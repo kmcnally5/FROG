@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>kLex — Try it Online</title>
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<div class="container">
+		<header>
+			<h1>kLex(FROG) REPL v0.2.45r</h1>
+			<p>Functional | Reactive | Opinionated | Governed</p>
+		</header>
+
+		<div class="repl-container">
+			<div id="output" class="terminal-output"></div>
+			<div class="input-line">
+				<span class="prompt" id="prompt">&gt;&gt;&nbsp;</span>
+				<input
+					type="text"
+					id="input"
+					class="terminal-input"
+					placeholder="Enter kLex code..."
+					autofocus
+				>
+			</div>
+		</div>
+
+		<div class="controls">
+			<button id="run-btn" class="btn btn-primary">Run (Enter)</button>
+			<button id="reset-btn" class="btn btn-secondary">Reset</button>
+		</div>
+
+		<footer>
+			<p>Learn more: <a href="https://github.com/kmcnally5/FROG" target="_blank">GitHub</a></p>
+		</footer>
+	</div>
+
+	<script src="wasm_exec.js"></script>
+	<script src="klex-repl.js"></script>
+</body>
+</html>
