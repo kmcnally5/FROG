@@ -155,6 +155,18 @@ if (1 > 0) { println("correct") }  // Works
 result = 1 == "1"  // TypeError: cannot compare int and string
 ```
 
+## Full Examples in /tests/
+
+These snippets are excerpted from the test suite. For comprehensive examples and full feature exploration, check out:
+
+- **[`tests/showcaseTest.lex`](tests/showcaseTest.lex)** — The complete FROG Report: enums, structs, pipelines, closures, async/await, HTTP requests, file I/O, JSON parsing, and interactive input. This is the most comprehensive demonstration of the language.
+- **[`tests/functionalTest.lex`](tests/functionalTest.lex)** — Higher-order functions: `compose`, `pipe`, `tap`, `partial`, `flip`, and real-world pipeline examples.
+- **[`tests/patternTest.lex`](tests/patternTest.lex)** — Enum pattern matching with data binding and exhaustive switch statements.
+- **[`tests/httpTest.lex`](tests/httpTest.lex)** — HTTP client usage and async requests.
+- **[`tests/fsTest.lex`](tests/fsTest.lex)** — File system operations (read, write, stat).
+- **[`tests/arrayTest.lex`](tests/arrayTest.lex)** — Array operations and built-in functions.
+- **[`tests/assertTest.lex`](tests/assertTest.lex)** — Assertion and error handling patterns.
+
 ## Testing
 
 Test your changes against the included test suite:
