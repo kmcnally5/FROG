@@ -15,6 +15,15 @@ FROG demonstrates the complete pipeline of a programming language: Lexer → Par
 
 The REPL supports multi-line input (automatically detects when blocks are complete) and maintains session state — define variables and functions, then use them in subsequent lines.
 
+## Editor Support
+
+Syntax highlighting is available for both **Vim** and **VSCode**:
+
+- **VSCode**: Download the extension from [`editors/vscode/`](editors/vscode/) — follow the included README for installation.
+- **Vim**: Download the syntax files from [`editors/vim/`](editors/vim/) — see included instructions for setup.
+
+These syntax plugins provide language-aware highlighting and integrate `.lex` file recognition into your editor.
+
 ## Quick Start
 
 ### Prerequisites
