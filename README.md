@@ -1,11 +1,7 @@
 # kLex
-
-Introducing FROG
 FROG is a Go-native, tree-walking interpreter I designed for developers who value absolute clarity over cleverness. It is built on the kLex engine and follows a core philosophy of being Functional, Reactive, Opinionated, and Governed.
 
 In FROG, types are strict, coercion is non-existent, and errors are handled as first-class values. I’ve prioritized a "Governed" structure where the language's behavior is predictable and explicit, rather than hidden behind shorthand or magic.
-
-The Motivation
 
 I wrote FROG in an effort to explore a development environment better suited for AI-assisted coding. In my experience, the "looseness" of many modern languages can occasionally lead even the most capable LLMs into cycles of ambiguity and hallucination.
 
@@ -15,7 +11,7 @@ FROG demonstrates the complete pipeline of a programming language: Lexer → Par
 
 ## Try it Online
 
-**[Launch the kLex REPL](https://kmcnally5.github.io/klex/)** — run kLex code directly in your browser, no installation required.
+**[Launch the kLex REPL](https://kmcnally5.github.io/FROG/playground/)** — run kLex code directly in your browser, no installation required.
 
 The REPL supports multi-line input (automatically detects when blocks are complete) and maintains session state — define variables and functions, then use them in subsequent lines.
 
