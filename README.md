@@ -85,12 +85,12 @@ kLex enforces a strict, explicit type system:
 ```klex
 fn fibonacci(n) {
   if (n <= 1) {
-    return n;
+    return n
   }
-  return fibonacci(n - 1) + fibonacci(n - 2);
+  return fibonacci(n - 1) + fibonacci(n - 2)
 }
 
-println(fibonacci(10));  // 55
+println(fibonacci(10))  // 55
 ```
 
 ### Pattern Matching with Enums
@@ -105,7 +105,7 @@ fn label(status) {
   }
 }
 
-println(label(Status.Active));  // 🔄 Active
+println(label(Status.Active))  // 🔄 Active
 ```
 
 ### Higher-Order Functions and Pipelines
@@ -117,7 +117,7 @@ result = numbers
   |> filter(fn(x) { x > 5 })     // [6, 8, 10]
   |> reduce(fn(acc, x) { acc + x }, 0)  // 24
 
-println(result);
+println(result)
 ```
 
 ### Structs with Methods
