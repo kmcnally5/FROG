@@ -1,0 +1,155 @@
+:root {
+  --frog-bg: #0b0f0c;
+  --frog-panel: #101713;
+  --frog-primary: #7CFC00;      /* neon green */
+  --frog-secondary: #32cd32;    /* lime green */
+  --frog-accent: #ff9f1c;       /* frog eye orange */
+  --frog-text: #d8ffe0;
+  --frog-dim: #6b8f71;
+  --frog-border: #1f2a24;
+  --frog-glow: rgba(124, 252, 0, 0.4);
+  --frog-error: #ff4d4d;
+}
+
+/* Global */
+body {
+  margin: 0;
+  font-family: "Fira Code", monospace;
+  background: radial-gradient(circle at top, #0f1a14, var(--frog-bg));
+  color: var(--frog-text);
+}
+
+/* Layout */
+.container {
+  max-width: 900px;
+  margin: 40px auto;
+  padding: 20px;
+}
+
+/* Header */
+header {
+  text-align: center;
+  margin-bottom: 25px;
+}
+
+header h1 {
+  color: var(--frog-primary);
+  font-size: 2rem;
+  letter-spacing: 1px;
+  text-shadow: 0 0 10px var(--frog-glow);
+}
+
+header p {
+  color: var(--frog-dim);
+  font-size: 0.9rem;
+}
+
+/* REPL */
+.repl-container {
+  background: var(--frog-panel);
+  border: 1px solid var(--frog-border);
+  border-radius: 10px;
+  padding: 15px;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+}
+
+/* Output */
+.terminal-output {
+  height: 300px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+/* Input line */
+.input-line {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--frog-border);
+  padding-top: 8px;
+}
+
+.prompt {
+  color: var(--frog-accent);
+  margin-right: 6px;
+}
+
+/* Input */
+.terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--frog-primary);
+  font-family: inherit;
+  font-size: 1rem;
+  outline: none;
+}
+
+.terminal-input::placeholder {
+  color: #3a4f42;
+}
+
+/* Buttons */
+.controls {
+  margin-top: 15px;
+  display: flex;
+  gap: 10px;
+}
+
+.btn {
+  border: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background: var(--frog-primary);
+  color: #001a00;
+  font-weight: bold;
+  box-shadow: 0 0 10px var(--frog-glow);
+}
+
+.btn-primary:hover {
+  background: #9cff2e;
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: #1a2a22;
+  color: var(--frog-text);
+  border: 1px solid var(--frog-border);
+}
+
+.btn-secondary:hover {
+  background: #24352c;
+}
+
+/* Footer */
+footer {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+footer a {
+  color: var(--frog-accent);
+  text-decoration: none;
+}
+
+footer a:hover {
+  text-decoration: underline;
+}
+
+/* Scrollbar (nice touch) */
+.terminal-output::-webkit-scrollbar {
+  width: 6px;
+}
+
+.terminal-output::-webkit-scrollbar-thumb {
+  background: var(--frog-secondary);
+  border-radius: 4px;
+}

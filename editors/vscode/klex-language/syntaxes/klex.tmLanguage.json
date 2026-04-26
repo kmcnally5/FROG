@@ -1,0 +1,114 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "kLex",
+  "scopeName": "source.klex",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#keywords" },
+    { "include": "#self" },
+    { "include": "#constants" },
+    { "include": "#builtins" },
+    { "include": "#strings" },
+    { "include": "#rawStrings" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+
+    "comments": {
+      "patterns": [{
+        "name": "comment.line.double-slash.klex",
+        "match": "//.*$"
+      }]
+    },
+
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.klex",
+          "match": "\\b(if|else|while|for|in|return|break|continue|switch|case|default|select)\\b"
+        },
+        {
+          "name": "keyword.declaration.klex",
+          "match": "\\b(fn|struct|enum|import|as|let|const)\\b"
+        }
+      ]
+    },
+
+    "self": {
+      "patterns": [{
+        "name": "variable.language.klex",
+        "match": "\\bself\\b"
+      }]
+    },
+
+    "constants": {
+      "patterns": [{
+        "name": "constant.language.klex",
+        "match": "\\b(null|true|false)\\b"
+      }]
+    },
+
+    "builtins": {
+      "patterns": [{
+        "name": "support.function.builtin.klex",
+        "match": "\\b(println|print|len|push|pop|type|str|int|float|split|join|substr|slice|keys|values|hasKey|delete|filter|map|reduce|upper|lower|trim|replace|indexOf|startsWith|endsWith|readFile|writeFile|appendFile|input|safe|exec|range|env|sleep|async|await|error|isError|assert|format|channel|send|recv|close|cancel)\\b(?=\\s*\\()"
+      }]
+    },
+
+    "strings": {
+      "patterns": [{
+        "name": "string.quoted.double.klex",
+        "begin": "\"",
+        "end": "\"",
+        "patterns": [
+          {
+            "name": "constant.character.escape.klex",
+            "match": "\\\\[nrtb\"\\\\{]"
+          },
+          {
+            "name": "meta.interpolation.klex",
+            "begin": "(?<!\\\\)\\{",
+            "end": "\\}",
+            "beginCaptures": {
+              "0": { "name": "punctuation.section.interpolation.begin.klex" }
+            },
+            "endCaptures": {
+              "0": { "name": "punctuation.section.interpolation.end.klex" }
+            },
+            "patterns": [
+              { "include": "#keywords" },
+              { "include": "#constants" },
+              { "include": "#builtins" },
+              { "include": "#numbers" },
+              { "include": "#operators" }
+            ]
+          }
+        ]
+      }]
+    },
+
+    "rawStrings": {
+      "patterns": [{
+        "name": "string.quoted.other.klex",
+        "begin": "`",
+        "end": "`"
+      }]
+    },
+
+    "numbers": {
+      "patterns": [{
+        "name": "constant.numeric.klex",
+        "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b"
+      }]
+    },
+
+    "operators": {
+      "patterns": [{
+        "name": "keyword.operator.klex",
+        "match": "(==|!=|<=|>=|&&|\\|>|\\|\\||\\.\\.\\.|[+\\-*/<>!%]|(?<![=<>!])=(?!=))"
+      }]
+    }
+
+  }
+}

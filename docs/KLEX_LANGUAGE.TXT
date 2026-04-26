@@ -1,0 +1,1888 @@
+
+================================================================================
+  kLex Language — Developer's Guide
+================================================================================
+
+  The kLex language is nicknamed FROG:
+    Functional, Reactive, Opinionated, Governed
+
+  kLex is a small, dynamically typed, tree-walking interpreter written in Go.
+  It is strict about types, has no implicit coercion, and handles errors the
+  Go way — by returning them as values rather than throwing exceptions.
+
+  This guide covers everything currently in the language. Read it top to
+  bottom the first time, then use it as a reference.
+
+
+--------------------------------------------------------------------------------
+  RUNNING A PROGRAM
+--------------------------------------------------------------------------------
+
+  Programs are stored in plain text files with a .lex extension.
+
+  To run a source file:
+
+    go run . myprogram.lex
+
+  To build the interpreter first and then run:
+
+    go build -o klex .
+    ./klex myprogram.lex
+
+  If your program imports standard library modules, tell the interpreter
+  where to find them:
+
+    KLEX_PATH=/path/to/stdlib ./klex myprogram.lex
+
+  Error messages include the line and column number where the problem occurred.
+
+  Exit codes:
+
+    0   program completed without any parse or runtime error
+    1   a parse error was found before execution began
+    1   a runtime error occurred during execution
+
+  This means klex can be used reliably in shell scripts and CI pipelines —
+  a non-zero exit always indicates something went wrong.
+
+
+--------------------------------------------------------------------------------
+  COMMENTS
+--------------------------------------------------------------------------------
+
+  Only single-line comments are supported. Everything after // on a line
+  is ignored.
+
+    x = 42        // this is a comment
+    // this whole line is a comment
+
+
+--------------------------------------------------------------------------------
+  TYPES
+--------------------------------------------------------------------------------
+
+  All values have a type. The type() builtin returns the type name as a string.
+
+    type(42)          returns "INTEGER"
+    type(3.14)        returns "FLOAT"
+    type("hello")     returns "STRING"
+    type(true)        returns "BOOLEAN"
+    type(null)        returns "NULL"
+    type([1, 2, 3])   returns "ARRAY"
+    type({"a": 1})    returns "HASH"
+    type(fn(x){x})    returns "FUNCTION"
+
+  Additional types appear in later sections:
+    "TUPLE"    multiple return values (see MULTIPLE RETURN VALUES)
+    "STRUCT"   struct instances (see STRUCTS)
+    "ENUM"     enum instances (see ENUMS)
+    "TASK"     async task handles (see ASYNC / AWAIT)
+    "CHANNEL"  goroutine-safe conduits (see CHANNELS)
+    "ERROR"    typed error values (see ERROR below)
+    "MODULE"   imported module handles (see MODULES)
+
+  There is no implicit conversion between types. Mixing types in an operation
+  that does not allow it gives a TypeError.
+
+
+  INTEGER
+
+    Whole numbers, positive or negative. Integer division truncates toward zero.
+
+      x = 42
+      y = -7
+      println(10 / 3)    // 3, not 3.333
+
+
+  FLOAT
+
+    Decimal numbers. Mixing an integer and a float in arithmetic produces float.
+
+      x = 3.14
+      println(1 + 0.5)   // 1.5
+      println(10 / 4)    // 2  (integer division)
+      println(10.0 / 4)  // 2.5
+
+
+  BOOLEAN
+
+    Exactly true or false. Conditions in if and while must be boolean — integers
+    are not truthy. There is no truthiness coercion.
+
+      flag = true
+      if flag { println("yes") }
+
+      if 1 {             // TypeError — 1 is not a boolean
+          println("no")
+      }
+
+
+  STRING
+
+    Double-quoted text. Strings are Unicode; len() and indexing work on
+    characters (code points), not bytes, so len("café") is 4.
+
+      name = "Frog"
+      println(name[0])   // "K"
+      println(len(name)) // 4
+
+    Supported escape sequences:
+
+      \n    newline
+      \r    carriage return
+      \t    tab
+      \b    backspace
+      \"    double quote
+      \\    backslash
+      \{    literal left brace (prevents interpolation)
+
+
+  RAW STRINGS (backtick)
+
+    A backtick-delimited string is taken entirely literally — no escape
+    processing and no interpolation. Every character, including newlines,
+    tabs, backslashes, and braces, is included as-is.
+
+      query = `
+          SELECT *
+          FROM users
+          WHERE age > 18
+      `
+
+      path = `C:\Users\Frog\file.txt`    // backslash is literal
+
+      tmpl = `Hello {name}`              // braces are NOT interpolated
+
+    Use raw strings for multi-line text, file paths, SQL, HTML, help text,
+    and any content where backslashes or braces should be literal.
+
+    Two delimiter rules — no overlap:
+
+      "..."   processed: escape sequences and {expr} interpolation active
+      `...`   raw: all characters literal, nothing processed
+
+    To include a backtick character inside a string, use a regular string:
+      tick = "`"
+
+    Raw strings are otherwise identical to regular strings at runtime —
+    they are plain string values and all string builtins (len, split,
+    substr, format, etc.) work on them normally.
+
+
+  FUNCTION
+
+    Functions are first-class values. They can be stored in variables, passed
+    as arguments, and returned from other functions.
+
+      add = fn(a, b) { a + b }
+      println(type(add))    // "FUNCTION"
+
+    See the FUNCTIONS section for full details.
+
+
+  TUPLE
+
+    A Tuple is a temporary multi-value carrier produced only by a function that
+    returns more than one value. It is consumed by a matching multi-assign.
+
+      fn pair() { return 1, "hello" }
+      n, s = pair()
+
+      println(type(pair()))   // "TUPLE"
+
+    Tuples are not general-purpose values — they cannot be indexed or stored
+    in a variable and used later as a first-class collection. They exist solely
+    to move multiple return values across a function boundary.
+
+
+  NULL
+
+    null is a first-class value representing the absence of a value.
+
+      x = null
+      println(x == null)   // true
+
+    null == null is true. null compared to any other type is always false —
+    it is never a TypeError to ask whether something is null.
+
+      null == null    // true
+      null == 0       // false
+      null == false   // false
+
+
+  ERROR
+
+    Error is a first-class typed error value. It is NOT an exception — it does
+    not interrupt execution. It is a normal value that functions return to
+    signal failure, which callers inspect to decide what to do next.
+
+    Constructing an error:
+
+      e = error("NOT_FOUND", "key 'x' does not exist")
+
+    Accessing properties:
+
+      e.code        // "NOT_FOUND"
+      e.message     // "key 'x' does not exist"
+      e.is("NOT_FOUND")  // true — shorthand for e.code == "NOT_FOUND"
+
+    safe() returns a typed Error when it catches a system error:
+
+      val, err = safe(fn() { return 1 / 0 })
+      err.code      // "RUNTIME_ERROR"
+
+      val, err = safe(fn() { return 1 + true })
+      err.code      // "TYPE_ERROR"
+
+    Standard system error codes produced by safe():
+      "RUNTIME_ERROR"   division by zero, out of bounds, undefined variable, etc.
+      "TYPE_ERROR"      wrong type for an operator or argument
+
+    User-defined error codes can be any string. Convention: UPPER_SNAKE_CASE.
+
+    Error propagation pattern:
+
+      fn lookup(store, key) {
+          if store[key] == null {
+              return null, error("NOT_FOUND", "key '" + key + "' not found")
+          }
+          return store[key], null
+      }
+
+      result, err = lookup(store, "x")
+      if err != null {
+          switch err.code {
+              case "NOT_FOUND"     { println("missing: " + err.message) }
+              case "RUNTIME_ERROR" { println("system error: " + err.message) }
+          }
+      }
+
+
+  ARRAY
+
+    Ordered lists of any values. Arrays are zero-indexed.
+
+      arr = [1, "two", true, null]
+      println(arr[0])          // 1
+      println(len(arr))        // 4
+
+    Accessing an index out of bounds is a RuntimeError.
+    push() and pop() return new arrays; they do not mutate the original.
+    Index assignment mutates in place:
+
+      arr[0] = 99              // mutates arr
+
+
+  HASH
+
+    Key-value maps. Keys must be strings, integers, or booleans.
+
+      person = {"name": "Frog", "age": 42}
+      println(person["name"])            // Frog
+      person["age"] = 43                 // mutates in place
+      println(person["missing"] == null) // true — missing keys return null
+
+    Hash fields are accessed only with bracket notation: h["key"].
+    Dot notation (h.key) is NOT supported on hashes and is a TypeError.
+    Dot access is reserved for structs, modules, and enum instances.
+
+    Built-in hash operations:
+
+      delete(person, "age")
+      k = keys(person)
+      v = values(person)
+      println(hasKey(person, "name"))   // true
+
+    Key order is not guaranteed.
+
+
+--------------------------------------------------------------------------------
+  VARIABLES
+--------------------------------------------------------------------------------
+
+  Variables are created by assignment. Scope is lexical.
+
+    x = 10
+    name = "Alice"
+
+  Variables are dynamically typed — you can reassign to a different type.
+  Using a variable that has not been assigned is a RuntimeError.
+
+
+  LOCAL DECLARATIONS — let
+
+  Bare assignment (x = val) walks the scope chain and updates an existing
+  binding. This is what makes closure mutation work:
+
+    count = 0
+    fn inc() { count = count + 1 }  // updates outer count
+
+  Use let to declare a variable strictly local to the current scope,
+  regardless of whether the same name exists in an outer scope:
+
+    let x = 10        // always creates x in the current scope
+
+    i = 0
+    fn renderBar(n) {
+        let i = 0          // local; outer i is untouched
+        while i < 20 {
+            i = i + 1      // finds the local let-declared i
+        }
+    }
+    // i is still 0 here
+
+  Rule of thumb:
+    - Use let when you need a local variable that must not affect outer scope.
+    - Use bare assignment when you intend to update a captured outer variable.
+
+
+  IMMUTABLE BINDINGS — const
+
+  Use const to declare a binding that can never be reassigned. Any attempt to
+  reassign it from any scope is a RuntimeError.
+
+    const PI = 3.14159
+    const MAX_RETRIES = 3
+    const API_BASE = "https://api.example.com"
+
+    PI = 3          // RuntimeError: cannot reassign constant PI
+    fn tryIt() { PI = 0 }  // RuntimeError even from inside a function
+
+  const always creates in the current scope (like let — never walks the chain).
+  A let or bare assignment in an inner scope may shadow a const without
+  modifying it:
+
+    const LIMIT = 100
+    fn process() {
+        let LIMIT = 999   // new binding in this scope — outer const unaffected
+        return LIMIT      // 999
+    }
+    println(LIMIT)        // 100
+
+  Rule of thumb:
+    - Use const for configuration values, mathematical constants, and anything
+      that must not change after initialisation.
+    - Use let for mutable locals that must not bleed into outer scope.
+    - Use bare assignment to update captured variables across closure boundaries.
+
+
+--------------------------------------------------------------------------------
+  OPERATORS
+--------------------------------------------------------------------------------
+
+  ARITHMETIC
+
+    +    addition (also string concatenation)
+    -    subtraction, unary negation
+    *    multiplication
+    /    division (integer division truncates)
+    %    modulo
+
+      println(10 % 3)      // 1
+      println(-10 % 3)     // -1
+      println("hi" + "!")  // "hi!"
+
+
+  COMPARISON
+
+    All comparison operators return a boolean.
+
+    ==   equal
+    !=   not equal
+    <    less than
+    >    greater than
+    <=   less than or equal
+    >=   greater than or equal
+
+    Comparing values of different types (except null comparisons) is a
+    TypeError. You cannot ask whether 1 == "1".
+
+
+  LOGICAL
+
+    &&   and — short-circuits: right side not evaluated if left is false
+    ||   or  — short-circuits: right side not evaluated if left is true
+    !    not
+
+      println(true && false)   // false
+      println(false || true)   // true
+      println(!true)           // false
+
+    Short-circuit evaluation means this is safe:
+
+      println(false && someUndefinedVariable)   // false, no error
+
+
+  PIPELINE  |>
+
+    Pipes the left-hand value as the FIRST argument of the right-hand call.
+    Chains are left-associative.
+
+      value |> fn               — equivalent to fn(value)
+      value |> fn(extra)        — equivalent to fn(value, extra)
+      a |> f() |> g()           — equivalent to g(f(a))
+
+    The right-hand side can be any callable — a user function, a builtin,
+    or a module function. If it is a call expression, the piped value is
+    prepended to its argument list.
+
+      // Nested form (hard to read, easy to get argument order wrong):
+      result = filter(map(split(input, ","), trim), fn(x) { return len(x) > 0 })
+
+      // Pipeline form (explicit left-to-right data flow):
+      result = input |> split(",") |> map(trim) |> filter(fn(x) { return len(x) > 0 })
+
+    More examples:
+
+      "  hello  " |> trim                   // "hello"
+      "a,b,c"     |> split(",")             // ["a", "b", "c"]
+      [1,-2,3]    |> filter(fn(x){return x > 0}) |> map(fn(x){return x*2})
+      42          |> str                    // "42"
+      "hello world" |> split(" ") |> len   // 2
+
+    Pipeline has the lowest precedence of any infix operator — the entire
+    left-hand expression is piped, not just the last operand:
+
+      a + b |> f()   →   f(a + b)   not   a + f(b)
+
+
+--------------------------------------------------------------------------------
+  STRING INTERPOLATION
+--------------------------------------------------------------------------------
+
+  Expressions can be embedded inside strings using curly braces.
+
+    name = "Frog"
+    age  = 42
+    println("Hello, {name}!")              // Hello, Frog!
+    println("{name} is {age} years old")
+
+  Any expression works inside the braces, including function calls.
+
+    fn double(n) { n * 2 }
+    println("Result: {double(5)}")         // Result: 10
+
+  To include a literal brace without triggering interpolation, escape it:
+
+    println("literal: \{not interpolated}")
+
+
+--------------------------------------------------------------------------------
+  CONTROL FLOW
+--------------------------------------------------------------------------------
+
+  IF / ELSE
+
+    Curly braces are required. The condition must be boolean.
+
+      if x > 10 {
+          println("big")
+      } else if x > 5 {
+          println("medium")
+      } else {
+          println("small")
+      }
+
+
+  WHILE
+
+    Runs the body repeatedly while the condition is true.
+
+      i = 0
+      while i < 5 {
+          println(i)
+          i = i + 1
+      }
+
+
+  FOR / IN
+
+    Iterates over an array, hash, or channel.
+
+    Single variable — elements of an array:
+
+      for x in [10, 20, 30] { println(x) }
+
+    Two variables — index-element pairs of an array, or key-value pairs of a hash:
+
+      for i, v in ["x", "y", "z"] {
+          println(str(i) + ": " + v)    // 0: x, 1: y, 2: z
+      }
+
+      scores = {"alice": 95, "bob": 82}
+      for name, score in scores {
+          println(name + ": " + str(score))
+      }
+
+    range() is the idiomatic way to iterate over a sequence of numbers:
+
+      for i in range(5)        { println(i) }    // 0 1 2 3 4
+      for i in range(1, 6)     { println(i) }    // 1 2 3 4 5
+      for i in range(0, 10, 2) { println(i) }    // 0 2 4 6 8
+
+
+  BREAK AND CONTINUE
+
+    break exits the nearest enclosing loop.
+    continue skips to the next iteration of the nearest enclosing loop.
+    Neither crosses a function boundary.
+
+
+  RETURN
+
+    Exits a function. Without a value, return produces null. A function
+    that reaches the end without a return also produces null.
+
+      fn greet(name) {
+          if name == null { return "hello, stranger" }
+          return "hello, " + name
+      }
+
+
+  SWITCH — VALUE FORM
+
+    Compares one expression against several values with ==. Cases run in
+    order; first match wins. No fallthrough.
+
+      switch status {
+          case "ok"            { println("all good") }
+          case "error"         { println("failed") }
+          case "retry", "wait" { println("try again") }
+          default              { println("unknown") }
+      }
+
+
+  SWITCH — EXPRESSION FORM
+
+    Omit the subject; each case is a boolean expression.
+
+      switch {
+          case score >= 90 { return "A" }
+          case score >= 80 { return "B" }
+          default          { return "F" }
+      }
+
+
+  SWITCH — ENUM PATTERN MATCHING
+
+    Match an enum value against its variants. Field bindings (names in
+    parentheses) are new local variables scoped to that case arm only.
+
+      enum Shape { Circle(radius)  Rect(width, height)  Point }
+
+      switch s {
+          case Shape.Circle(r)   { println("circle r=" + str(r)) }
+          case Shape.Rect(w, h)  { println(str(w) + "x" + str(h)) }
+          case Shape.Point       { println("point") }
+          default                { println("unknown") }
+      }
+
+    Binding count must exactly match the variant's field count — a mismatch
+    is a RuntimeError. Zero-field variants use the plain form (no parentheses).
+    Bindings do not affect variables of the same name in the outer scope.
+
+
+  SELECT — CHANNEL DISPATCH
+
+    Waits on multiple channel operations simultaneously. Picks one ready
+    case at random if several are ready at once. Optional default makes it
+    non-blocking.
+
+      select {
+          case val, ok = recv(ch1) { }   // receive; binds val and ok
+          case val    = recv(ch2) { }    // receive; bind value only
+          case          recv(ch3) { }    // receive; discard value
+          case send(ch4, expr)    { }    // send
+          default                 { }    // run if no case is ready
+      }
+
+    Recv bindings update variables in the enclosing scope (same as assignment).
+    A closed channel is always ready for recv; ok will be false.
+
+    Typical patterns:
+      Timeout:   select { case v,_ = recv(result) {} case _,_ = recv(timer) {} }
+      Non-block: select { case v,_ = recv(ch) {} default {} }
+      Fan-in:    select { case v,_ = recv(ch1) {} case v,_ = recv(ch2) {} }
+
+
+--------------------------------------------------------------------------------
+  FUNCTIONS
+--------------------------------------------------------------------------------
+
+  Functions are first-class values.
+
+
+  NAMED FUNCTIONS
+
+    fn add(a, b) { return a + b }
+    println(add(3, 4))    // 7
+
+  Named functions can call themselves recursively.
+
+    fn factorial(n) {
+        if n <= 1 { return 1 }
+        return n * factorial(n - 1)
+    }
+
+
+  ANONYMOUS FUNCTIONS
+
+    double = fn(x) { x * 2 }
+    evens  = filter([1,2,3,4,5], fn(x) { x % 2 == 0 })
+
+
+  CLOSURES
+
+    Functions capture their surrounding environment.
+
+    fn makeCounter() {
+        count = 0
+        fn increment() {
+            count = count + 1
+            return count
+        }
+        return increment
+    }
+    counter = makeCounter()
+    println(counter())    // 1
+    println(counter())    // 2
+
+
+  ARITY
+
+    kLex enforces strict arity. Wrong number of arguments is a RuntimeError.
+
+    Functions with default parameters accept between the number of required
+    parameters and the total number of parameters (inclusive).
+
+
+  DEFAULT PARAMETER VALUES
+
+    Parameters may carry a default value, used when the caller omits the argument.
+
+      fn greet(name = "world") { return "hello, " + name + "!" }
+      println(greet())          // hello, world!
+      println(greet("Frog"))    // hello, Frog!
+
+      fn connect(host, port = 8080, timeout = 30) {
+          return host + ":" + str(port)
+      }
+      connect("localhost")          // localhost:8080
+      connect("localhost", 9000)    // localhost:9000
+
+    Rules:
+    - Parameters with defaults must come AFTER all required parameters.
+      fn bad(a = 1, b) is a ParseError.
+    - Default expressions are evaluated at call time in the function's closure
+      environment — they are not frozen at definition time.
+    - Defaults work in named functions, anonymous functions, and struct methods.
+    - Variadic (...) is incompatible with defaults on the variadic parameter itself.
+
+
+  VARIADIC FUNCTIONS
+
+    Mark the last parameter with ... to collect remaining arguments as an array.
+
+      fn sum(nums...) {
+          return reduce(nums, fn(acc, x) { acc + x }, 0)
+      }
+      println(sum(1, 2, 3))    // 6
+      println(sum())           // 0
+
+    You can mix fixed parameters with a variadic tail:
+
+      fn joinWith(sep, parts...) { return join(parts, sep) }
+      println(joinWith(", ", "a", "b", "c"))   // a, b, c
+
+
+  LAST EXPRESSION AS RETURN VALUE
+
+    If the last statement in a function body is an expression, its value
+    is returned without an explicit return.
+
+      fn double(x) { x * 2 }
+
+
+--------------------------------------------------------------------------------
+  MULTIPLE RETURN VALUES
+--------------------------------------------------------------------------------
+
+  A function can return more than one value. The caller unpacks with a
+  matching comma-separated assignment.
+
+    fn divide(a, b) {
+        if b == 0 { return null, "division by zero" }
+        return a / b, null
+    }
+
+    val, err = divide(10, 2)
+
+  The number of variables on the left must exactly match the number of
+  values returned. A mismatch is a RuntimeError.
+
+  Convention: return (result, null) on success, (null, message) on failure.
+
+
+--------------------------------------------------------------------------------
+  ERROR HANDLING
+--------------------------------------------------------------------------------
+
+  kLex does not have try/catch. Errors are values, not exceptions.
+
+  For expected failures, return (result, null) on success and (null, err)
+  on failure, then check err in the caller:
+
+    content, err = fs.read("/etc/hostname")
+    if err != null {
+        println("read failed: " + err)
+        return null
+    }
+
+  For unanticipated runtime errors, use safe():
+
+    val, err = safe(risky, 1)    // err is null on success
+    val, err = safe(risky, 99)   // err holds the error message on failure
+
+
+  TWO-PATH ERROR CHECKING
+
+  safe() surfaces errors in two distinct ways:
+
+    result, callErr = safe(fn, arg)
+
+    Path 1 — callErr != null
+      safe() caught an internal error (RuntimeError or TypeError).
+      callErr.code    // "RUNTIME_ERROR" or "TYPE_ERROR"
+      callErr.message // the error message
+
+    Path 2 — isError(result)
+      The callee returned an error() value explicitly. safe() treats the
+      call as successful and puts the error object in result, not callErr.
+      result.code     // your code, e.g. "NOT_FOUND"
+      result.message  // your message
+
+    Full defensive pattern:
+
+      result, callErr = safe(fetch, id)
+      if callErr != null {
+          println("internal error: " + callErr.message)
+          return null
+      }
+      if isError(result) {
+          switch result.code {
+              case "NOT_FOUND" { return defaultValue }
+              default          { return null }
+          }
+      }
+      println(result)
+
+  Why two paths? Internal errors are propagation signals safe() catches as
+  a safety net. User errors created with error() are first-class values
+  returned intentionally — mixing them would make it impossible to distinguish
+  a crash from a domain-level "no".
+
+
+--------------------------------------------------------------------------------
+  BUILT-IN FUNCTIONS
+--------------------------------------------------------------------------------
+
+  Available everywhere without importing anything.
+
+
+  OUTPUT
+
+    println(value)           print followed by newline
+    print(value)             print with no newline
+    input(prompt)            print prompt and read one line from stdin
+
+
+  FILE I/O (low-level)
+
+    readFile(path)           read entire file; RuntimeError on failure
+    writeFile(path, content) create or truncate and write
+    appendFile(path, content) create or append
+    exec(command, args)      run binary; returns stdout; RuntimeError on failure
+
+
+  SYSTEM
+
+    env(name)                read environment variable or null
+
+
+  TYPE INSPECTION AND CONVERSION
+
+    type(value)              returns type name as string
+    str(value)               any value → string
+    int(value)               string or float → integer (truncates)
+    float(value)             integer or string → float
+
+
+  STRINGS
+
+    len(string)              number of Unicode characters
+    split(string, sep)       split on separator → array of strings
+    join(array, sep)         join array of strings with separator
+    upper(string)            uppercase copy
+    lower(string)            lowercase copy
+    trim(string)             strip leading and trailing whitespace
+    replace(string, old, new) replace every occurrence of old with new
+    indexOf(string, sub)     first index of sub, or -1
+    startsWith(string, pre)  boolean
+    endsWith(string, suf)    boolean
+
+    substr(string, start)
+    substr(string, start, end)
+      Substring by 0-based index. end is exclusive; omit for end-of-string.
+      RuntimeError if start or end is out of bounds.
+        substr("hello world", 6)     → "world"
+        substr("hello world", 0, 5)  → "hello"
+
+    format(template, args...)
+      Printf-style string formatting. Returns a new string.
+
+        format("%s is %d years old", "Frog", 42)  → "Frog is 42 years old"
+        format("%.2f%%", 99.9)                    → "99.90%"
+        format("%-10s %5d", "item", 3)            → "item           3"
+
+      Verbs:
+        %d        integer decimal
+        %f        float decimal (also accepts INTEGER)
+        %e %E     float scientific
+        %g %G     float shortest representation
+        %s        string — use %v for any other type
+        %t        boolean
+        %v        any type via Inspect()
+        %x %X     integer hex
+        %o        integer octal
+        %b        integer binary
+        %%        literal percent sign
+
+      Width, precision, flags:
+        %10d      right-align in field of width 10
+        %-10d     left-align
+        %010d     zero-pad to width 10
+        %+d       always show sign
+        %.2f      2 decimal places
+
+      Argument count must match exactly — RuntimeError if it does not.
+
+    String index access:
+      "hello"[1]   → "e"    (returns single character as string)
+
+
+  ARRAYS
+
+    len(array)               number of elements
+    push(array, value)       new array with value appended (does not mutate)
+    pop(array)               new array with last element removed (does not mutate)
+
+    range(stop)
+    range(start, stop)
+    range(start, stop, step)
+      Returns an array of integers. Step can be negative to count down.
+        range(5)          → [0, 1, 2, 3, 4]
+        range(3, 8)       → [3, 4, 5, 6, 7]
+        range(0, 10, 2)   → [0, 2, 4, 6, 8]
+        range(5, 0, -1)   → [5, 4, 3, 2, 1]
+
+    slice(array, start)
+    slice(array, start, end)
+      Sub-array by 0-based index. end is exclusive; omit for end-of-array.
+      RuntimeError if start or end is out of bounds.
+        slice([1,2,3,4,5], 2)     → [3, 4, 5]
+        slice([1,2,3,4,5], 1, 4)  → [2, 3, 4]
+
+
+  HASHES
+
+    keys(hash)               array of all keys (order not guaranteed)
+    values(hash)             array of all values
+    hasKey(hash, key)        boolean — preferred over checking h[key] == null
+    delete(hash, key)        removes key in place, returns null
+
+
+  HIGHER-ORDER FUNCTIONS
+
+    map(array, fn)           apply fn to every element, return new array
+    filter(array, fn)        return elements where fn returns true
+    reduce(array, fn, init)  fold array to a single value
+
+    fn may be a user-defined function or any built-in function.
+
+      map([1, 2, 3], str)           → ["1", "2", "3"]
+      map(["42", "7"], int)         → [42, 7]
+      filter([-1, 2, -3, 4], fn(x) { return x > 0 })  → [2, 4]
+
+
+  CONCURRENCY
+
+    channel()                unbuffered channel
+    channel(n)               buffered channel with capacity n
+    send(ch, value)          send; returns null on success, false if cancelled, RuntimeError if closed
+    recv(ch)                 returns (val, true) or (null, false) when closed
+    close(ch)                signal no more sends
+    cancel(ch)               signal producer to stop; future send() returns false
+    async(fn, args...)       launch fn in background goroutine, return Task
+    await(task)              block until Task completes, return result
+    sleep(ms)                pause for ms milliseconds
+
+
+  ERROR HANDLING
+
+    error(code, message)     create a user Error value
+    isError(val)             true for any Error value
+    safe(fn, args...)        call fn; return (result, null) or (null, userError)
+
+    assert(condition)
+    assert(condition, message)
+      Verify that condition is true. condition must be bool (non-bool is a
+      TypeError). On success returns null. On failure raises a RuntimeError:
+        assert(false)                   → RuntimeError: assert: condition is false
+        assert(false, "must be pos")    → RuntimeError: must be pos
+      Catchable with safe() like any other error. Use for preconditions,
+      postconditions, and inline tests.
+        assert(len(results) > 0, "assert: query returned no rows")
+        assert(err == null, "unexpected error: " + err.message)
+
+
+--------------------------------------------------------------------------------
+  ACCESS SYNTAX RULES
+--------------------------------------------------------------------------------
+
+  kLex enforces which access syntax belongs to which type. This is not
+  stylistic — it is enforced by the evaluator.
+
+    Dot access  (x.foo)      typed, schematic values: struct instances,
+                             modules, enum definitions, enum instances.
+
+    Bracket access (x["k"]) dynamic, untyped storage: hashes only.
+
+    Integer bracket (x[i])  ordered, indexed storage: arrays and strings.
+
+  Dot means "this value has a declared schema." You can read a struct
+  definition and know every field that exists.
+
+  Bracket means "this is a bag of keys." No schema, any string is valid,
+  and a missing key returns null rather than an error.
+
+  Mixing these (dot access on a hash, bracket access on a struct) is a
+  TypeError enforced at runtime. Keeping them separate makes it impossible
+  to confuse a dynamic hash with a typed struct at a glance.
+
+
+--------------------------------------------------------------------------------
+  MODULES
+--------------------------------------------------------------------------------
+
+  A module is a .lex file. Import it with a name and access its contents
+  through that name.
+
+    import "math.lex" as math
+    println(math.min(3, 7))    // 3
+    println(math.abs(-5))      // 5
+
+  The interpreter looks for modules in the directory specified by KLEX_PATH.
+
+    KLEX_PATH=/path/to/stdlib ./klex myprogram.lex
+
+  Everything defined at the top level of the imported file is accessible
+  through the module name. Each import statement evaluates the imported file
+  independently — there is no caching. Import cycles are detected and reported
+  as a RuntimeError.
+
+
+--------------------------------------------------------------------------------
+  STRUCTS
+--------------------------------------------------------------------------------
+
+  Structs are nominal typed values with a fixed set of named fields and
+  optional methods. All field names are explicit at construction time.
+
+
+  DECLARING A STRUCT
+
+    struct Point { x, y }
+
+    struct Rect {
+        w, h
+        fn area()    { return self.w * self.h }
+        fn scale(f)  { self.w = self.w * f   self.h = self.h * f }
+        fn desc()    { return str(self.w) + "x" + str(self.h) }
+    }
+
+
+  CREATING AN INSTANCE
+
+    p = Point { x: 10, y: 20 }
+    r = Rect  { w: 4,  h: 5  }
+
+  Every declared field must be provided. Missing or unknown fields are
+  RuntimeErrors. Fields can be any expression.
+
+
+  FIELD ACCESS AND MUTATION
+
+    println(p.x)     // 10
+    p.x = 99
+
+  Writing to a field that does not exist is a RuntimeError.
+  Bracket access on a struct (p["x"]) is a TypeError.
+
+
+  CALLING METHODS
+
+    println(r.area())   // 20
+    r.scale(2)
+    println(r.desc())   // 8x10
+
+  Inside a method, self refers to the instance. The implicit self is only
+  available inside struct methods — not in standalone functions.
+
+
+  TYPE AND REFERENCE
+
+    type(p)   // "STRUCT"
+    str(p)    // "Point {x: 10, y: 20}"
+
+  Structs are passed by reference — assigning to another variable gives a
+  second reference to the same instance, not a copy.
+
+
+--------------------------------------------------------------------------------
+  ENUMS
+--------------------------------------------------------------------------------
+
+  Enums are sum types: a value that is exactly one of a fixed set of named
+  variants, each of which can carry its own named fields.
+
+
+  DECLARING AN ENUM
+
+    enum Shape {
+        Circle(radius)
+        Rect(width, height)
+        Point
+    }
+
+  Variants with fields list their field names in parentheses.
+  Zero-field variants need no parentheses.
+
+
+  CONSTRUCTING A VALUE
+
+    s1 = Shape.Circle(5.0)
+    s2 = Shape.Rect(4.0, 3.0)
+    s3 = Shape.Point             // zero-field; no call needed
+
+  Wrong arity is a RuntimeError.
+
+
+  ACCESSING FIELDS
+
+    println(s1.radius)   // 5.0
+    println(s2.width)    // 4.0
+
+  Accessing a field that does not belong to the current variant is a
+  RuntimeError. Switch on the variant first.
+
+
+  PATTERN MATCHING WITH BINDINGS
+
+  Use case Variant(bindings) to match a variant and bind its fields to
+  new local variables in one step:
+
+    fn describe(s) {
+        switch s {
+            case Shape.Circle(r)   { return "circle r=" + str(r) }
+            case Shape.Rect(w, h)  { return str(w) + "x" + str(h) }
+            case Shape.Point       { return "point" }
+        }
+    }
+
+  Binding count must exactly match the variant's field count (RuntimeError
+  if not). Bindings are local to the case arm and do not affect outer scope.
+  Zero-field variants use the plain form (no parentheses).
+
+
+  EXHAUSTIVE MATCHING
+
+  When switching on an enum value, every variant must be covered. If the
+  runtime reaches the end of a switch with no matching case and no default
+  clause, it is a RuntimeError:
+
+    switch s {
+        case Shape.Circle(r) { return "circle" }
+        // forgot Rect and Point — RuntimeError when s is either of those
+    }
+    // RuntimeError: switch: Shape.Rect not handled — add a case or a default
+
+  To handle selected variants and ignore the rest explicitly, use an empty
+  default:
+
+    switch s {
+        case Shape.Circle(r) { return "circle r=" + str(r) }
+        default {}    // I know there are other variants; I am intentionally
+                      // doing nothing with them
+    }
+
+  This is enforced at runtime, not statically. The check only applies to
+  enum values — non-enum subjects (integers, strings, etc.) still return
+  null silently when no case matches.
+
+
+  EQUALITY
+
+    Shape.Circle(5.0) == Shape.Circle(5.0)   // true — same variant, same fields
+    Shape.Circle(5.0) == Shape.Circle(6.0)   // false
+    Shape.Circle(5.0) == Shape.Circle        // true — variant match, fields ignored
+                                              // (this is how switch works internally)
+
+  TYPE
+
+    type(s1)   // "ENUM"
+    str(s1)    // "Shape.Circle(radius: 5.0)"
+
+
+  REAL-WORLD EXAMPLE — RESULT TYPE
+
+    enum Result { Ok(value)  Err(message) }
+
+    fn divide(a, b) {
+        if b == 0 { return Result.Err("division by zero") }
+        return Result.Ok(a / b)
+    }
+
+    r = divide(10, 2)
+    switch r {
+        case Result.Ok(v)  { println("result: " + str(v)) }
+        case Result.Err(m) { println("error: " + m) }
+    }
+
+
+--------------------------------------------------------------------------------
+  ASYNC / AWAIT
+--------------------------------------------------------------------------------
+
+  kLex supports async computation via three builtins: async, await, sleep.
+  The model is goroutine-backed: async launches real concurrent work; await
+  blocks the caller until it completes.
+
+
+  LAUNCHING A TASK
+
+    task = async(fn() {
+        sleep(100)
+        return 42
+    })
+
+    task = async(fn(x, y) { return x + y }, 10, 32)
+
+  Note: do not call input() from an async task — concurrent reads will race.
+
+
+  WAITING FOR A RESULT
+
+    result = await(task)
+
+  If the task produced a runtime error, await propagates it.
+
+
+  RUNNING MULTIPLE TASKS CONCURRENTLY
+
+    t1 = async(fn() { sleep(200)  return "slow" })
+    t2 = async(fn() { sleep(50)   return "fast" })
+
+    r1 = await(t1)
+    r2 = await(t2)
+
+  Total wall-clock time is roughly the slowest task, not the sum.
+
+
+  THE SHARED-STATE CONSTRAINT
+
+  Async functions run in separate goroutines. If two tasks mutate the same
+  array or hash concurrently, behaviour is undefined. Communicate only via
+  return values and channels.
+
+    // SAFE — data passed by value
+    task = async(fn(arr) {
+        total = 0
+        for x in arr { total = total + x }
+        return total
+    }, data)
+
+    // UNSAFE — mutating shared state
+    results = []
+    task = async(fn() { results = push(results, 1) })   // do not do this
+
+
+  TYPE
+
+    type(task)   // "TASK"
+
+  Tasks are first-class. Awaiting a completed task returns the result
+  immediately without blocking.
+
+
+--------------------------------------------------------------------------------
+  CHANNELS
+--------------------------------------------------------------------------------
+
+  Channels let async tasks communicate by passing values. A channel is a
+  goroutine-safe conduit.
+
+
+  CREATING A CHANNEL
+
+    ch = channel()      // unbuffered
+    ch = channel(10)    // buffered, capacity 10
+
+
+  SENDING AND RECEIVING
+
+    send(ch, value)         // send a value
+    value, ok = recv(ch)    // ok == false when closed and empty
+
+
+  CLOSING A CHANNEL
+
+    close(ch)    // signal no more sends; buffered values can still be received
+
+
+  FOR-IN OVER A CHANNEL
+
+    for val in ch { println(val) }
+
+  Exits automatically when the channel is closed. break also works.
+
+
+  PRODUCER / CONSUMER PATTERN
+
+    ch = channel()
+
+    task = async(fn() {
+        for i in range(5) { send(ch, i * i) }
+        close(ch)
+    })
+
+    for result in ch { println(result) }   // 0 1 4 9 16
+    await(task)
+
+
+  TYPE
+
+    type(ch)   // "CHANNEL"
+
+
+  CONSTRAINT
+
+  Do not pass a mutable array or hash through a channel and also modify it
+  in the sending task. Channels transfer ownership; they do not broadcast.
+
+
+--------------------------------------------------------------------------------
+  ACTOR MODEL
+--------------------------------------------------------------------------------
+
+  actor.lex gives each actor a goroutine, a typed mailbox (buffered channel),
+  and explicit state threaded between message iterations (Erlang/OTP style).
+  Messages are processed one at a time — no shared mutable state needed.
+
+    import "actor.lex" as actor
+
+  Three spawn variants:
+
+    actor.spawn(behavior, initialState)
+      Stateful actor, mailbox capacity 32.
+      Behavior signature: fn(msg, state) { ... return newState }
+
+    actor.spawnBuffered(behavior, initialState, capacity)
+      Stateful actor, caller-defined mailbox capacity.
+
+    actor.spawnStateless(behavior)
+      No state threading, mailbox capacity 32.
+      Behavior signature: fn(msg) { ... }
+
+  Actor handle methods:
+    a.send(msg)   enqueue a message; returns false if mailbox is closed
+    a.stop()      close the mailbox, await goroutine exit, return final state
+                  (or propagate the error if the behavior crashed)
+
+  The idiomatic pattern combines enums for message types and pattern matching:
+
+    enum CountMsg { Add(n)  Get(replyTo) }
+
+    a = actor.spawn(fn(msg, count) {
+        switch msg {
+            case CountMsg.Add(n)  { return count + n }
+            case CountMsg.Get(ch) { send(ch, count)  return count }
+        }
+        return count
+    }, 0)
+
+    a.send(CountMsg.Add(5))
+    replyCh = channel(1)
+    a.send(CountMsg.Get(replyCh))
+    n, _ = recv(replyCh)    // 5
+    final = a.stop()         // 5
+
+  Request-reply: embed a reply channel in the message (Get(replyTo) above).
+  Error handling: behavior crash propagates through stop(). Wrap stop() in
+  safe() to inspect the crash. Resilient behaviors use safe() internally.
+
+
+--------------------------------------------------------------------------------
+  STANDARD LIBRARY
+--------------------------------------------------------------------------------
+
+  Import any module: import "name.lex" as alias
+  Functions that can fail return (result, err). err is null on success.
+
+
+  array.lex — array utilities
+
+    first(arr)              first element; RuntimeError if empty
+    last(arr)               last element; RuntimeError if empty
+    contains(arr, val)      true if val is in arr
+    reverse(arr)            reversed copy
+    unique(arr)             copy with duplicates removed, order preserved
+    flatten(arr)            copy with one level of nesting removed
+    zip(a, b)               pairs by index → array of two-element arrays
+    sort(arr)               sorted copy ascending (integers or strings)
+    sortBy(arr, compareFn)  sorted copy using a caller-supplied comparator
+                            compareFn(a, b) returns true if a comes before b
+    split(arr, sep)         split array on a separator value → array of arrays
+                            split([1,2,":",3], ":") → [[1,2],[3]]
+
+      sortBy(nums,  fn(a, b) { return a < b })           // ascending
+      sortBy(nums,  fn(a, b) { return a > b })           // descending
+      sortBy(users, fn(a, b) { return a.age < b.age })   // struct field
+      sortBy(words, fn(a, b) { return len(a) < len(b) }) // derived key
+
+
+  assert.lex — test assertions
+
+    assertEqual(a, b)
+    assertNotEqual(a, b)
+    assertTrue(val)
+    assertFalse(val)
+    assertNull(val)
+    assertNotNull(val)
+    assertType(val, typeName)
+    summary()               print pass/fail totals; returns true if all passed
+
+
+  async.lex — concurrency helpers
+
+    await_all(tasks)        await array of Tasks, return results in order
+                            total wall time is the slowest task
+    parallel(tasks)         alias for await_all
+
+
+  base64.lex — base64 encoding
+
+    encode(s)               standard base64 encode, returns string
+    decode(s)               returns (string, err)
+    urlEncode(s)            URL-safe base64 encode
+    urlDecode(s)            returns (string, err)
+
+
+  cache.lex — in-memory key/value cache (instantiable)
+
+    c = cache.newCache()
+
+    c.set(key, value)
+    c.get(key)              returns value or null
+    c.has(key)              boolean
+    c.del(key)
+    c.clear()
+    c.size()
+    c.save(path)            persist to file (pipe-delimited)
+    c.load(path)            load entries from file
+    c.memoize(fnRef)        return a cached wrapper of fnRef
+
+
+  datetime.lex — date and time
+
+    now()                   DateTime for current UTC time
+    fromUnix(unix)          DateTime from unix timestamp
+    format(dt, layout)      formatted string; layout uses Go time format
+    parse(s, layout)        returns (DateTime, err)
+    diffSeconds(a, b)       integer seconds between two DateTimes
+    addSeconds(dt, n)       new DateTime with n seconds added
+    isWeekend(dt)           boolean
+
+    DateTime fields: year, month, day, hour, minute, second, unix
+
+
+  encoding.lex — byte and character encoding
+
+    ord(c)                  character → integer code point
+    chr(n)                  integer → character string
+    bytes(s)                string → array of integer byte values
+    stringFromBytes(arr)    array of integers → string
+
+
+  event.lex — event emitter (instantiable)
+
+    e = ev.newEmitter()
+
+    e.on(event, handler)
+    e.emit(event, data)
+    e.once(event, handler)            fires exactly once, then removes itself
+    e.off(event, handler)             remove a specific listener
+    e.clear(event)                    remove all listeners for an event
+    e.mapEvent(in, out, fn)           forward events through a transform
+    e.filterEvent(in, out, fn)        forward only events where fn returns true
+    e.logEvent(event)                 attach debug listener that prints emissions
+
+
+  fs.lex — filesystem operations
+
+    read(path)              returns (content, err)
+    write(path, content)    returns (null, err) — creates or truncates
+    append(path, content)   returns (null, err)
+    exists(path)            returns bool
+    remove(path)            returns (null, err)
+    removeAll(path)         returns (null, err)
+    mkdir(path)             returns (null, err)
+    mkdirAll(path)          returns (null, err)
+    listDir(path)           returns (array_of_names, err)
+    rename(src, dst)        returns (null, err)
+    stat(path)              returns (FileInfo, err)
+    copy(src, dst)          returns (null, err)
+
+    FileInfo fields: name, size, isDir, modTime (unix seconds)
+
+
+  functional.lex — higher-order function utilities
+
+    identity(x)
+    compose(f, g)           returns fn applying g then f
+    pipe(fns...)            returns fn applying fns left to right
+    tap(fnRef)              side-effect fn; returns input value unchanged
+    always(v)               returns fn that always returns v
+    partial(fnRef, args...) returns fn with leading args pre-applied
+                            maximum 3 total arguments (fixed + remaining)
+    flip(fnRef)             returns fn with first two args swapped
+                            maximum 3 total arguments
+
+
+  graph.lex — reactive dependency graph (instantiable)
+
+    g = gmod.newGraph()
+
+    g.node(name, fn)        declare a computed node
+    g.depends(target, src)  declare that target depends on source
+    g.compute(name)         evaluate a node (cached; recomputes if stale)
+    g.set(name, value)      assign a constant and propagate to dependents
+    g.invalidate(name)      clear cached value
+    g.propagate(name)       recompute all transitive dependents
+    g.recomputeAll()        force recomputation of every node
+    g.debug()               print full graph state
+
+
+  hash.lex — hash/dictionary utilities
+
+    merge(a, b)             new hash combining a and b (b wins on conflicts)
+    invert(h)               new hash with keys and values swapped
+    pick(h, keys)           new hash with only the listed keys
+    omit(h, keys)           new hash without the listed keys
+    has(h, key)             alias for hasKey
+    size(h)                 number of keys
+    xor(a, b)               bitwise XOR of two integers (32-bit; used internally
+                            by the hashing functions)
+    hash(s)                 FNV-1a hash of string, returns integer
+    hashBytes(arr)          FNV-1a hash of byte array
+    hashFile(content)       FNV-1a hash of file content string
+    combineHash(a, b)       combine two hash integers
+
+
+  http.lex — low-level HTTP client
+
+    request(method, url, headers, body)   returns (Response, err)
+    get(url)                              returns (Response, err)
+    post(url, body, contentType)          returns (Response, err)
+    put(url, body, contentType)           returns (Response, err)
+    patch(url, body, contentType)         returns (Response, err)
+    del(url)                              returns (Response, err)
+    isOk(resp)                            true if status 200-299
+    header(resp, name)                    header value or null
+
+    Response fields: status, body, headers
+
+    For JSON APIs prefer rest.lex.
+
+
+  json.lex — JSON serialisation
+
+    parse(input)            returns (value, err)
+    stringify(v)            returns JSON string
+
+
+  kv_store.lex — persistent key/value store (instantiable)
+
+    store = kv.newKVStore()
+
+    store.set(key, value)
+    store.get(key)
+    store.del(key)
+    store.allKeys()
+    store.allValues()
+    store.save(path)        persist to file
+    store.load(path)        load from file
+    store.mapValues(fn)     apply fn to every value
+    store.filterKeys(fn)    return keys where fn(k, v) returns true
+    store.reduceStore(fn, init)  fold over all key/value pairs
+
+
+  math.lex — mathematical operations
+
+    abs(n)    max(a,b)    min(a,b)    clamp(n,lo,hi)    pow(base,exp)
+    sum(arr)  product(arr)  sign(n)  even(n)  odd(n)  gcd(a,b)  lcm(a,b)
+
+
+  observable.lex — reactive values (instantiable)
+
+    o = obs.newObservable(initial)
+
+    o.get()                 return current value
+    o.set(val)              update value; call all subscribers synchronously
+    o.subscribe(handler)    register handler(newVal)
+    o.unsubscribe(handler)  remove handler (same reference required)
+    o.once(handler)         fires once then removes itself
+    o.clear()               remove all subscribers
+
+    Observable operators — return a new derived Observable:
+      o.map(fn)             transform each emitted value
+      o.filter(fn)          suppress values where fn returns false
+      o.distinct()          suppress consecutive duplicate values
+      o.skip(n)             ignore first n values
+      o.take(n)             forward first n values then stop
+      o.debounce(ms)        emit only after ms ms of silence
+
+    Module-level functions:
+      computed(deps, fn)    read-only Observable derived from deps array
+      merge(sources...)     any source fires → output fires with that value
+      combine(sources...)   any source fires → output fires with array of
+                            current values from all sources
+
+
+  os.lex — operating system interface
+
+    getenv(key)    setenv(key, val)    cwd()    hostname()
+    pid()          args()              exit(code)
+
+    args() returns full os.Args: index 0 = binary, 1 = script, 2+ = user args.
+
+
+  path.lex — file path manipulation
+
+    normalize(p)  parts(p)   join(a,b)   joinAll(parts...)
+    basename(p)   dirname(p) ext(p)      stripExt(p)
+    isAbsolute(p) isRelative(p)          clean(p)
+
+
+  process.lex — subprocess execution
+
+    run(cmd, args)              returns (stdout, err)
+    exec(cmd, args)             returns (stdout, stderr, exitCode, err)
+    shell(cmdStr)               returns (stdout, err) via /bin/sh -c
+
+
+  regex.lex — regular expressions (Go RE2 syntax)
+
+    match(pattern, str)         returns (bool, err)
+    find(pattern, str)          returns (string|null, err)
+    findAll(pattern, str)       returns (array, err)
+    replace(pattern, str, repl) returns (string, err)
+    replaceAll(pattern, str, r) returns (string, err)
+    split(pattern, str)         returns (array, err)
+    groups(pattern, str)        returns (array|null, err)
+    groupsAll(pattern, str)     returns (array, err)
+
+
+  rest.lex — JSON REST client
+
+    get(url)                    returns (RestResponse, err)
+    getWith(url, headers)       returns (RestResponse, err)
+    post(url, body)             returns (RestResponse, err)
+    put(url, body)              returns (RestResponse, err)
+    patch(url, body)            returns (RestResponse, err)
+    del(url)                    returns (RestResponse, err)
+    isOk(resp)                  true if status 200-299
+
+    RestResponse fields: status, data, headers
+    data is parsed JSON when Content-Type is application/json, else raw string.
+
+
+  retry.lex — retry with optional backoff
+
+    do(fn, maxAttempts)                  returns (result, err)
+    doWithBackoff(fn, maxAttempts, ms)   exponential backoff starting at ms
+
+
+  server.lex — HTTP server
+
+    s = srv.new()
+
+    s.get(path, fn(req){})
+    s.post(path, fn(req){})
+    s.put(path, fn(req){})
+    s.del(path, fn(req){})
+    s.start(port)              bind to port and block (runs until process exits)
+
+    Request hash fields:
+      req["method"]    req["path"]    req["query"]    req["headers"]   req["body"]
+
+    Response helpers:
+      ok(body)                   200, plain body
+      json(body)                 200, Content-Type: application/json
+      status(code, body)         custom status
+      respond(code, body, hdrs)  custom status, body, and headers hash
+
+    Routes matched in registration order. Unmatched → 404.
+    Requests are serialised (one at a time) — correct for tool servers.
+
+
+  stream.lex — channel-based lazy streams
+
+    Sources:
+      fromArray(arr)           rangeStream(start, stop)   repeat(val)
+
+    Transforms (lazy):
+      map(stream, fn)          filter(stream, fn)
+      take(stream, n)          tap(stream, fn)
+      flatMap(stream, fn)
+
+    Fan-in:
+      merge(streams...)        zip(streams...)
+
+    Terminals:
+      collect(stream)          returns (array, null) or (null, error)
+      reduce(stream, fn, init) returns (value, null) or (null, error)
+
+    Pipe helper:
+      pipe(stream, op, op, ...)
+      Curried builders: Map(f)  Filter(f)  Take(n)  Tap(f)  FlatMap(f)
+
+
+  stream_fusion.lex — single-pass eager stream fusion
+
+    fuse(arr, steps...)       run arr through a pipeline of step functions
+                              in one pass; returns a new array
+    mapStep(fn)               step that transforms each element via fn
+    filterStep(fn)            step that keeps elements where fn returns true
+    tapStep(fn)               step that calls fn for side effects, passes through
+    takeStep(n)               step that limits output to first n elements
+
+    Steps are composed left to right. Use when you want a single allocation
+    pass over an array rather than the channel-per-stage overhead of stream.lex.
+
+      result = sf.fuse(
+          [1, 2, 3, 4, 5, 6],
+          sf.mapStep(fn(x) { x * 2 }),
+          sf.filterStep(fn(x) { x > 4 })
+      )
+
+
+  strings.lex — string utilities
+
+    contains(str, sub)         repeat(str, n)      count(str, sub)
+    trimLeft(str)              trimRight(str)      trimSpace(str)
+    padLeft(str, width, char)  padRight(str, width, char)
+    toUpper(str)               toLower(str)
+    lines(str)                 words(str)
+
+
+  url.lex — URL encoding
+
+    encode(s)   decode(s)   build(base, params)   joinPath(base, path)
+
+
+  uuid.lex — UUID generation
+
+    v4()     returns a random UUID v4 string
+
+
+--------------------------------------------------------------------------------
+  TYPE SYSTEM RULES
+--------------------------------------------------------------------------------
+
+  These rules are fixed.
+
+  1.  No implicit coercion. Types never convert automatically.
+      "count: " + str(n) — explicit conversion required.
+
+  2.  Conditions must be boolean. if and while require exactly true or false.
+
+  3.  Cross-type equality is a TypeError — except null comparisons.
+      1 == "1" crashes. null == anything is always safe and always false.
+
+      Exception: an enum instance may be compared with a data-carrying enum
+      variant using == or != in either direction.
+        shape == Shape.Circle   // true if shape is a Circle instance
+        Shape.Circle == shape   // identical semantics — order does not matter
+
+  4.  Ordering operators (<, >, <=, >=) are defined for integers, floats,
+      and strings. Integer and float can be mixed (integer is promoted).
+      String comparison is lexicographic (Unicode code point order).
+      Any other type combination is a TypeError.
+
+        "apple" < "banana"   // true
+        "Z" < "a"            // true — uppercase sorts before lowercase
+
+  5.  Arithmetic on mixed numeric types promotes to float. Any other mixed
+      arithmetic is a TypeError.
+
+  6.  Integer division truncates. 10 / 3 is 3.
+
+  7.  Arrays and hashes use reference equality. Two separately created arrays
+      with the same contents are not ==.
+
+  8.  Strict arity for fixed parameters. Wrong number of arguments is always
+      a RuntimeError. There are no default arguments.
+
+  9.  Functions transform, assignments mutate. This is a first-class language
+      rule, not a convention.
+
+      Functions (push, pop, slice, sort, reverse, map, filter, etc.) never
+      mutate their arguments — they always return a new value. The caller
+      must capture the result or it is silently discarded.
+
+        arr = push(arr, x)   // correct — transform and rebind
+        push(arr, x)         // wrong  — result discarded, arr unchanged
+
+      Assignment syntax (arr[i] = x, hash["k"] = v, struct.field = v) always
+      mutates the target in place. There is no exception to either side of
+      this rule.
+
+      The workaround for any function whose result you intend to keep is
+      explicit reassignment:
+
+        arr  = push(arr, 4)
+        arr  = pop(arr)
+        arr  = slice(arr, 1, 3)
+        arr  = sort(arr)
+        evens = filter(arr, fn(x) { x % 2 == 0 })
+
+      Functions called purely for side effects (send, emit, println) also
+      return values — those return values are legitimately discarded. The
+      rule applies specifically to functions that produce a transformed copy
+      of their input: if you called it to change a collection, capture the result.
+
+  10. Hash key order is non-deterministic.
+
+  11. break and continue are loop-local. They do not cross function boundaries.
+
+  12. _ is the discard identifier. Assigning to _ evaluates the right-hand
+      side for side effects but does not store the value. Reading _ is always
+      a RuntimeError: "_ is a discard — its value cannot be read".
+
+      Multiple discards in the same scope do not conflict — each _ is
+      independent. This is the idiomatic way to ignore parts of a multi-assign:
+
+        val, _ = safe(readFile, path)       // ignore the error
+        _, err = safe(writeFile, path, s)   // ignore the result
+        a, _ = safe(fn() { return 1 })
+        b, _ = safe(fn() { return 2 })      // second _ does not shadow first
+
+      _ also works as a for-in loop variable when the index or key is unused:
+
+        for _ in items { ... }              // iterate without binding element
+        for _, v in hash { println(v) }     // only care about values
+
+  13. Integer literals are bounded by the platform integer range
+      (−9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 on 64-bit).
+      A literal that overflows this range is a ParseError — there is no
+      silent wrap.
+
+
+--------------------------------------------------------------------------------
+  WORKED EXAMPLES
+--------------------------------------------------------------------------------
+
+  FIZZBUZZ
+
+    for i in range(1, 21) {
+        if i % 15 == 0      { println("FizzBuzz") }
+        else if i % 3 == 0  { println("Fizz") }
+        else if i % 5 == 0  { println("Buzz") }
+        else                { println(i) }
+    }
+
+
+  SAFE CALLS IN A LOOP
+
+    inputs = ["42", "hello", "7", "nope", "100"]
+    total = 0
+    for item in inputs {
+        val, err = safe(int, item)
+        if err == null {
+            total = total + val
+        } else {
+            println("skipping: " + item)
+        }
+    }
+    println("total: " + str(total))    // 149
+
+
+  USING RANGE WITH A STEP
+
+    for i in range(0, 20, 2) { print(str(i) + " ") }
+    println("")    // 0 2 4 6 8 10 12 14 16 18
+
+    for i in range(5, 0, -1) { print(str(i) + " ") }
+    println("")    // 5 4 3 2 1
+
+
+  CLOSURE-BASED ACCUMULATOR
+
+    fn makeAdder(n) {
+        return fn(x) { x + n }
+    }
+    add10 = makeAdder(10)
+    println(add10(5))     // 15
+    println(add10(32))    // 42
+
+
+  ENUM-DRIVEN DISPATCH
+
+    enum Cmd { Add(n)  Reset  Report(ch) }
+
+    a = actor.spawn(fn(msg, total) {
+        switch msg {
+            case Cmd.Add(n)    { return total + n }
+            case Cmd.Reset     { return 0 }
+            case Cmd.Report(c) { send(c, total)  return total }
+        }
+        return total
+    }, 0)
+
+    a.send(Cmd.Add(10))
+    a.send(Cmd.Add(5))
+    a.send(Cmd.Reset)
+    a.send(Cmd.Add(3))
+
+    ch = channel(1)
+    a.send(Cmd.Report(ch))
+    n, _ = recv(ch)
+    println(n)       // 3
+    a.stop()
+
+
+  FORMATTED OUTPUT
+
+    for i in range(1, 6) {
+        println(format("%-10s %3d", "item" + str(i), i * i))
+    }
+    // item1        1
+    // item2        4
+    // item3        9
+    // item4       16
+    // item5       25
+
+
+================================================================================
+  End of guide
+================================================================================

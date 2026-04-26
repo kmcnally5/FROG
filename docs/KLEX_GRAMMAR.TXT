@@ -1,0 +1,645 @@
+================================================================================
+  kLex FORMAL GRAMMAR (EBNF)
+================================================================================
+
+  The kLex language is nicknamed FROG: Functional, Reactive, Opinionated, Governed
+
+  This document is the authoritative source of truth for kLex syntax.
+  Before adding any new syntax to the language, write it here first and check
+  it for ambiguities. If you cannot express the new construct unambiguously
+  in this grammar, it is not yet ready to implement.
+
+  Derived from: lexer/lexer.go  and  parser/parser.go
+  Keep this document in sync with those files whenever either is changed.
+
+
+--------------------------------------------------------------------------------
+  NOTATION
+--------------------------------------------------------------------------------
+
+  rule = ...          production definition
+  A B                 A followed by B (concatenation)
+  A | B               A or B (alternation)
+  [ A ]               A is optional (zero or one)
+  { A }               A repeated zero or more times
+  A+                  A repeated one or more times  (shorthand for A { A })
+  "text"              literal terminal (exact characters)
+  UPPER_CASE          lexical token (defined in the Lexical Grammar section)
+  (* note *)          comment — not part of the grammar
+
+
+--------------------------------------------------------------------------------
+  LEXICAL GRAMMAR
+--------------------------------------------------------------------------------
+
+  The lexer converts raw source text into a flat stream of tokens.
+  Whitespace (spaces, tabs, newlines) and line comments are stripped here;
+  they are not visible to the parser.
+
+  -- Comments --
+
+  comment      = "//" { any_char } newline
+                 (* line comment only; no block comments in kLex *)
+
+
+  -- Identifiers and keywords --
+
+  letter       = (* any Unicode letter *) | "_"
+  digit        = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+
+  IDENT        = letter { letter | digit }
+                 (* if the result matches a keyword below, the keyword token
+                    is produced instead of IDENT *)
+
+  Keywords (reserved; cannot be used as identifiers):
+    if  else  fn  return  while  for  in  break  continue
+    switch  case  default  struct  enum  select  let  import  as
+    true  false  null
+
+
+  -- Numeric literals --
+
+  INT          = digit+
+                 (* value must fit in a signed 64-bit integer
+                    (−9,223,372,036,854,775,808 to 9,223,372,036,854,775,807);
+                    a literal that overflows this range is a ParseError —
+                    silent wrap is never permitted *)
+
+  FLOAT        = digit+ "." digit+
+                 (* the decimal point must be followed by at least one digit;
+                    bare "3." is not a valid float *)
+
+
+  -- String literals --
+
+  STRING       = '"' { str_char } '"'
+  INTERP_STR   = '"' { str_char | interp_expr } '"'
+                 (* INTERP_STR is produced whenever the string contains at
+                    least one bare "{"; STRING otherwise.
+                    A string not closed before end-of-file is a ParseError:
+                    "unterminated string literal" *)
+
+  str_char     = escape_seq | (* any character except '"' and unescaped "{" *)
+  escape_seq   = '\"'         (* literal double quote          *)
+               | '\n'         (* newline                        *)
+               | '\t'         (* tab                            *)
+               | '\\'         (* literal backslash              *)
+               | '\r'         (* carriage return                *)
+               | '\b'         (* backspace                      *)
+               | '\{'         (* literal "{" — NOT interpolation *)
+  interp_expr  = "{" expression "}"
+
+  RAW_STR      = '`' { any_char_except_backtick } '`'
+                 (* No escape processing. No interpolation. Every character
+                    including newlines and backslashes is taken literally.
+                    Use for multi-line text, file paths, SQL, HTML, etc.
+                    A backtick cannot appear inside a raw string.
+                    A raw string not closed before end-of-file is a ParseError:
+                    "unterminated raw string literal" *)
+
+  Two delimiter rules — no overlap:
+    "..."   escape sequences and {expr} interpolation are active
+    `...`   all characters are literal; nothing is processed
+
+
+  -- Operators and punctuation --
+
+  "+"   "-"   "*"   "/"   "%"       arithmetic
+  "="                               assignment
+  "=="  "!="                        equality
+  "<"   ">"   "<="  ">="            comparison
+  "&&"  "||"  "!"                   logical
+  "("   ")"                         grouping / call
+  "{"   "}"                         block / hash / struct body
+  "["   "]"                         array / index
+  ","                               separator
+  ":"                               key-value separator
+  "."                               property / method access
+  "..."                             variadic marker (on last parameter only)
+
+
+--------------------------------------------------------------------------------
+  SYNTACTIC GRAMMAR
+--------------------------------------------------------------------------------
+
+  -- Top level --
+
+  program      = { statement }
+
+
+  -- Statements --
+
+  statement    = if_stmt
+               | while_stmt
+               | for_stmt
+               | switch_stmt
+               | select_stmt
+               | return_stmt
+               | break_stmt
+               | continue_stmt
+               | import_stmt
+               | struct_decl
+               | enum_decl
+               | named_fn_stmt
+               | let_stmt
+               | multi_assign_stmt
+               | assign_stmt
+               | index_assign_stmt
+               | dot_assign_stmt
+               | expression             (* expression used as a statement *)
+
+
+  -- Control flow --
+
+  if_stmt      = "if" expression block
+                   [ "else" ( if_stmt | block ) ]
+
+  while_stmt   = "while" expression block
+
+  for_stmt     = "for" IDENT [ "," IDENT ] "in" expression block
+                 (* first IDENT: element (arrays/channels) or key (hashes)
+                    second IDENT: value — only meaningful when iterating a hash *)
+
+  switch_stmt  = "switch" [ expression ] "{"
+                   { "case" case_pattern { "," case_pattern } block }
+                   [ "default" block ]
+                 "}"
+                 (* no subject → expression switch: each case value is a bool expr
+                    with subject → value switch: each case value is compared with ==
+                    no fallthrough between cases *)
+
+  case_pattern = enum_pattern
+               | expression
+               (* enum_pattern is only valid in a value switch (with subject);
+                  expression switch cases must be boolean expressions *)
+
+  enum_pattern = dot_expr "(" IDENT { "," IDENT } ")"
+               (* Destructuring pattern: case Shape.Circle(r) { } or Shape.Rect(w, h) { }
+                  dot_expr must resolve to an enum variant at runtime.
+                  Each IDENT is a new local variable bound positionally to the
+                  variant's declared fields for the duration of the case body.
+                  Binding count must exactly match the variant's field count;
+                  a mismatch is a RuntimeError.
+                  Bindings are local to the case arm and do not affect the outer scope.
+                  Zero-field variants use the plain expression form — no parentheses.
+                  Recognised at parse time: a CallExpr where the function is a DotExpr
+                  and every argument is a bare Ident is rewritten to enum_pattern. *)
+
+  select_stmt  = "select" "{"
+                   { "case" select_case block }
+                   [ "default" block ]
+                 "}"
+                 (* blocks until one channel operation can proceed;
+                    uses reflect.Select internally so all cases are evaluated simultaneously;
+                    optional default makes the select non-blocking *)
+
+  select_case  = "send" "(" expression "," expression ")"
+                 (* send a value to a channel *)
+
+               | IDENT "," IDENT "=" "recv" "(" expression ")"
+                 (* receive with two bindings: val, ok = recv(ch)
+                    ok is false when the channel is closed *)
+
+               | IDENT "=" "recv" "(" expression ")"
+                 (* receive with one binding: val = recv(ch) *)
+
+               | "recv" "(" expression ")"
+                 (* receive, discarding the value *)
+
+               (* recv bindings are resolved via Assign() — they update existing
+                  outer-scope variables rather than creating new local ones *)
+
+
+  return_stmt  = "return" [ expression { "," expression } ]
+                 (* bare "return" yields null
+                    "return a, b" yields a Tuple — must be received with multi-assign *)
+
+  break_stmt   = "break"
+  continue_stmt= "continue"
+
+
+  -- Declarations --
+
+  import_stmt  = "import" STRING "as" IDENT
+                 (* path is resolved against KLEX_PATH env var when not absolute;
+                    each import evaluates the file independently — no caching;
+                    import cycles are detected and reported as a RuntimeError *)
+
+  named_fn_stmt= "fn" IDENT "(" params ")" block
+                 (* syntactic sugar — desugared at parse time to:
+                    IDENT = fn( params ) { body } *)
+
+  struct_decl  = "struct" IDENT "{"
+                   { field_list | method_decl }
+                 "}"
+
+  field_list   = IDENT { "," IDENT }
+                 (* one or more field names on the same "line";
+                    fields and methods may be interleaved freely *)
+
+  method_decl  = "fn" IDENT "(" params ")" block
+                 (* methods have access to the instance via the implicit
+                    identifier `self`; `self` is injected at call time *)
+
+  enum_decl    = "enum" IDENT "{"
+                   { variant_decl }
+                 "}"
+
+  variant_decl = IDENT [ "(" IDENT { "," IDENT } ")" ]
+                 (* zero-field variant: just a name,  e.g. None
+                    tuple variant:      name + fields, e.g. Point(x, y) *)
+
+
+  -- Assignment --
+
+  let_stmt          = "let" IDENT "=" expression
+                      (* always creates the binding in the current scope via Set();
+                         never walks the scope chain — existing outer bindings are
+                         unaffected. Use this to declare a variable that must be
+                         local regardless of outer scope contents. *)
+
+  const_stmt        = "const" IDENT "=" expression
+                      (* creates an immutable binding in the current scope.
+                         Any subsequent assignment to this name from any scope
+                         that can see it is a RuntimeError:
+                         "cannot reassign constant <name>".
+                         An inner scope may shadow a const with let or bare
+                         assignment without triggering the error. *)
+
+  assign_stmt       = IDENT "=" expression
+                      (* creates the variable in the current scope if absent;
+                         walks the scope chain via Assign() if it already exists *)
+
+  multi_assign_stmt = IDENT "," IDENT { "," IDENT } "=" expression
+                      (* right-hand side must evaluate to a Tuple with exactly
+                         the same number of elements as the left-hand side *)
+
+  index_assign_stmt = expression "[" expression "]" "=" expression
+                      (* mutates the array or hash in place *)
+
+  dot_assign_stmt   = expression "." IDENT "=" expression
+                      (* mutates the hash entry or struct field in place *)
+
+
+  -- Block --
+
+  block        = "{" { statement } "}"
+
+
+  -- Parameters --
+
+  params       = (* empty *)
+               | param { "," param } [ "," IDENT "..." ]
+               (* "..." must appear on the last parameter only;
+                  that parameter receives any extra arguments as an array;
+                  zero extra arguments yields an empty array, never null *)
+
+  param        = IDENT [ "=" expression ]
+               (* optional default value; evaluated at call time in the
+                  function's closure environment, not at definition time.
+                  Parameters with defaults must follow all required parameters —
+                  a required param after a defaulted one is a ParseError. *)
+
+
+--------------------------------------------------------------------------------
+  EXPRESSION GRAMMAR
+--------------------------------------------------------------------------------
+
+  Expressions are parsed with a Pratt (top-down operator precedence) parser.
+  The grammar below is layered by precedence from lowest to highest.
+  All binary operators are left-associative at the same precedence level.
+
+
+  -- Operator precedence table --
+
+  Level  Operators         Associativity   Name
+  -----  ----------------  -------------   ----
+    2    |>                left            pipeline
+    3    && ||             left            logical
+    4    == != < > <= >=   left            comparison
+    5    + -               left            additive
+    6    * / %             left            multiplicative
+    7    - !               right (prefix)  unary
+    8    ( args )          left            call
+    9    [ index ]         left            subscript
+    9    . ident           left            dot access
+
+
+  -- Expression rules --
+
+  pipe_expr    = logic_expr { "|>" ( call_expr | postfix_expr ) }
+                 (* Pipes the left value as the first argument of the right
+                    callable. If the right side is a call_expr, the piped
+                    value is prepended to its argument list.
+                    If the right side is a bare reference (ident, dot_expr),
+                    it is called with the left value as the only argument.
+                    Left-associative: a |> f() |> g() ≡ g(f(a)) *)
+
+  expression   = pipe_expr
+
+  logic_expr   = compare_expr { ( "&&" | "||" ) compare_expr }
+
+  compare_expr = add_expr { ( "==" | "!=" | "<" | ">" | "<=" | ">=" ) add_expr }
+
+  add_expr     = mul_expr { ( "+" | "-" ) mul_expr }
+
+  mul_expr     = unary_expr { ( "*" | "/" | "%" ) unary_expr }
+
+  unary_expr   = ( "-" | "!" ) unary_expr
+               | postfix_expr
+
+  postfix_expr = primary { postfix_op }
+
+  postfix_op   = "[" expression "]"     (* subscript / index      *)
+               | "(" arg_list ")"       (* call                   *)
+               | "." IDENT              (* property or method name *)
+
+  arg_list     = (* empty *) | expression { "," expression }
+
+
+  -- Primary expressions --
+
+  primary      = INT
+               | FLOAT
+               | STRING
+               | RAW_STR
+               | INTERP_STR
+               | "true"
+               | "false"
+               | "null"
+               | ident_or_struct_lit
+               | array_literal
+               | hash_literal
+               | fn_literal
+               | "(" expression ")"
+
+
+  ident_or_struct_lit
+               = IDENT                           (* plain identifier *)
+               | IDENT "{" field_init_list "}"   (* struct literal   *)
+
+               (* IMPORTANT: struct literals are SUPPRESSED in condition
+                  positions — see "Disambiguation Rules" below.
+                  In those positions, IDENT "{" is always an identifier
+                  followed by a block, never a struct literal. *)
+
+  field_init_list
+               = (* empty *)
+               | field_init { "," field_init }
+
+  field_init   = IDENT ":" expression
+
+
+  array_literal= "[" [ expression { "," expression } ] "]"
+
+  hash_literal = "{" [ pair { "," pair } ] "}"
+               (* "{" in expression position is always a hash literal.
+                  "{" after a keyword (if/while/fn/etc.) is always a block.
+                  There is no ambiguity because the parser context is always known. *)
+
+  pair         = expression ":" expression
+
+  fn_literal   = "fn" "(" params ")" block
+               (* anonymous function; use named_fn_stmt for top-level named fns *)
+
+
+  -- String interpolation --
+
+  An interpolated string (INTERP_STR) contains embedded kLex expressions:
+
+    "Hello, {name}! Result: {1 + 2}"
+
+  Each {…} is parsed as a full expression using a nested parser instance.
+  Nested braces are tracked by depth, so function bodies and hashes inside
+  interpolations work correctly:
+
+    "value: {fn(x) { x + 1 }(5)}"   -- valid
+
+  Use \{ to include a literal "{" without triggering interpolation:
+
+    "not interpolated: \{name}"      -- prints: not interpolated: {name}
+
+
+--------------------------------------------------------------------------------
+  DISAMBIGUATION RULES
+--------------------------------------------------------------------------------
+
+  1.  Struct literals in condition position
+
+      The parser suppresses struct literal parsing after the following keywords:
+        if,  while,  for (in the collection expression),  switch (subject),
+        case (each match expression)
+
+      This prevents the opening brace of a block from being misread as the
+      start of a struct literal:
+
+        if x != handler {         -- "handler {" is NOT a struct literal here
+            ...
+        }
+
+      Outside these positions, IDENT immediately followed by "{" is always
+      parsed as a struct literal.
+
+
+  2.  Named function vs anonymous function
+
+      "fn" followed immediately by IDENT at statement level:
+        fn foo(x) { x + 1 }      -- named function; desugars to: foo = fn(x) { x + 1 }
+
+      "fn" followed by "(" anywhere:
+        fn(x) { x + 1 }          -- anonymous function literal
+
+
+  3.  Block vs hash literal
+
+      "{" after a keyword or in statement position → block
+      "{" in expression position (right of "=", inside another expression, etc.) → hash literal
+
+      Because the parser always knows its context, these cases never overlap.
+
+
+  4.  Dot access vs float literal
+
+      "." is only a property accessor when it appears after a postfix_expr.
+      "." followed by digits is not a valid token — floats must have a leading
+      digit: "3.14" is valid, ".14" is not.
+
+
+  5.  Comparison chaining
+
+      Comparison operators are left-associative and can chain syntactically:
+        a == b == c   parses as   (a == b) == c
+
+      This is a syntax-level property; whether the result is well-typed is
+      a runtime concern (bool == bool is valid; bool == int is a TypeError).
+
+
+  6.  Index assign vs index read
+
+      Syntactically, "expr[i] = val" is an index_assign_stmt only at the
+      statement level — the "=" is detected after the full index expression
+      is parsed. Inside a larger expression, "expr[i]" is always a read.
+
+
+  7.  Assignment to reserved literals
+
+      Assigning to "true", "false", or "null" is a parse-time error:
+        null = 3    -- parse error: cannot assign to reserved literal
+
+
+--------------------------------------------------------------------------------
+  SEMANTIC CONSTRAINTS
+  (enforced by the evaluator, not the parser)
+--------------------------------------------------------------------------------
+
+  These are not grammar rules but are listed here because they shape what
+  programs are meaningful, and they affect language design decisions.
+
+  - Conditions for "if" and "while" must evaluate to exactly BOOL.
+    Integer, null, or any other type in condition position is a TypeError.
+
+  - Cross-type equality (other than null comparisons) is a TypeError.
+    "1 == true" is a TypeError.  "null == anything" is always safe.
+    Exception: an ENUM instance may be compared with an ENUM variant using ==
+    or != in either direction — both operand orderings are valid.
+      shape == Shape.Circle   (* instance on left *)
+      Shape.Circle == shape   (* variant on left — identical semantics *)
+
+  - Arithmetic on two integers yields integer; integer OP float (or vice versa)
+    yields float. All other type combinations are TypeErrors.
+
+  - Ordering operators (<, >, <=, >=) are defined for (int, int), (float, float),
+    (int, float), (float, int), and (string, string). String comparison is
+    lexicographic by Unicode code point order. Any other type combination
+    is a TypeError.
+
+  - Function arity is strict for non-variadic functions.
+    Calling foo(a, b) with one or three arguments is a RuntimeError.
+
+  - Struct literals must initialise every declared field exactly once.
+    Missing fields and unknown fields are both RuntimeErrors.
+
+  - Multi-assign requires the right-hand side to be a Tuple with exactly as
+    many elements as there are names on the left.
+
+  - "break" and "continue" are loop-local. They do not propagate through
+    function call boundaries. Using either outside a loop is a RuntimeError.
+
+  - _ is the discard identifier. It is valid on the left-hand side of any
+    assignment form (assign_stmt, let_stmt, multi_assign_stmt, for_stmt loop
+    variables, select recv bindings). The right-hand side is evaluated for
+    side effects but the value is not stored. Reading _ in an expression is
+    always a RuntimeError: "_ is a discard — its value cannot be read".
+    Multiple _ in the same scope are independent — they do not shadow each other.
+
+  - Enum switch exhaustiveness: when a switch has an enum subject and no
+    case matches, a RuntimeError is raised if there is no default clause.
+      switch: Shape.Rect not handled — add a case or a default
+    An explicit empty default {} suppresses the check — use it to express
+    intentional partial matching. This check does not apply to non-enum
+    subjects (integer, string, etc.) where the domain is open.
+
+  - "return" inside a struct method or function closes only that function.
+    It never exits an outer function.
+
+  - error() creates a first-class Error value (type "ERROR"). It is NOT a
+    propagation signal. isError() ignores it; it stays in the environment
+    like any other value. Only errors produced internally by the evaluator
+    propagate automatically.
+
+  - format() argument count must match the number of format specifiers exactly.
+    Too few or too many arguments is a RuntimeError. Verb/type mismatches
+    (e.g. %d given a string) are also RuntimeErrors.
+
+  - Functions transform; assignments mutate. No function in kLex mutates its
+    arguments. Functions that operate on collections (push, pop, slice, sort,
+    reverse, map, filter, reduce) return a new value and leave the original
+    unchanged. The caller must capture the return value or it is discarded.
+
+      arr = push(arr, x)   (* correct — result captured *)
+      push(arr, x)         (* discard — arr is unchanged; the language permits
+                              this syntactically but it is always a logic error
+                              when the intent was to modify arr *)
+
+    Assignment forms (index_assign_stmt, dot_assign_stmt) always mutate the
+    target in place. There is no function in the core language or stdlib that
+    violates this rule on either side.
+
+
+--------------------------------------------------------------------------------
+  BUILT-IN FUNCTIONS
+  (always in scope — no import required)
+--------------------------------------------------------------------------------
+
+  Output:
+    println(val, ...)
+    print(val, ...)
+    input(prompt)
+
+  Type conversion:
+    type(val)                       returns type name as STRING
+    str(val)                        any value → STRING
+    int(val)                        STRING | FLOAT → INTEGER
+    float(val)                      STRING | INTEGER → FLOAT
+
+  String operations:
+    len(string)                     character count (Unicode code points)
+    split(str, sep)                 STRING → ARRAY of STRINGs
+    join(arr, sep)                  ARRAY of STRINGs → STRING
+    upper(str)   lower(str)         case conversion
+    trim(str)                       strip leading/trailing whitespace
+    replace(str, old, new)          replace every occurrence
+    indexOf(str, sub)               first index or -1
+    startsWith(str, pre)            BOOLEAN
+    endsWith(str, suf)              BOOLEAN
+    substr(str, start [, end])      substring by 0-based index; end exclusive
+    format(template, args...)       printf-style formatting
+
+  Array operations:
+    len(array)                      element count
+    push(arr, val)                  new array with val appended
+    pop(arr)                        new array without last element
+    range(stop)
+    range(start, stop)
+    range(start, stop, step)        returns INTEGER ARRAY
+    slice(arr, start [, end])       sub-array by 0-based index; end exclusive
+
+  Hash operations:
+    keys(h)    values(h)            ARRAYs of keys / values
+    hasKey(h, key)                  BOOLEAN
+    delete(h, key)                  removes key in place; returns null
+
+  Higher-order:
+    map(arr, fn)                    apply fn(el) → new ARRAY
+    filter(arr, fn)                 keep elements where fn(el) is true
+    reduce(arr, fn, init)           fold to single value
+                                    (* fn may be a user-defined function or
+                                       any built-in function; builtins are
+                                       accepted wherever a user fn is *)
+
+  Concurrency:
+    channel([n])                    new CHANNEL; unbuffered if n omitted
+    send(ch, val)                   null on success; false (BOOLEAN) if cancelled; RuntimeError if closed
+    recv(ch)                        TUPLE (val, BOOLEAN ok)
+    close(ch)                       signal no more sends
+    cancel(ch)                      signal producer to stop
+    async(fn, args...)              returns TASK
+    await(task)                     blocks; returns task result
+    sleep(ms)                       pause ms milliseconds
+
+  Error handling:
+    error(code, message)            create user ERROR value
+    isError(val)                    BOOLEAN — true for any Error
+    safe(fn, args...)               returns (result, null) or (null, userError)
+    assert(condition [, message])   RuntimeError if condition is false;
+                                    condition must be BOOLEAN (TypeError otherwise);
+                                    default message: "assert: condition is false"
+
+  System:
+    env(name)                       read env var or null
+    exec(cmd, args)                 run binary; returns stdout STRING
+
+
+================================================================================
+  END OF GRAMMAR
+================================================================================

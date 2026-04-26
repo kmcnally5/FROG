@@ -1,0 +1,62 @@
+{
+  "editor.tokenColorCustomizations": {
+    "textMateRules": [
+      {
+        "scope": "keyword.control.klex",
+        "settings": {
+          "foreground": "#C678DD",
+          "fontStyle": "bold"
+        }
+      },
+      {
+        "scope": "support.function.builtin.klex",
+        "settings": {
+          "foreground": "#61AFEF",
+          "fontStyle": ""
+        }
+      },
+      {
+        "scope": "constant.language.klex",
+        "settings": {
+          "foreground": "#E5C07B",
+          "fontStyle": "bold"
+        }
+      },
+      {
+        "scope": "constant.numeric.klex",
+        "settings": {
+          "foreground": "#D19A66",
+          "fontStyle": ""
+        }
+      },
+      {
+        "scope": "string.quoted.double.klex",
+        "settings": {
+          "foreground": "#E06C75",
+          "fontStyle": ""
+        }
+      },
+      {
+        "scope": "constant.character.escape.klex",
+        "settings": {
+          "foreground": "#56B6C2",
+          "fontStyle": "bold"
+        }
+      },
+      {
+        "scope": "comment.line.double-slash.klex",
+        "settings": {
+          "foreground": "#98C379",
+          "fontStyle": "italic"
+        }
+      },
+      {
+        "scope": "keyword.operator.klex",
+        "settings": {
+          "foreground": "#ABB2BF",
+          "fontStyle": ""
+        }
+      }
+    ]
+  }
+}
