@@ -70,8 +70,9 @@ kLex enforces a strict, explicit type system:
 - **Strict boolean conditions** — only `bool` types are valid in conditionals; integers are not truthy
 - **Lexical scoping** — full closure support with proper environment chaining
 
-## Example
+## Examples
 
+### Recursion and Control Flow
 ```klex
 fn fibonacci(n) {
   if (n <= 1) {
@@ -80,7 +81,78 @@ fn fibonacci(n) {
   return fibonacci(n - 1) + fibonacci(n - 2);
 }
 
-println(fibonacci(10));
+println(fibonacci(10));  // 55
+```
+
+### Pattern Matching with Enums
+```klex
+enum Status { Pending Active Completed }
+
+fn label(status) {
+  switch status {
+    case Status.Pending { return "⏳ Pending" }
+    case Status.Active { return "🔄 Active" }
+    case Status.Completed { return "✓ Completed" }
+  }
+}
+
+println(label(Status.Active));  // 🔄 Active
+```
+
+### Higher-Order Functions and Pipelines
+```klex
+numbers = [1, 2, 3, 4, 5]
+
+result = numbers
+  |> map(fn(x) { x * 2 })        // [2, 4, 6, 8, 10]
+  |> filter(fn(x) { x > 5 })     // [6, 8, 10]
+  |> reduce(fn(acc, x) { acc + x }, 0)  // 24
+
+println(result);
+```
+
+### Structs with Methods
+```klex
+struct Point {
+  x, y
+
+  fn distance() {
+    return math.sqrt(self.x * self.x + self.y * self.y)
+  }
+
+  fn scale(factor) {
+    return Point { x: self.x * factor, y: self.y * factor }
+  }
+}
+
+p = Point { x: 3, y: 4 }
+println(p.distance())      // 5
+println(p.scale(2).x)      // 6
+```
+
+### Closures and First-Class Functions
+```klex
+fn makeAdder(n) {
+  return fn(x) { x + n }
+}
+
+add5 = makeAdder(5)
+add10 = makeAdder(10)
+
+println(add5(3))   // 8
+println(add10(3))  // 13
+```
+
+### Strict Type System (No Implicit Coercion)
+```klex
+// This is strict — no "truthy" integers
+if (1) { println("truthy") }  // TypeError: condition must be bool
+
+// Proper boolean checks
+if (1 > 0) { println("correct") }  // Works
+
+// Type safety in comparisons
+result = 1 == "1"  // TypeError: cannot compare int and string
 ```
 
 ## Testing
