@@ -19,7 +19,7 @@ func init() {
 		}
 		val, set := os.LookupEnv(k.Value)
 		if !set {
-			return &Null{}
+			return NULL
 		}
 		return &String{Value: val}
 	}}
@@ -38,9 +38,9 @@ func init() {
 			return typeError(fmt.Sprintf("_osSetenv: second argument must be string, got %s", args[1].Type()), ast.Pos{})
 		}
 		if err := os.Setenv(k.Value, v.Value); err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
 	// _osCwd() → (path_string, err)
@@ -50,9 +50,9 @@ func init() {
 		}
 		dir, err := os.Getwd()
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: dir}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: dir}, NULL}}
 	}}
 
 	// _osHostname() → (hostname_string, err)
@@ -62,9 +62,9 @@ func init() {
 		}
 		h, err := os.Hostname()
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: h}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: h}, NULL}}
 	}}
 
 	// _osPid() → integer  — current process ID
@@ -100,6 +100,6 @@ func init() {
 			return typeError(fmt.Sprintf("_osExit: argument must be integer, got %s", args[0].Type()), ast.Pos{})
 		}
 		os.Exit(code.Value)
-		return &Null{} // unreachable
+		return NULL // unreachable
 	}}
 }

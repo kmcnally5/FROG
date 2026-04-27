@@ -104,6 +104,15 @@ type Null struct{}
 func (n *Null) Type() ObjectType { return NULL_OBJ }
 func (n *Null) Inspect() string  { return "null" }
 
+// Singletons for immutable constant values — allocated once at startup,
+// reused everywhere. Every comparison, condition, and null check returns
+// one of these, eliminating the most common heap allocations in the evaluator.
+var (
+	TRUE  = &Boolean{Value: true}
+	FALSE = &Boolean{Value: false}
+	NULL  = &Null{}
+)
+
 // -------------------- ERROR --------------------
 
 // ErrorKind distinguishes between type errors (wrong types for an operation)
@@ -409,7 +418,7 @@ func (e *EnumInstance) Inspect() string {
 		}
 		val := e.Fields[name]
 		if val == nil {
-			val = &Null{}
+			val = NULL
 		}
 		out += name + ": " + val.Inspect()
 	}
@@ -449,7 +458,7 @@ func (s *StructInstance) Inspect() string {
 		}
 		val := s.Fields[name]
 		if val == nil {
-			val = &Null{}
+			val = NULL
 		}
 		out += name + ": " + val.Inspect()
 		first = false

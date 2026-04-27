@@ -19,9 +19,9 @@ func init() {
 		}
 		data, err := os.ReadFile(p.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: string(data)}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: string(data)}, NULL}}
 	}}
 
 	// _fsWrite(path, content) → (null, err)  — creates or truncates
@@ -38,9 +38,9 @@ func init() {
 			return typeError(fmt.Sprintf("_fsWrite: second argument must be string, got %s", args[1].Type()), ast.Pos{})
 		}
 		if err := os.WriteFile(p.Value, []byte(content.Value), 0644); err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
 	// _fsAppend(path, content) → (null, err)  — creates or appends
@@ -58,13 +58,13 @@ func init() {
 		}
 		f, err := os.OpenFile(p.Value, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		defer f.Close()
 		if _, err = f.WriteString(content.Value); err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
 	// _fsExists(path) → bool  — no error; false means absent or inaccessible
@@ -90,9 +90,9 @@ func init() {
 			return typeError(fmt.Sprintf("_fsRemove: argument must be string, got %s", args[0].Type()), ast.Pos{})
 		}
 		if err := os.Remove(p.Value); err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
 	// _fsRemoveAll(path) → (null, err)  — removes path and all its contents
@@ -105,9 +105,9 @@ func init() {
 			return typeError(fmt.Sprintf("_fsRemoveAll: argument must be string, got %s", args[0].Type()), ast.Pos{})
 		}
 		if err := os.RemoveAll(p.Value); err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
 	// _fsMkdir(path) → (null, err)  — creates a single directory (parent must exist)
@@ -120,9 +120,9 @@ func init() {
 			return typeError(fmt.Sprintf("_fsMkdir: argument must be string, got %s", args[0].Type()), ast.Pos{})
 		}
 		if err := os.Mkdir(p.Value, 0755); err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
 	// _fsMkdirAll(path) → (null, err)  — creates directory and all missing parents
@@ -135,9 +135,9 @@ func init() {
 			return typeError(fmt.Sprintf("_fsMkdirAll: argument must be string, got %s", args[0].Type()), ast.Pos{})
 		}
 		if err := os.MkdirAll(p.Value, 0755); err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
 	// _fsListDir(path) → (array_of_names, err)  — lists directory entries (names only, sorted)
@@ -151,13 +151,13 @@ func init() {
 		}
 		entries, err := os.ReadDir(p.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		names := make([]Object, len(entries))
 		for i, e := range entries {
 			names[i] = &String{Value: e.Name()}
 		}
-		return &Tuple{Elements: []Object{&Array{Elements: names}, &Null{}}}
+		return &Tuple{Elements: []Object{&Array{Elements: names}, NULL}}
 	}}
 
 	// _fsRename(src, dst) → (null, err)  — renames or moves a file
@@ -174,9 +174,9 @@ func init() {
 			return typeError(fmt.Sprintf("_fsRename: second argument must be string, got %s", args[1].Type()), ast.Pos{})
 		}
 		if err := os.Rename(src.Value, dst.Value); err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
 	// _fsStat(path) → (info_hash, err)
@@ -192,7 +192,7 @@ func init() {
 		}
 		fi, err := os.Stat(p.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		info := &Hash{Pairs: make(map[HashKey]HashPair)}
 		set := func(k string, v Object) {
@@ -203,7 +203,7 @@ func init() {
 		set("size", &Integer{Value: int(fi.Size())})
 		set("isDir", &Boolean{Value: fi.IsDir()})
 		set("modTime", &Integer{Value: int(fi.ModTime().Unix())})
-		return &Tuple{Elements: []Object{info, &Null{}}}
+		return &Tuple{Elements: []Object{info, NULL}}
 	}}
 
 	// _fsCopy(src, dst) → (null, err)  — copies a file byte-for-byte
@@ -221,17 +221,17 @@ func init() {
 		}
 		in, err := os.Open(src.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		defer in.Close()
 		out, err := os.Create(dst.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		defer out.Close()
 		if _, err = io.Copy(out, in); err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 }

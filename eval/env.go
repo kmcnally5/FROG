@@ -1,5 +1,7 @@
 package eval
 
+import "sync"
+
 // env.go implements kLex's variable scoping system.
 //
 // An Environment is a simple map from variable names to Objects.
@@ -26,16 +28,32 @@ package eval
 //   }
 
 // Environment is the variable store with lexical scoping via outer chain.
+//
+// Concurrency model:
+//   shared = true  → this env is accessible by multiple goroutines (only the
+//                    global env, created by NewEnv). All reads and writes are
+//                    guarded by mu.
+//   shared = false → this env is goroutine-local (function frames, loop envs,
+//                    closure call envs). No locking needed; mu is never touched.
+//
+// When a goroutine-local env walks up to a shared outer env, the shared env
+// locks itself — so correctness is preserved without paying mutex overhead on
+// the 99% of envs that are never shared.
 type Environment struct {
+	mu     sync.RWMutex
+	shared bool             // true only for the global env
 	store  map[string]Object // variables defined in this scope
 	consts map[string]bool   // names that cannot be reassigned (nil = none)
 	outer  *Environment      // the enclosing scope, or nil for the global env
 }
 
-// NewEnv creates a fresh top-level (global) environment with no outer scope.
+// NewEnv creates the top-level (global) environment. It is the only env
+// marked shared=true because it is the only one read by multiple goroutines
+// concurrently after async tasks are launched.
 func NewEnv() *Environment {
 	return &Environment{
-		store: make(map[string]Object),
+		shared: true,
+		store:  make(map[string]Object),
 	}
 }
 
@@ -43,11 +61,17 @@ func NewEnv() *Environment {
 // Any subsequent attempt to assign to this name (from any scope that can see it)
 // will produce a RuntimeError.
 func (e *Environment) SetConst(name string, value Object) Object {
+	if e.shared {
+		e.mu.Lock()
+	}
 	if e.consts == nil {
 		e.consts = make(map[string]bool)
 	}
 	e.store[name] = value
 	e.consts[name] = true
+	if e.shared {
+		e.mu.Unlock()
+	}
 	return value
 }
 
@@ -55,27 +79,42 @@ func (e *Environment) SetConst(name string, value Object) Object {
 // this scope chain, or nil if the assignment is permitted.
 // Mirrors Assign's lookup logic: checks current scope first, then walks outer.
 func (e *Environment) CheckWritable(name string) *Error {
-	if e.consts != nil && e.consts[name] {
+	if e.shared {
+		e.mu.RLock()
+	}
+	isConst := e.consts != nil && e.consts[name]
+	_, inStore := e.store[name]
+	if e.shared {
+		e.mu.RUnlock()
+	}
+
+	if isConst {
 		return &Error{Kind: RuntimeErr, Message: "cannot reassign constant " + name}
 	}
-	if _, ok := e.store[name]; ok {
+	if inStore {
 		return nil // found here and not const — writable
 	}
 	if e.outer != nil && e.outer.has(name) {
 		return e.outer.CheckWritable(name)
 	}
-	return nil // not found anywhere — new binding, always allowed
+	return nil
 }
 
 // Get looks up a variable name. It searches:
 //  1. This scope's own store
-//  2. The built-in functions (println, len, push, etc.)
-//  3. The outer (enclosing) scope, recursively
+//  2. The outer (enclosing) scope, recursively
+//  3. The built-in functions (println, len, push, etc.)
 //
 // If nothing is found, it returns (nil, false) and the evaluator will
 // produce an "undefined variable" RuntimeError.
 func (e *Environment) Get(name string) (Object, bool) {
+	if e.shared {
+		e.mu.RLock()
+	}
 	val, ok := e.store[name]
+	if e.shared {
+		e.mu.RUnlock()
+	}
 	if ok {
 		return val, true
 	}
@@ -98,7 +137,13 @@ func (e *Environment) Get(name string) (Object, bool) {
 // Used when we know a variable belongs to the current scope (e.g. function parameters,
 // loop variables in for-in). Do not use for general assignment — use Assign instead.
 func (e *Environment) Set(name string, value Object) Object {
-	e.store[name] = value
+	if e.shared {
+		e.mu.Lock()
+		e.store[name] = value
+		e.mu.Unlock()
+	} else {
+		e.store[name] = value
+	}
 	return value
 }
 
@@ -116,23 +161,48 @@ func (e *Environment) Set(name string, value Object) Object {
 // The tradeoff: a function CAN modify a variable in an outer scope. There is
 // no `local` keyword to prevent this. Assign outer-scope variables intentionally.
 func (e *Environment) Assign(name string, value Object) Object {
-	if _, ok := e.store[name]; ok {
-		e.store[name] = value
-		return value
+	if e.shared {
+		e.mu.Lock()
+		if _, ok := e.store[name]; ok {
+			e.store[name] = value
+			e.mu.Unlock()
+			return value
+		}
+		e.mu.Unlock()
+	} else {
+		if _, ok := e.store[name]; ok {
+			e.store[name] = value
+			return value
+		}
 	}
+
 	if e.outer != nil {
 		if e.outer.has(name) {
 			return e.outer.Assign(name, value)
 		}
 	}
+
 	// Variable not found anywhere — create it in the current scope.
-	e.store[name] = value
+	if e.shared {
+		e.mu.Lock()
+		e.store[name] = value
+		e.mu.Unlock()
+	} else {
+		e.store[name] = value
+	}
 	return value
 }
 
 // has reports whether name exists anywhere in this scope chain.
 func (e *Environment) has(name string) bool {
-	if _, ok := e.store[name]; ok {
+	if e.shared {
+		e.mu.RLock()
+	}
+	_, ok := e.store[name]
+	if e.shared {
+		e.mu.RUnlock()
+	}
+	if ok {
 		return true
 	}
 	if e.outer != nil {

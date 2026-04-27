@@ -23,9 +23,9 @@ func init() {
 		}
 		re, err := regexp.Compile(pat.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Boolean{Value: re.MatchString(str.Value)}, &Null{}}}
+		return &Tuple{Elements: []Object{&Boolean{Value: re.MatchString(str.Value)}, NULL}}
 	}}
 
 	// _regexFind(pattern, str) → (string|null, err)
@@ -44,13 +44,13 @@ func init() {
 		}
 		re, err := regexp.Compile(pat.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		m := re.FindString(str.Value)
 		if m == "" && !re.MatchString(str.Value) {
-			return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+			return &Tuple{Elements: []Object{NULL, NULL}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: m}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: m}, NULL}}
 	}}
 
 	// _regexFindAll(pattern, str) → (array, err)
@@ -69,14 +69,14 @@ func init() {
 		}
 		re, err := regexp.Compile(pat.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		matches := re.FindAllString(str.Value, -1)
 		elems := make([]Object, len(matches))
 		for i, m := range matches {
 			elems[i] = &String{Value: m}
 		}
-		return &Tuple{Elements: []Object{&Array{Elements: elems}, &Null{}}}
+		return &Tuple{Elements: []Object{&Array{Elements: elems}, NULL}}
 	}}
 
 	// _regexReplace(pattern, str, repl) → (string, err)
@@ -99,7 +99,7 @@ func init() {
 		}
 		re, err := regexp.Compile(pat.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		loc := re.FindStringIndex(str.Value)
 		var result string
@@ -108,7 +108,7 @@ func init() {
 		} else {
 			result = str.Value[:loc[0]] + re.ReplaceAllString(str.Value[loc[0]:loc[1]], repl.Value) + str.Value[loc[1]:]
 		}
-		return &Tuple{Elements: []Object{&String{Value: result}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: result}, NULL}}
 	}}
 
 	// _regexReplaceAll(pattern, str, repl) → (string, err)
@@ -131,9 +131,9 @@ func init() {
 		}
 		re, err := regexp.Compile(pat.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: re.ReplaceAllString(str.Value, repl.Value)}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: re.ReplaceAllString(str.Value, repl.Value)}, NULL}}
 	}}
 
 	// _regexSplit(pattern, str) → (array, err)
@@ -152,14 +152,14 @@ func init() {
 		}
 		re, err := regexp.Compile(pat.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		parts := re.Split(str.Value, -1)
 		elems := make([]Object, len(parts))
 		for i, p := range parts {
 			elems[i] = &String{Value: p}
 		}
-		return &Tuple{Elements: []Object{&Array{Elements: elems}, &Null{}}}
+		return &Tuple{Elements: []Object{&Array{Elements: elems}, NULL}}
 	}}
 
 	// _regexGroups(pattern, str) → (array|null, err)
@@ -179,17 +179,17 @@ func init() {
 		}
 		re, err := regexp.Compile(pat.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		sub := re.FindStringSubmatch(str.Value)
 		if sub == nil {
-			return &Tuple{Elements: []Object{&Null{}, &Null{}}}
+			return &Tuple{Elements: []Object{NULL, NULL}}
 		}
 		elems := make([]Object, len(sub))
 		for i, s := range sub {
 			elems[i] = &String{Value: s}
 		}
-		return &Tuple{Elements: []Object{&Array{Elements: elems}, &Null{}}}
+		return &Tuple{Elements: []Object{&Array{Elements: elems}, NULL}}
 	}}
 
 	// _regexGroupsAll(pattern, str) → (array_of_arrays, err)
@@ -209,7 +209,7 @@ func init() {
 		}
 		re, err := regexp.Compile(pat.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		allSubs := re.FindAllStringSubmatch(str.Value, -1)
 		outer := make([]Object, len(allSubs))
@@ -220,6 +220,6 @@ func init() {
 			}
 			outer[i] = &Array{Elements: inner}
 		}
-		return &Tuple{Elements: []Object{&Array{Elements: outer}, &Null{}}}
+		return &Tuple{Elements: []Object{&Array{Elements: outer}, NULL}}
 	}}
 }

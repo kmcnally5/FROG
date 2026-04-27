@@ -67,7 +67,7 @@ var Builtins = map[string]*Builtin{
 		for _, arg := range args {
 			fmt.Fprintln(Output, arg.Inspect())
 		}
-		return &Null{}
+		return NULL
 	}},
 	"len": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
@@ -149,7 +149,7 @@ var Builtins = map[string]*Builtin{
 			return err
 		}
 		delete(hash.Pairs, hk)
-		return &Null{}
+		return NULL
 	}},
 	// print outputs a value without a trailing newline.
 	// Useful for building output on a single line across multiple calls.
@@ -157,7 +157,7 @@ var Builtins = map[string]*Builtin{
 		for _, arg := range args {
 			fmt.Print(arg.Inspect())
 		}
-		return &Null{}
+		return NULL
 	}},
 	// type returns the runtime type name of any value as a string.
 	// Useful for debugging: type(42) → "INTEGER", type("hi") → "STRING"
@@ -494,7 +494,7 @@ var Builtins = map[string]*Builtin{
 		}
 		val, set := os.LookupEnv(name.Value)
 		if !set {
-			return &Null{}
+			return NULL
 		}
 		return &String{Value: val}
 	}},
@@ -533,7 +533,7 @@ var Builtins = map[string]*Builtin{
 		if err != nil {
 			return runtimeError(fmt.Sprintf("writeFile: %s", err.Error()), ast.Pos{})
 		}
-		return &Null{}
+		return NULL
 	}},
 	// appendFile appends a string to a file, creating it if it does not exist.
 	// On failure returns a runtime error.
@@ -557,7 +557,7 @@ var Builtins = map[string]*Builtin{
 		if _, err = f.WriteString(content.Value); err != nil {
 			return runtimeError(fmt.Sprintf("appendFile: %s", err.Error()), ast.Pos{})
 		}
-		return &Null{}
+		return NULL
 	}},
 	// exec runs an external binary and returns its stdout as a string.
 	// The first argument is the command name or path; the second is an array
@@ -646,7 +646,7 @@ var Builtins = map[string]*Builtin{
 		if !ok {
 			return typeError(fmt.Sprintf("send: first argument must be a channel, got %s", args[0].Type()), ast.Pos{})
 		}
-		var result Object = &Null{}
+		var result Object = NULL
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -655,9 +655,9 @@ var Builtins = map[string]*Builtin{
 			}()
 			select {
 			case ch.ch <- args[1]:
-				result = &Null{}
+				result = NULL
 			case <-ch.done:
-				result = &Boolean{Value: false}
+				result = FALSE
 			}
 		}()
 		return result
@@ -680,7 +680,7 @@ var Builtins = map[string]*Builtin{
 			defer func() { recover() }()
 			close(ch.done)
 		}()
-		return &Null{}
+		return NULL
 	}},
 
 	// isError returns true if val is a RuntimeError or TypeError produced by the
@@ -709,7 +709,7 @@ var Builtins = map[string]*Builtin{
 			return typeError(fmt.Sprintf("assert: condition must be bool, got %s", args[0].Type()), ast.Pos{})
 		}
 		if cond.Value {
-			return &Null{}
+			return NULL
 		}
 		msg := "assert: condition is false"
 		if len(args) == 2 {
@@ -736,9 +736,9 @@ var Builtins = map[string]*Builtin{
 		}
 		val, open := <-ch.ch
 		if !open {
-			return &Tuple{Elements: []Object{&Null{}, &Boolean{Value: false}}}
+			return &Tuple{Elements: []Object{NULL, FALSE}}
 		}
-		return &Tuple{Elements: []Object{val, &Boolean{Value: true}}}
+		return &Tuple{Elements: []Object{val, TRUE}}
 	}},
 
 	// close signals that no more values will be sent on the channel.
@@ -752,7 +752,7 @@ var Builtins = map[string]*Builtin{
 		if !ok {
 			return typeError(fmt.Sprintf("close: argument must be a channel, got %s", args[0].Type()), ast.Pos{})
 		}
-		var result Object = &Null{}
+		var result Object = NULL
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -775,7 +775,7 @@ var Builtins = map[string]*Builtin{
 			return typeError(fmt.Sprintf("sleep: argument must be an integer (milliseconds), got %s", args[0].Type()), ast.Pos{})
 		}
 		time.Sleep(time.Duration(ms.Value) * time.Millisecond)
-		return &Null{}
+		return NULL
 	}},
 }
 
@@ -924,7 +924,7 @@ func init() {
 				if e.Kind == TypeError {
 					code = "TYPE_ERROR"
 				}
-				return &Tuple{Elements: []Object{&Null{}, &Error{IsUserError: true, Code: code, Message: e.Message}}}
+				return &Tuple{Elements: []Object{NULL, &Error{IsUserError: true, Code: code, Message: e.Message}}}
 			}
 		case *Builtin:
 			result = fn.Fn(callArgs)
@@ -934,7 +934,7 @@ func init() {
 				if e.Kind == TypeError {
 					code = "TYPE_ERROR"
 				}
-				return &Tuple{Elements: []Object{&Null{}, &Error{IsUserError: true, Code: code, Message: e.Message}}}
+				return &Tuple{Elements: []Object{NULL, &Error{IsUserError: true, Code: code, Message: e.Message}}}
 			}
 		default:
 			return typeError(fmt.Sprintf("safe: first argument must be function, got %s", args[0].Type()), ast.Pos{})
@@ -942,7 +942,7 @@ func init() {
 		if t, ok := result.(*Tuple); ok {
 			return t
 		}
-		return &Tuple{Elements: []Object{result, &Null{}}}
+		return &Tuple{Elements: []Object{result, NULL}}
 	}}
 
 	// async launches a function in a background goroutine and returns a Task
@@ -1071,7 +1071,7 @@ func applyFunction(fn *Function, args []Object) (Object, Object) {
 			return nil, errObj
 		}
 	}
-	var result Object = &Null{}
+	var result Object = NULL
 	for _, node := range fn.Body {
 		result = Eval(node, env)
 		if isReturn(result) {
@@ -1197,7 +1197,7 @@ func evalEquals(left, right Object, pos ast.Pos) Object {
 		case *EnumInstance:
 			// handled below after the type check
 		default:
-			return &Boolean{Value: false}
+			return FALSE
 		}
 	}
 	if lv, ok := left.(*EnumVariant); ok {
@@ -1207,7 +1207,7 @@ func evalEquals(left, right Object, pos ast.Pos) Object {
 		case *EnumVariant:
 			return &Boolean{Value: lv.TypeName == r.TypeName && lv.VariantName == r.VariantName}
 		default:
-			return &Boolean{Value: false}
+			return FALSE
 		}
 	}
 
@@ -1230,25 +1230,25 @@ func evalEquals(left, right Object, pos ast.Pos) Object {
 	case *EnumInstance:
 		r := right.(*EnumInstance)
 		if l.TypeName != r.TypeName || l.VariantName != r.VariantName {
-			return &Boolean{Value: false}
+			return FALSE
 		}
 		for name, lv := range l.Fields {
 			rv, ok := r.Fields[name]
 			if !ok {
-				return &Boolean{Value: false}
+				return FALSE
 			}
 			eq := evalEquals(lv, rv, pos)
 			if isError(eq) {
 				return eq
 			}
 			if !eq.(*Boolean).Value {
-				return &Boolean{Value: false}
+				return FALSE
 			}
 		}
-		return &Boolean{Value: true}
+		return TRUE
 	}
 
-	return &Boolean{Value: false}
+	return FALSE
 }
 
 // evalOrderCompare handles <, >, <=, >= for integers, floats, and strings.
@@ -1301,10 +1301,10 @@ func evalLogical(n *ast.InfixExpr, env *Environment) Object {
 	}
 	lval := left.(*Boolean).Value
 	if n.Operator == "&&" && !lval {
-		return &Boolean{Value: false}
+		return FALSE
 	}
 	if n.Operator == "||" && lval {
-		return &Boolean{Value: true}
+		return TRUE
 	}
 	right := Eval(n.Right, env)
 	if isError(right) {
@@ -1397,7 +1397,7 @@ func evalCall(c *ast.CallExpr, env *Environment) Object {
 			}
 		}
 
-		var result Object = &Null{}
+		var result Object = NULL
 		for _, node := range fn.Body {
 			result = Eval(node, newEnv)
 			if isReturn(result) {
@@ -1448,7 +1448,7 @@ func Eval(node ast.Node, env *Environment) Object {
 	// context) are programming errors — convert them to RuntimeErrors rather
 	// than silently swallowing them.
 	case *ast.Program:
-		var result Object = &Null{}
+		var result Object = NULL
 		for _, stmt := range n.Statements {
 			result = Eval(stmt, env)
 			if isError(result) {
@@ -1710,7 +1710,7 @@ func Eval(node ast.Node, env *Environment) Object {
 				}
 			}
 			if matched {
-				var result Object = &Null{}
+				var result Object = NULL
 				for _, stmt := range sc.Body {
 					result = Eval(stmt, matchEnv)
 					if isReturn(result) || isError(result) || isBreak(result) || isContinue(result) {
@@ -1722,7 +1722,7 @@ func Eval(node ast.Node, env *Environment) Object {
 		}
 		// No case matched — run default if present.
 		if n.HasDefault {
-			var result Object = &Null{}
+			var result Object = NULL
 			for _, stmt := range n.Default {
 				result = Eval(stmt, env)
 				if isReturn(result) || isError(result) || isBreak(result) || isContinue(result) {
@@ -1743,7 +1743,7 @@ func Eval(node ast.Node, env *Environment) Object {
 				)
 			}
 		}
-		return &Null{}
+		return NULL
 
 	// ---------------- SELECT ----------------
 	// Blocks until one channel operation can proceed, then runs that case's body.
@@ -1813,7 +1813,7 @@ func Eval(node ast.Node, env *Environment) Object {
 			if recvOK {
 				val = recvVal.Interface().(Object)
 			} else {
-				val = &Null{}
+				val = NULL
 			}
 			ok := &Boolean{Value: recvOK}
 			if len(sc.Vars) >= 1 && sc.Vars[0] != "_" {
@@ -1830,7 +1830,7 @@ func Eval(node ast.Node, env *Environment) Object {
 			}
 		}
 
-		var result Object = &Null{}
+		var result Object = NULL
 		for _, stmt := range sc.Body {
 			result = Eval(stmt, caseEnv)
 			if isReturn(result) || isError(result) || isBreak(result) || isContinue(result) {
@@ -1858,7 +1858,7 @@ func Eval(node ast.Node, env *Environment) Object {
 					return result
 				}
 				if isBreak(result) {
-					return &Null{}
+					return NULL
 				}
 				if isContinue(result) {
 					break
@@ -1867,7 +1867,7 @@ func Eval(node ast.Node, env *Environment) Object {
 			return nil // nil = keep going
 		}
 
-		var result Object = &Null{}
+		var result Object = NULL
 
 		addBinding := func(m map[string]Object, name string, val Object) {
 			if name != "_" {
@@ -1887,7 +1887,7 @@ func Eval(node ast.Node, env *Environment) Object {
 				}
 				if r := runBody(bindings); r != nil {
 					if isBreak(r) {
-						return &Null{}
+						return NULL
 					}
 					return r
 				}
@@ -1902,7 +1902,7 @@ func Eval(node ast.Node, env *Environment) Object {
 				addBinding(bindings, n.ValueVar, pair.Value)
 				if r := runBody(bindings); r != nil {
 					if isBreak(r) {
-						return &Null{}
+						return NULL
 					}
 					return r
 				}
@@ -1920,7 +1920,7 @@ func Eval(node ast.Node, env *Environment) Object {
 							defer func() { recover() }()
 							close(coll.done)
 						}()
-						return &Null{}
+						return NULL
 					}
 					return r
 				}
@@ -1937,7 +1937,7 @@ func Eval(node ast.Node, env *Environment) Object {
 	// so the outer for{} loop re-evaluates the condition on the next iteration.
 	// ReturnValue and errors pass through unchanged — they unwind the call stack.
 	case *ast.WhileStmt:
-		var result Object = &Null{}
+		var result Object = NULL
 		for {
 			cond := Eval(n.Condition, env)
 			if isError(cond) {
@@ -1963,7 +1963,7 @@ func Eval(node ast.Node, env *Environment) Object {
 					return result
 				}
 				if isBreak(result) {
-					return &Null{}
+					return NULL
 				}
 				if isContinue(result) {
 					break // skip remaining stmts, outer for{} re-evaluates condition
@@ -2004,7 +2004,7 @@ func Eval(node ast.Node, env *Environment) Object {
 		}
 
 		if b {
-			var result Object = &Null{}
+			var result Object = NULL
 			for _, stmt := range n.Body {
 				result = Eval(stmt, env)
 				if isError(result) || isReturn(result) || isBreak(result) || isContinue(result) {
@@ -2015,7 +2015,7 @@ func Eval(node ast.Node, env *Environment) Object {
 		}
 
 		if n.ElseBody != nil {
-			var result Object = &Null{}
+			var result Object = NULL
 			for _, stmt := range n.ElseBody {
 				result = Eval(stmt, env)
 				if isError(result) || isReturn(result) || isBreak(result) || isContinue(result) {
@@ -2025,7 +2025,7 @@ func Eval(node ast.Node, env *Environment) Object {
 			return result
 		}
 
-		return &Null{}
+		return NULL
 
 	// ---------------- TUPLE LITERAL ----------------
 	// Produced by `return a, b` — evaluates each element and wraps them in a Tuple.
@@ -2135,7 +2135,7 @@ func Eval(node ast.Node, env *Environment) Object {
 			pair, ok := l.Pairs[hk]
 			if !ok {
 				// Missing key returns null, not an error — enables `m["k"] == null` checks.
-				return &Null{}
+				return NULL
 			}
 			return pair.Value
 		case *String:
@@ -2351,7 +2351,7 @@ func Eval(node ast.Node, env *Environment) Object {
 	// ---------------- LITERALS ----------------
 	// Leaf nodes — they just produce their value directly.
 	case *ast.NullLiteral:
-		return &Null{}
+		return NULL
 
 	case *ast.BoolLiteral:
 		return &Boolean{Value: n.Value}
@@ -2542,5 +2542,5 @@ func Eval(node ast.Node, env *Environment) Object {
 
 	}
 
-	return &Null{}
+	return NULL
 }

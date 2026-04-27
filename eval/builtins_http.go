@@ -123,7 +123,7 @@ func init() {
 			&Integer{Value: resp.StatusCode},
 			&String{Value: string(respBytes)},
 			headersHash,
-			&Null{},
+			NULL,
 		}}
 	}}
 }
@@ -213,7 +213,7 @@ func init() {
 			req.respCh <- extractServeResponse(result)
 		}
 
-		return &Null{}
+		return NULL
 	}}
 }
 

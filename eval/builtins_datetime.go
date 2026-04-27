@@ -92,6 +92,6 @@ func init() {
 		if err != nil {
 			return &Tuple{Elements: []Object{&Integer{Value: 0}, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&Integer{Value: int(t.Unix())}, &Null{}}}
+		return &Tuple{Elements: []Object{&Integer{Value: int(t.Unix())}, NULL}}
 	}}
 }

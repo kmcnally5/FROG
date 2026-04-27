@@ -33,9 +33,9 @@ func init() {
 			if se := strings.TrimSpace(stderr.String()); se != "" {
 				msg = se
 			}
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: msg}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: msg}}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: stdout.String()}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: stdout.String()}, NULL}}
 	}}
 
 	// _processExec(cmd, args) → (stdout, stderr, exitCode, err)
@@ -66,7 +66,7 @@ func init() {
 			} else {
 				// process could not start
 				return &Tuple{Elements: []Object{
-					&Null{}, &Null{},
+					NULL, NULL,
 					&Integer{Value: -1},
 					&String{Value: runErr.Error()},
 				}}
@@ -76,7 +76,7 @@ func init() {
 			&String{Value: stdout.String()},
 			&String{Value: stderr.String()},
 			&Integer{Value: exitCode},
-			&Null{},
+			NULL,
 		}}
 	}}
 
@@ -99,9 +99,9 @@ func init() {
 			if se := strings.TrimSpace(stderr.String()); se != "" {
 				msg = se
 			}
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: msg}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: msg}}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: stdout.String()}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: stdout.String()}, NULL}}
 	}}
 }
 

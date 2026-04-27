@@ -31,8 +31,8 @@ func init() {
 		}
 		decoded, err := url.QueryUnescape(s.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: decoded}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: decoded}, NULL}}
 	}}
 }

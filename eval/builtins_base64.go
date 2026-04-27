@@ -30,9 +30,9 @@ func init() {
 		}
 		b, err := base64.StdEncoding.DecodeString(s.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: string(b)}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: string(b)}, NULL}}
 	}}
 
 	// _base64UrlEncode(s) → string  — URL-safe base64, no padding
@@ -58,8 +58,8 @@ func init() {
 		}
 		b, err := base64.RawURLEncoding.DecodeString(s.Value)
 		if err != nil {
-			return &Tuple{Elements: []Object{&Null{}, &String{Value: err.Error()}}}
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
-		return &Tuple{Elements: []Object{&String{Value: string(b)}, &Null{}}}
+		return &Tuple{Elements: []Object{&String{Value: string(b)}, NULL}}
 	}}
 }
