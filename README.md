@@ -9,6 +9,8 @@ It is my hope that by enforcing a more rigid, opinionated syntax, I can improve 
 
 FROG demonstrates the complete pipeline of a programming language: Lexer → Parser → AST → Evaluator → Environment.  For indepth language reading please find the KLEX_GRAMMER.TXT and KLEX_LANGUAGE.TXT files in the /docs/ folder.
 
+Architected and Designed by Karl McNally. Implementation assisted by AI-augmented workflows.
+
 ## Try it Online
 
 **[Launch the kLex REPL](https://kmcnally5.github.io/FROG/playground/)** — run kLex code directly in your browser, no installation required.
