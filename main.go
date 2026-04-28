@@ -29,7 +29,7 @@ import (
 	"os"
 )
 
-const Version = "v0.2.45r"
+const Version = "v0.3.1"
 
 func main() {
 	eval.KLexVersion = Version
