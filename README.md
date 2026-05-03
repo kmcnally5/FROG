@@ -29,7 +29,7 @@ The REPL supports multi-line input (automatically detects when blocks are comple
 
 Syntax highlighting is available for both **Vim** and **VSCode**:
 
-- **VSCode**: Download the extension from [`editors/vscode/`](editors/vscode_froglsp/) — follow the included README for installation.
+- **VSCode**: Download the extension from [`editors/vscode_froglsp/`](editors/vscode_froglsp/) — follow the included README for installation.
 - **Vim**: Download the syntax files from [`editors/vim/`](editors/vim/) — see included instructions for setup.
 
 These syntax plugins provide language-aware highlighting and integrate `.lex` file recognition into your editor.
