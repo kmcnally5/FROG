@@ -32,7 +32,7 @@ import (
 	"runtime/pprof"
 )
 
-const Version = "v0.3.11x"
+const Version = "v0.3.31"
 
 func main() {
 	eval.KLexVersion = Version
