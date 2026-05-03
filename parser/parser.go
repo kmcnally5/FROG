@@ -856,14 +856,30 @@ func (p *Parser) parseFunctionBody() *ast.FunctionLiteral {
 	}
 	p.nextToken() // move past '('
 
-	// Parse parameter names, separated by commas.
-	// A parameter may carry a default value:  name = expr
-	// Parameters with defaults must follow all required parameters.
-	// A trailing ... on the last parameter makes the function variadic.
+	// Parse parameter names with optional type annotations.
+	// Type-first annotation syntax: type name or type name = default
+	// Variadic: type ...name
+	// All-or-nothing rule: either all params annotated or none.
 	seenDefault := false
+	var annotatedCount int
 	for p.curToken.Type != lexer.TokenRParen && p.curToken.Type != lexer.TokenEOF {
 		if p.curToken.Type == lexer.TokenIdent {
-			fn.Params = append(fn.Params, p.curToken.Literal)
+			// Check for type-first annotation: if curToken is IDENT and peekToken is also IDENT,
+			// then curToken is the type and peekToken is the param name.
+			// Note: TokenEllipsis after a param name means variadic, not a type annotation.
+			var paramType string
+			paramName := p.curToken.Literal
+
+			if p.peekToken.Type == lexer.TokenIdent {
+				// Type annotation detected (next token is another identifier, so current is type name)
+				paramType = p.curToken.Literal
+				annotatedCount++
+				p.nextToken() // advance to param name
+				paramName = p.curToken.Literal
+			}
+
+			fn.Params = append(fn.Params, paramName)
+			fn.ParamTypes = append(fn.ParamTypes, paramType)
 
 			if p.peekToken.Type == lexer.TokenEllipsis {
 				fn.Defaults = append(fn.Defaults, nil)
@@ -882,7 +898,7 @@ func (p *Parser) parseFunctionBody() *ast.FunctionLiteral {
 				seenDefault = true
 			} else {
 				if seenDefault {
-					p.addError("required parameter " + p.curToken.Literal + " cannot follow a parameter with a default value")
+					p.addError("required parameter " + paramName + " cannot follow a parameter with a default value")
 				}
 				fn.Defaults = append(fn.Defaults, nil)
 			}
@@ -893,6 +909,23 @@ func (p *Parser) parseFunctionBody() *ast.FunctionLiteral {
 		} else {
 			p.nextToken()
 		}
+	}
+
+	// Enforce all-or-nothing: either all params annotated or none
+	if annotatedCount > 0 && annotatedCount < len(fn.Params) {
+		p.addError("all parameters must be annotated or none — cannot mix annotated and unannotated parameters")
+		return nil
+	}
+
+	// Check for return type annotation: ) : type {
+	if p.peekToken.Type == lexer.TokenColon {
+		p.nextToken() // consume ':'
+		if p.peekToken.Type != lexer.TokenIdent {
+			p.addError("expected type name after ':'")
+			return nil
+		}
+		p.nextToken() // move to type name
+		fn.ReturnType = p.curToken.Literal
 	}
 
 	if !p.expectPeek(lexer.TokenLBrace) {
@@ -1137,12 +1170,14 @@ func (p *Parser) parseStruct() ast.Node {
 				return nil
 			}
 			decl.Methods = append(decl.Methods, &ast.MethodDecl{
-				Pos:      mpos,
-				Name:     mname,
-				Params:   lit.Params,
-				Defaults: lit.Defaults,
-				Variadic: lit.Variadic,
-				Body:     lit.Body,
+				Pos:        mpos,
+				Name:       mname,
+				Params:     lit.Params,
+				ParamTypes: lit.ParamTypes,
+				Defaults:   lit.Defaults,
+				Variadic:   lit.Variadic,
+				ReturnType: lit.ReturnType,
+				Body:       lit.Body,
 			})
 			p.nextToken() // advance past the method's last token ('}')
 			continue

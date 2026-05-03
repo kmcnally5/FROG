@@ -195,10 +195,12 @@ func (b *BoolLiteral) TokenLiteral() string {
 // so that "foo" ends up in scope like any other variable.
 type FunctionLiteral struct {
 	Pos
-	Params   []string // parameter names in declaration order
-	Defaults []Node   // parallel to Params; nil entry means the param is required
-	Variadic bool     // true if the last param collects remaining args as an array
-	Body     []Node   // the statements inside the function body
+	Params      []string // parameter names in declaration order
+	ParamTypes  []string // parallel to Params; "" means unannotated
+	Defaults    []Node   // parallel to Params; nil entry means the param is required
+	Variadic    bool     // true if the last param collects remaining args as an array
+	ReturnType  string   // "" means no return type annotation
+	Body        []Node   // the statements inside the function body
 }
 
 func (f *FunctionLiteral) TokenLiteral() string { return "fn" }
@@ -377,11 +379,13 @@ func (d *DotAssignStmt) TokenLiteral() string { return ".=" }
 // MethodDecl is a method inside a struct body: fn name(params) { body }
 type MethodDecl struct {
 	Pos
-	Name     string
-	Params   []string
-	Defaults []Node // parallel to Params; nil entry means the param is required
-	Variadic bool
-	Body     []Node
+	Name        string
+	Params      []string
+	ParamTypes  []string // parallel to Params; "" means unannotated
+	Defaults    []Node   // parallel to Params; nil entry means the param is required
+	Variadic    bool
+	ReturnType  string   // "" means no return type annotation
+	Body        []Node
 }
 
 func (m *MethodDecl) TokenLiteral() string { return "method" }

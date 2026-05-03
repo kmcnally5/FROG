@@ -19,7 +19,11 @@ package eval
 import (
 	"fmt"
 	"klex/ast"
+	"net"
 	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 // ObjectType is a string tag naming the runtime type of a value.
@@ -45,6 +49,7 @@ const (
 	STRUCT_DEF_OBJ  ObjectType = "STRUCT_DEF"
 	STRUCT_INST_OBJ ObjectType = "STRUCT"
 	CHANNEL_OBJ     ObjectType = "CHANNEL"
+	NET_CONN_OBJ    ObjectType = "NET_CONN"
 	ENUM_DEF_OBJ    ObjectType = "ENUM_DEF"
 	ENUM_VARIANT_OBJ ObjectType = "ENUM_VARIANT"
 	ENUM_OBJ        ObjectType = "ENUM"
@@ -255,14 +260,16 @@ type Array struct {
 
 func (a *Array) Type() ObjectType { return ARRAY_OBJ }
 func (a *Array) Inspect() string {
-	out := "["
+	var buf strings.Builder
+	buf.WriteString("[")
 	for i, el := range a.Elements {
 		if i > 0 {
-			out += ", "
+			buf.WriteString(", ")
 		}
-		out += el.Inspect()
+		buf.WriteString(el.Inspect())
 	}
-	return out + "]"
+	buf.WriteString("]")
+	return buf.String()
 }
 
 // -------------------- TUPLE --------------------
@@ -278,14 +285,16 @@ type Tuple struct {
 
 func (t *Tuple) Type() ObjectType { return TUPLE_OBJ }
 func (t *Tuple) Inspect() string {
-	out := "("
+	var buf strings.Builder
+	buf.WriteString("(")
 	for i, el := range t.Elements {
 		if i > 0 {
-			out += ", "
+			buf.WriteString(", ")
 		}
-		out += el.Inspect()
+		buf.WriteString(el.Inspect())
 	}
-	return out + ")"
+	buf.WriteString(")")
+	return buf.String()
 }
 
 // -------------------- HASH --------------------
@@ -317,16 +326,20 @@ type Hash struct {
 
 func (h *Hash) Type() ObjectType { return HASH_OBJ }
 func (h *Hash) Inspect() string {
-	out := "{"
+	var buf strings.Builder
+	buf.WriteString("{")
 	first := true
 	for _, pair := range h.Pairs {
 		if !first {
-			out += ", "
+			buf.WriteString(", ")
 		}
-		out += pair.Key.Inspect() + ": " + pair.Value.Inspect()
+		buf.WriteString(pair.Key.Inspect())
+		buf.WriteString(": ")
+		buf.WriteString(pair.Value.Inspect())
 		first = false
 	}
-	return out + "}"
+	buf.WriteString("}")
+	return buf.String()
 }
 
 // -------------------- MODULE --------------------
@@ -350,12 +363,33 @@ func (m *Module) Inspect() string  { return "module(" + m.Name + ")" }
 // Reading result after <-done is safe without a mutex: the Go memory model
 // guarantees that writes before close(done) are visible after <-done returns.
 type Task struct {
-	done   chan struct{}
+	done   atomic.Bool
 	result Object
 }
 
 func (t *Task) Type() ObjectType { return TASK_OBJ }
 func (t *Task) Inspect() string  { return "task" }
+
+// taskPool reuses Task objects to reduce allocation overhead.
+var taskPool = sync.Pool{
+	New: func() interface{} {
+		return &Task{}
+	},
+}
+
+// getTask retrieves a Task from the pool or allocates a new one.
+// Caller must call returnTask() when done to return it to the pool.
+func getTask() *Task {
+	task := taskPool.Get().(*Task)
+	task.done.Store(false)
+	task.result = nil
+	return task
+}
+
+// returnTask returns a Task to the pool for reuse.
+func returnTask(task *Task) {
+	taskPool.Put(task)
+}
 
 // -------------------- CHANNEL --------------------
 
@@ -373,6 +407,22 @@ type Channel struct {
 
 func (c *Channel) Type() ObjectType { return CHANNEL_OBJ }
 func (c *Channel) Inspect() string  { return fmt.Sprintf("channel(cap=%d)", cap(c.ch)) }
+
+// -------------------- NET_CONN --------------------
+
+// NetConn wraps a net.Conn for use in kLex programs.
+// Produced by tcpDial and tcpListen; consumed by netRead, netWrite, netClose.
+type NetConn struct {
+	Conn net.Conn
+}
+
+func (n *NetConn) Type() ObjectType { return NET_CONN_OBJ }
+func (n *NetConn) Inspect() string {
+	if n.Conn == nil {
+		return "conn(closed)"
+	}
+	return "conn(" + n.Conn.RemoteAddr().String() + ")"
+}
 
 // -------------------- ENUM --------------------
 
@@ -411,18 +461,25 @@ func (e *EnumInstance) Inspect() string {
 	if len(e.FieldNames) == 0 {
 		return e.TypeName + "." + e.VariantName
 	}
-	out := e.TypeName + "." + e.VariantName + "("
+	var buf strings.Builder
+	buf.WriteString(e.TypeName)
+	buf.WriteString(".")
+	buf.WriteString(e.VariantName)
+	buf.WriteString("(")
 	for i, name := range e.FieldNames {
 		if i > 0 {
-			out += ", "
+			buf.WriteString(", ")
 		}
 		val := e.Fields[name]
 		if val == nil {
 			val = NULL
 		}
-		out += name + ": " + val.Inspect()
+		buf.WriteString(name)
+		buf.WriteString(": ")
+		buf.WriteString(val.Inspect())
 	}
-	return out + ")"
+	buf.WriteString(")")
+	return buf.String()
 }
 
 // -------------------- STRUCT DEF --------------------
@@ -450,20 +507,25 @@ type StructInstance struct {
 
 func (s *StructInstance) Type() ObjectType { return STRUCT_INST_OBJ }
 func (s *StructInstance) Inspect() string {
-	out := s.Def.Name + " {"
+	var buf strings.Builder
+	buf.WriteString(s.Def.Name)
+	buf.WriteString(" {")
 	first := true
 	for _, name := range s.Def.Fields {
 		if !first {
-			out += ", "
+			buf.WriteString(", ")
 		}
 		val := s.Fields[name]
 		if val == nil {
 			val = NULL
 		}
-		out += name + ": " + val.Inspect()
+		buf.WriteString(name)
+		buf.WriteString(": ")
+		buf.WriteString(val.Inspect())
 		first = false
 	}
-	return out + "}"
+	buf.WriteString("}")
+	return buf.String()
 }
 
 // -------------------- BUILTIN --------------------

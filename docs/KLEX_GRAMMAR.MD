@@ -54,6 +54,11 @@ switch  case  default  struct  enum  select  let  import  as
 true  false  null
 ```
 
+**IMPORTANT:** `fn` is a reserved keyword and cannot be used as a parameter name
+or variable name. Using `fn` as a parameter causes the parser to miscount the
+function's arity, leading to "expects N argument(s), got M" errors. Use alternative
+names: `func`, `f`, `callback`, `fn_arg`, etc.
+
 ### Numeric Literals
 
 ```
@@ -228,9 +233,10 @@ import_stmt  = "import" STRING "as" IDENT
                   each import evaluates the file independently — no caching;
                   import cycles are detected and reported as a RuntimeError *)
 
-named_fn_stmt= "fn" IDENT "(" params ")" block
+named_fn_stmt= "fn" IDENT "(" [ params ] ")" [ ":" type_name ] block
                (* syntactic sugar — desugared at parse time to:
-                  IDENT = fn( params ) { body } *)
+                  IDENT = fn( params ): type_name { body }
+                  Type annotation is optional. *)
 
 struct_decl  = "struct" IDENT "{"
                  { field_list | method_decl }
@@ -240,9 +246,10 @@ field_list   = IDENT { "," IDENT }
                (* one or more field names on the same "line";
                   fields and methods may be interleaved freely *)
 
-method_decl  = "fn" IDENT "(" params ")" block
+method_decl  = "fn" IDENT "(" [ params ] ")" [ ":" type_name ] block
                (* methods have access to the instance via the implicit
-                  identifier `self`; `self` is injected at call time *)
+                  identifier `self`; `self` is injected at call time.
+                  Type annotations follow the same rules as functions. *)
 
 enum_decl    = "enum" IDENT "{"
                  { variant_decl }
@@ -401,8 +408,23 @@ hash_literal = "{" [ pair { "," pair } ] "}"
 
 pair         = expression ":" expression
 
-fn_literal   = "fn" "(" params ")" block
+fn_literal   = "fn" "(" [ params ] ")" [ ":" type_name ] block
              (* anonymous function; use named_fn_stmt for top-level named fns *)
+
+params       = param { "," param }
+
+param        = [ type_name ] IDENT [ "?" ] [ "..." ]
+             (* Type annotation is optional, but if ANY param has a type,
+                ALL params must have types (all-or-nothing rule).
+                "?" indicates a default value follows (not shown here for brevity).
+                "..." makes this param variadic (must be the last param).
+                Order: [type] name [?] [...] *)
+
+type_name    = IDENT
+             (* Valid type names: integer, float, string, boolean, array, hash,
+                function, null, task, channel, error, tuple, struct.
+                Type names are plain identifiers (not reserved keywords);
+                any identifier can be used as a type. *)
 ```
 
 ### String Interpolation
@@ -516,6 +538,14 @@ These are not grammar rules but are listed here because they shape what programs
 
 * Struct literals must initialise every declared field exactly once. Missing fields and unknown fields are both `RuntimeError`s.
 
+* **Type Annotation Rules** (optional annotations for documentation):
+  * Type annotations on function parameters and return types are optional.
+  * If ANY parameter in a function has a type annotation, ALL parameters must have type annotations (all-or-nothing rule). Mixing annotated and unannotated parameters is a `ParseError`.
+  * Return type annotations are optional even when parameters are annotated.
+  * Type annotations are not enforced at runtime and do not affect runtime behavior.
+  * Valid type names are plain identifiers: `integer`, `float`, `string`, `boolean`, `array`, `hash`, `function`, `null`, `task`, `channel`, `error`, `tuple`, `struct`.
+  * Type annotations are available for IDE hover tooltips and code documentation.
+
 * Multi-assign requires the right-hand side to be a `Tuple` with exactly as many elements as there are names on the left.
 
 * `"break"` and `"continue"` are loop-local. They do not propagate through function call boundaries. Using either outside a loop is a `RuntimeError`.
@@ -551,11 +581,13 @@ These are not grammar rules but are listed here because they shape what programs
 
 *(always in scope — no import required)*
 
-### Output
+**Extracted from source:** use `go run tools/docwalk/extract_builtins.go` to verify completeness.
 
-* `println(val, ...)`
-* `print(val, ...)`
-* `input(prompt)`
+### Output & Input
+
+* `println(val, ...)` — prints each argument on its own line
+* `print(val, ...)` — prints each argument with no newline
+* `input(prompt)` — reads a line from stdin
 
 ### Type Conversion
 
@@ -578,15 +610,28 @@ These are not grammar rules but are listed here because they shape what programs
 * `substr(str, start [, end])` — substring by 0-based index; end exclusive
 * `format(template, args...)` — printf-style formatting
 
-### Array Operations
+### String Encoding (Low-level)
+
+* `_base64Encode(str)` — encode string to base64
+* `_base64Decode(str)` — decode base64 to string
+* `_base64UrlEncode(str)` — URL-safe base64 encoding
+* `_base64UrlDecode(str)` — URL-safe base64 decoding
+* `_urlEncode(str)` — URL percent-encoding
+* `_urlDecode(str)` — URL percent-decoding
+
+### Array & Collection Operations
 
 * `len(array)` — element count
 * `push(arr, val)` — new array with val appended
 * `pop(arr)` — new array without last element
-* `range(stop)`
-* `range(start, stop)`
-* `range(start, stop, step)` — returns `INTEGER ARRAY`
+* `concat(arr1, arr2)` — new array containing all elements of arr1 followed by arr2; single allocation
+* `makeArray(size)` — new `ARRAY` with `size` null elements; O(n) pre-allocation
+* `makeArray(size, default)` — new `ARRAY` with `size` elements, each initialized to `default`
+  * **CRITICAL:** Use instead of `push()` in loops (avoids O(n²))
+* `range(stop)` `range(start, stop)` `range(start, stop, step)` — `INTEGER` arrays
 * `slice(arr, start [, end])` — sub-array by 0-based index; end exclusive
+* `sort(arr)` — new sorted array (generic sort; elements must be comparable)
+* `shuffle(arr)` — new array with elements in random order
 
 ### Hash Operations
 
@@ -598,13 +643,33 @@ These are not grammar rules but are listed here because they shape what programs
 
 * `map(arr, fn)` — apply `fn(el)` → new `ARRAY`
 * `filter(arr, fn)` — keep elements where `fn(el)` is true
-* `reduce(arr, fn, init)` — fold to single value
-  * `fn` may be a user-defined function or any built-in function; builtins are accepted wherever a user fn is
+* `reduce(arr, fn, init)` — fold to single value; `fn` may be user-defined or built-in
 
-### Concurrency
+### Math Functions
+
+* `ceil(x)` — round up
+* `cos(x)` — cosine
+* `floor(x)` — round down
+* `max(a, b)` — maximum of two numbers
+* `min(a, b)` — minimum of two numbers
+* `rand()` — random `FLOAT` in [0, 1)
+* `randInt(min, max)` — random `INTEGER` in [min, max)
+* `round(x)` — round to nearest integer
+* `sin(x)` — sine
+* `sqrt(x)` — square root
+* `tan(x)` — tangent
+
+### Error Handling
+
+* `error(code, message)` — create user `ERROR` value
+* `isError(val)` — `BOOLEAN` — true for any Error
+* `safe(fn, args...)` — returns `(result, null)` or `(null, userError)`
+* `assert(condition [, message])` — `RuntimeError` if condition is false
+
+### Concurrency & Channels
 
 * `channel([n])` — new `CHANNEL`; unbuffered if n omitted
-* `send(ch, val)` — null on success; false (`BOOLEAN`) if cancelled; `RuntimeError` if closed
+* `send(ch, val)` — null on success; false if cancelled; `RuntimeError` if closed
 * `recv(ch)` — `TUPLE` `(val, BOOLEAN ok)`
 * `close(ch)` — signal no more sends
 * `cancel(ch)` — signal producer to stop
@@ -612,17 +677,88 @@ These are not grammar rules but are listed here because they shape what programs
 * `await(task)` — blocks; returns task result
 * `sleep(ms)` — pause ms milliseconds
 
-### Error Handling
+### Parallel Processing
 
-* `error(code, message)` — create user `ERROR` value
-* `isError(val)` — `BOOLEAN` — true for any Error
-* `safe(fn, args...)` — returns `(result, null)` or `(null, userError)`
-* `assert(condition [, message])` — `RuntimeError` if condition is false; condition must be `BOOLEAN` (`TypeError` otherwise); default message: `"assert: condition is false"`
+From `parallel.lex`:
 
-### System
+* `pmap(arr, func, numWorkers)` — `STREAM` of transformed elements (parallel)
+* `parallel_filter(arr, func, numWorkers)` — `STREAM` of filtered elements (parallel)
+* `parallel_reduce(arr, chunkFn, mergeFn, numWorkers, init)` — `TUPLE` `(value, null)` or `(null, error)`
+* `parallel_every(arr, func, numWorkers)` — `BOOLEAN` — true iff `func(el)` true for all
+* `parallel_some(arr, func, numWorkers)` — `BOOLEAN` — true iff `func(el)` true for any
+* `parallel_find(arr, func, numWorkers)` — `TUPLE` `(element, null)` or `(null, null)`
 
-* `env(name)` — read env var or null
-* `exec(cmd, args)` — run binary; returns stdout `STRING`
+### File System (Low-level)
+
+* `_fsExists(path)` — `BOOLEAN`
+* `_fsRead(path)` → `(STRING, error)`
+* `_fsWrite(path, content)` → `(null, error)`
+* `_fsAppend(path, content)` → `(null, error)`
+* `_fsRemove(path)` → `(null, error)`
+* `_fsRemoveAll(path)` → `(null, error)`
+* `_fsMkdir(path)` → `(null, error)`
+* `_fsMkdirAll(path)` → `(null, error)`
+* `_fsRename(oldPath, newPath)` → `(null, error)`
+* `_fsCopy(src, dst)` → `(null, error)`
+* `_fsListDir(path)` → `(ARRAY, error)`
+* `_fsReadDir(path)` → `(ARRAY, error)` — detailed file info
+* `_fsStat(path)` → `(HASH, error)` — file metadata
+* `_fsLstat(path)` → `(HASH, error)` — metadata without following symlinks
+* `_fsSymlink(target, linkPath)` → `(null, error)`
+* `_fsReadlink(path)` → `(STRING, error)`
+* `_fsChmod(path, mode)` → `(null, error)`
+* `_fsTmpDir()` → `(STRING, error)` — system temp directory
+* `_fsTmpFile([prefix])` → `(STRING, error)` — create temp file
+
+### Operating System (Low-level)
+
+* `_osGetenv(key)` → `STRING` or null
+* `_osSetenv(key, val)` → `(null, error)`
+* `_osCwd()` → `(STRING, error)` — current working directory
+* `_osHostname()` → `(STRING, error)` — machine hostname
+* `_osPid()` → `INTEGER` — process ID
+* `_osArgs()` → `ARRAY` — command-line arguments
+* `_osExit(code)` — terminate process (does not return)
+
+### Process Execution (Low-level)
+
+* `_processExec(cmd, args)` → `(stdout, stderr, exitCode, error)`
+* `_processRun(cmd, args)` → `(stdout, stderr, exitCode, error)`
+* `_processShell(cmd)` → `(stdout, stderr, exitCode, error)`
+
+### Networking (Low-level)
+
+* `tcpDial(addr)` → `(CONN, error)` — connect to TCP server
+* `tcpListen(addr)` → `(LISTENER, error)` — listen on TCP port
+* `netRead(conn)` → `(STRING, error)` — read from connection
+* `netWrite(conn, data)` → `(null, error)` — write to connection
+* `netClose(conn)` → `(null, error)` — close connection
+* `_httpDo(method, url, headers, body)` → `(response, error)` — HTTP request
+* `_httpServe(addr, handler)` → `(null, error)` — HTTP server
+* `dnsLookup(hostname)` → `(ARRAY, error)` — DNS resolution
+
+### Regular Expressions (Low-level)
+
+* `_regexMatch(pattern, str)` → `(BOOLEAN, error)`
+* `_regexFind(pattern, str)` → `(STRING|null, error)`
+* `_regexFindAll(pattern, str)` → `(ARRAY, error)`
+* `_regexReplace(pattern, str, repl)` → `(STRING, error)`
+* `_regexReplaceAll(pattern, str, repl)` → `(STRING, error)`
+* `_regexSplit(pattern, str)` → `(ARRAY, error)`
+* `_regexGroups(pattern, str)` → `(ARRAY, error)` — capture groups from first match
+* `_regexGroupsAll(pattern, str)` → `(ARRAY, error)` — all capture group matches
+
+### Time (Low-level)
+
+* `_timeNow()` → `INTEGER` — current Unix timestamp in nanoseconds
+* `_timeParse(layout, str)` → `(INTEGER, error)` — parse time string to timestamp
+* `_timeFormat(layout, t)` → `(STRING, error)` — format timestamp to string
+* `_timeFields(t)` → `(HASH, error)` — break timestamp into year/month/day/hour/min/sec/nsec/weekday
+* `_timeNanos()` → `INTEGER` — current time in nanoseconds
+
+### UUID
+
+* `_uuid()` → `STRING` — generate random UUID v4
 
 ---
 

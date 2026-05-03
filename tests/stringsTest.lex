@@ -1,27 +1,23 @@
 import "strings.lex" as s
 
-println("== contains ==")
-println(s.contains("hello world", "world"))   // true
-println(s.contains("hello world", "xyz"))     // false
+println("== indexOf (builtin) ==")
+println(indexOf("hello", "ll"))    // 2
+println(indexOf("hello", "x"))     // -1
+println(indexOf("hello", ""))      // 0
 
-println("== indexOf ==")
-println(s.indexOf("hello", "ll"))    // 2
-println(s.indexOf("hello", "x"))     // -1
-println(s.indexOf("hello", ""))      // 0
-
-println("== startsWith / endsWith ==")
-println(s.startsWith("hello", "he"))    // true
-println(s.startsWith("hello", "lo"))    // false
-println(s.endsWith("hello", "lo"))      // true
-println(s.endsWith("hello", "he"))      // false
+println("== startsWith / endsWith (builtins) ==")
+println(startsWith("hello", "he"))    // true
+println(startsWith("hello", "lo"))    // false
+println(endsWith("hello", "lo"))      // true
+println(endsWith("hello", "he"))      // false
 
 println("== repeat ==")
 println(s.repeat("ab", 3))    // ababab
 println(s.repeat("x", 0))     // (empty)
 
-println("== replace ==")
-println(s.replace("a-b-c", "-", "."))    // a.b.c
-println(s.replace("aaa", "a", "b"))      // bbb
+println("== replace (builtin) ==")
+println(replace("a-b-c", "-", "."))    // a.b.c
+println(replace("aaa", "a", "b"))      // bbb
 
 println("== count ==")
 println(s.count("banana", "an"))    // 2
@@ -35,16 +31,16 @@ println("== trimRight ==")
 println(s.trimRight("hello   "))    // hello
 println(s.trimRight("hello"))       // hello
 
-println("== trimSpace ==")
-println(s.trimSpace("  hello  "))   // hello
+println("== trim (builtin) ==")
+println(trim("  hello  "))   // hello
 
 println("== padLeft / padRight ==")
 println(s.padLeft("42", 5, "0"))      // 00042
 println(s.padRight("hi", 5, "."))     // hi...
 
-println("== toUpper / toLower ==")
-println(s.toUpper("hello"))    // HELLO
-println(s.toLower("HELLO"))    // hello
+println("== upper / lower (builtins) ==")
+println(upper("hello"))    // HELLO
+println(lower("HELLO"))    // hello
 
 println("== lines ==")
 ls = s.lines("a\nb\nc")

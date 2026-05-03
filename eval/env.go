@@ -30,18 +30,19 @@ import "sync"
 // Environment is the variable store with lexical scoping via outer chain.
 //
 // Concurrency model:
-//   shared = true  → this env is accessible by multiple goroutines (only the
-//                    global env, created by NewEnv). All reads and writes are
-//                    guarded by mu.
-//   shared = false → this env is goroutine-local (function frames, loop envs,
-//                    closure call envs). No locking needed; mu is never touched.
+//
+//	shared = true  → this env is accessible by multiple goroutines (only the
+//	                 global env, created by NewEnv). All reads and writes are
+//	                 guarded by mu.
+//	shared = false → this env is goroutine-local (function frames, loop envs,
+//	                 closure call envs). No locking needed; mu is never touched.
 //
 // When a goroutine-local env walks up to a shared outer env, the shared env
 // locks itself — so correctness is preserved without paying mutex overhead on
 // the 99% of envs that are never shared.
 type Environment struct {
 	mu     sync.RWMutex
-	shared bool             // true only for the global env
+	shared bool              // true only for the global env
 	store  map[string]Object // variables defined in this scope
 	consts map[string]bool   // names that cannot be reassigned (nil = none)
 	outer  *Environment      // the enclosing scope, or nil for the global env
@@ -94,7 +95,7 @@ func (e *Environment) CheckWritable(name string) *Error {
 	if inStore {
 		return nil // found here and not const — writable
 	}
-	if e.outer != nil && e.outer.has(name) {
+	if e.outer != nil {
 		return e.outer.CheckWritable(name)
 	}
 	return nil
@@ -153,10 +154,11 @@ func (e *Environment) Set(name string, value Object) Object {
 // it is created in the current (innermost) scope.
 //
 // This is what makes closures work correctly:
-//   fn makeCounter() {
-//       count = 0
-//       fn next() { count = count + 1 }  ← updates makeCounter's count, not a new local
-//   }
+//
+//	fn makeCounter() {
+//	    count = 0
+//	    fn next() { count = count + 1 }  ← updates makeCounter's count, not a new local
+//	}
 //
 // The tradeoff: a function CAN modify a variable in an outer scope. There is
 // no `local` keyword to prevent this. Assign outer-scope variables intentionally.
@@ -177,8 +179,9 @@ func (e *Environment) Assign(name string, value Object) Object {
 	}
 
 	if e.outer != nil {
-		if e.outer.has(name) {
-			return e.outer.Assign(name, value)
+		// Let the parent's own Lock handle the safety
+		if _, updated := e.outer.tryAssign(name, value); updated {
+			return value
 		}
 	}
 
@@ -193,20 +196,94 @@ func (e *Environment) Assign(name string, value Object) Object {
 	return value
 }
 
-// has reports whether name exists anywhere in this scope chain.
-func (e *Environment) has(name string) bool {
+// tryAssign attempts to update a variable only if it already exists in the chain.
+// Returns (value, true) if updated, (nil, false) if not found.
+// Written as a last ditch effort to avoid locking in the pond development stuff... Must
+// decide if this is going to stay or not... To be continued...
+func (e *Environment) tryAssign(name string, value Object) (Object, bool) {
 	if e.shared {
-		e.mu.RLock()
+		e.mu.Lock()
 	}
-	_, ok := e.store[name]
+
+	// Check if it exists in THIS scope
+	if _, ok := e.store[name]; ok {
+		e.store[name] = value
+		if e.shared {
+			e.mu.Unlock()
+		}
+		return value, true
+	}
+
+	// Unlock before recursing to avoid holding multiple locks (deadlock prevention)
 	if e.shared {
-		e.mu.RUnlock()
+		e.mu.Unlock()
 	}
-	if ok {
-		return true
-	}
+
+	// Recurse to parent
 	if e.outer != nil {
-		return e.outer.has(name)
+		return e.outer.tryAssign(name, value)
 	}
-	return false
+
+	return nil, false
+}
+
+// Snapshot creates a task-local copy of the global environment for async tasks.
+// The returned environment has the same data as the parent but is not shared:
+// it has no outer scope and is never locked. Mutations inside an async task
+// are isolated and invisible to other tasks and the caller.
+// This eliminates mutex contention while preventing shared mutable state bugs.
+func (e *Environment) Snapshot() *Environment {
+	// First pass: count total variables and constants to pre-allocate maps.
+	var totalVars, totalConsts int
+	env := e
+	for env != nil {
+		if env.shared {
+			env.mu.RLock()
+		}
+		totalVars += len(env.store)
+		totalConsts += len(env.consts)
+		if env.shared {
+			env.mu.RUnlock()
+		}
+		env = env.outer
+	}
+
+	snap := &Environment{
+		store:  make(map[string]Object, totalVars),
+		consts: make(map[string]bool, totalConsts),
+		outer:  nil,
+		shared: false,
+	}
+
+	// Copy all variables and constants from the current scope chain into the snapshot.
+	// This includes all accessible variables (globals and parent scopes).
+	env = e
+	for env != nil {
+		if env.shared {
+			env.mu.RLock()
+		}
+
+		// Copy all variables in this scope level.
+		for k, v := range env.store {
+			// Only add if not already in snapshot (inner scopes override outer).
+			if _, exists := snap.store[k]; !exists {
+				snap.store[k] = v
+			}
+		}
+
+		// Copy all const marks.
+		for k, v := range env.consts {
+			if _, exists := snap.consts[k]; !exists {
+				snap.consts[k] = v
+			}
+		}
+
+		if env.shared {
+			env.mu.RUnlock()
+		}
+
+		env = env.outer
+	}
+
+	return snap
 }

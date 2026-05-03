@@ -1,0 +1,186 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "kLex",
+  "scopeName": "source.klex",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#moduleAccess"
+    },
+    {
+      "include": "#functionCalls"
+    },
+    {
+      "include": "#self"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#rawStrings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#operators"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.klex",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.klex",
+          "match": "\\b(if|else|while|for|in|return|break|continue|switch|case|default|select)\\b"
+        },
+        {
+          "name": "keyword.declaration.klex",
+          "match": "\\bfn\\b"
+        },
+        {
+          "match": "\\bfn\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.declaration.klex"
+            }
+          }
+        },
+        {
+          "name": "keyword.declaration.klex",
+          "match": "\\b(struct|enum|import|as|let|const)\\b"
+        }
+      ]
+    },
+    "moduleAccess": {
+      "patterns": [
+        {
+          "name": "variable.other.module.klex",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\\.)"
+        }
+      ]
+    },
+    "functionCalls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.klex",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\\()"
+        }
+      ]
+    },
+    "self": {
+      "patterns": [
+        {
+          "name": "variable.language.klex",
+          "match": "\\bself\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.klex",
+          "match": "\\b(null|true|false)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.klex",
+          "match": "\\b(_base64Decode|_base64Encode|_base64UrlDecode|_base64UrlEncode|_bcryptHash|_bcryptVerify|_constantTimeEquals|_csvFormat|_csvFormatDelim|_csvParse|_csvParseDelim|_csvParseHeaders|_deflateCompress|_deflateDecompress|_fsAppend|_fsChmod|_fsCopy|_fsExists|_fsListDir|_fsLstat|_fsMkdir|_fsMkdirAll|_fsRead|_fsReadDir|_fsReadlink|_fsRemove|_fsRemoveAll|_fsRename|_fsStat|_fsSymlink|_fsTmpDir|_fsTmpFile|_fsWrite|_gzipCompress|_gzipDecompress|_hmacSha256|_hmacSha512|_httpDo|_httpServe|_md5|_osArgs|_osCwd|_osExit|_osGetenv|_osHostname|_osPid|_osSetenv|_processExec|_processRun|_processShell|_randomBytes|_regexFind|_regexFindAll|_regexGroups|_regexGroupsAll|_regexMatch|_regexReplace|_regexReplaceAll|_regexSplit|_sha256|_sha512|_timeFields|_timeFormat|_timeNanos|_timeNow|_timeParse|_tsvFormat|_tsvParse|_urlDecode|_urlEncode|_uuid|async|await|ceil|cos|dnsLookup|error|filter|floor|format|map|max|min|netClose|netRead|netWrite|rand|randInt|reduce|round|safe|shuffle|sin|slice|sort|sortBy|sqrt|substr|tan|tcpDial|tcpListen)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.klex",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.klex",
+              "match": "\\\\[nrtb\"\\\\{]"
+            },
+            {
+              "name": "meta.embedded.klex",
+              "begin": "(?<!\\\\)\\{",
+              "end": "\\}",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.section.embedded.begin.klex"
+                }
+              },
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.section.embedded.end.klex"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#keywords"
+                },
+                {
+                  "include": "#constants"
+                },
+                {
+                  "include": "#builtins"
+                },
+                {
+                  "include": "#numbers"
+                },
+                {
+                  "include": "#operators"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "rawStrings": {
+      "patterns": [
+        {
+          "name": "string.quoted.other.klex",
+          "begin": "`",
+          "end": "`"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.klex",
+          "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.klex",
+          "match": "(==|!=|<=|>=|&&|\\|>|\\|\\||\\.\\.\\.|[+\\-*/<>!%]|(?<![=<>!])=(?!=))"
+        }
+      ]
+    }
+  }
+}

@@ -521,13 +521,12 @@ func (l *Lexer) readString() (string, bool) {
 // NextToken; this function reads up to and including the closing backtick.
 func (l *Lexer) readRawString() string {
 	l.readChar() // skip opening backtick
-	var buf []byte
+	start := l.position
 	for l.ch != '`' && l.ch != 0 {
-		buf = append(buf, l.ch)
 		l.readChar()
 	}
 	// l.ch is now the closing backtick; NextToken's readChar() call will advance past it
-	return string(buf)
+	return l.input[start:l.position]
 }
 
 // skipWhitespace advances past spaces, tabs, newlines, and // line comments.

@@ -31,9 +31,9 @@ println("hello world" |> split(" ") |> len)
 println((1 + 2) |> str)       // "3"
 println(1 + 2 |> str |> len)  // str(3) = "3", len("3") = 1
 
-// Pipeline into module function
+// Pipeline with indexOf and comparison
 import "strings.lex" as s
-println("hello" |> s.contains("ell"))
+println(indexOf("hello", "ell") != -1)
 
 // Pipeline with range
 println(range(5) |> len)

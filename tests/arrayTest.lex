@@ -40,7 +40,7 @@ z2 = arr.zip([1, 2], ["a", "b", "c"])
 println(len(z2))          // 2
 
 println("== sort ==")
-s = arr.sort([3, 1, 4, 1, 5, 9, 2])
+s = sort([3, 1, 4, 1, 5, 9, 2])
 println(s[0])     // 1
 println(s[1])     // 1
 println(s[6])     // 9

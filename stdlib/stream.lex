@@ -28,7 +28,7 @@ struct Stream {
 // fromArray — produce a stream from an array
 // -------------------------------------
 fn fromArray(arr) {
-    ch    = channel()
+    ch    = channel(64)
     errCh = channel(1)
     async(fn() {
         for x in arr {
@@ -45,7 +45,7 @@ fn fromArray(arr) {
 // rangeStream — produce a stream of integers [start, stop)
 // -------------------------------------
 fn rangeStream(start, stop) {
-    ch    = channel()
+    ch    = channel(64)
     errCh = channel(1)
     async(fn() {
         i = start
@@ -64,7 +64,7 @@ fn rangeStream(start, stop) {
 // repeat — infinite stream of a single value
 // -------------------------------------
 fn repeat(val) {
-    ch    = channel()
+    ch    = channel(64)
     errCh = channel(1)
     async(fn() {
         while true {
@@ -86,7 +86,7 @@ fn repeat(val) {
 fn map(stream, fnRef) {
     src    = stream.ch
     srcErr = stream.errCh
-    out    = channel()
+    out    = channel(64)
     errCh  = channel(1)
     async(fn() {
         let myErr        = null
@@ -124,7 +124,7 @@ fn map(stream, fnRef) {
 fn filter(stream, fnRef) {
     src    = stream.ch
     srcErr = stream.errCh
-    out    = channel()
+    out    = channel(64)
     errCh  = channel(1)
     async(fn() {
         let myErr        = null
@@ -164,7 +164,7 @@ fn filter(stream, fnRef) {
 fn take(stream, n) {
     src    = stream.ch
     srcErr = stream.errCh
-    out    = channel()
+    out    = channel(64)
     errCh  = channel(1)
     async(fn() {
         let limitHit     = false
@@ -199,7 +199,7 @@ fn take(stream, n) {
 fn tap(stream, fnRef) {
     src    = stream.ch
     srcErr = stream.errCh
-    out    = channel()
+    out    = channel(64)
     errCh  = channel(1)
     async(fn() {
         let myErr        = null
@@ -238,7 +238,7 @@ fn tap(stream, fnRef) {
 fn flatMap(stream, fnRef) {
     src    = stream.ch
     srcErr = stream.errCh
-    out    = channel()
+    out    = channel(64)
     errCh  = channel(1)
     async(fn() {
         let myErr        = null
@@ -286,7 +286,7 @@ fn flatMap(stream, fnRef) {
 // Output stream closes only after every source is exhausted.
 // -------------------------------------
 fn merge(streams...) {
-    out     = channel()
+    out     = channel(64)
     errCh   = channel(1)
     results = channel(len(streams))
 
@@ -334,7 +334,7 @@ fn merge(streams...) {
 // Stops as soon as any stream is exhausted. Cancels remaining streams on exit.
 // -------------------------------------
 fn zip(streams...) {
-    out   = channel()
+    out   = channel(64)
     errCh = channel(1)
     async(fn() {
         let myErr        = null

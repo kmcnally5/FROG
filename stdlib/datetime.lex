@@ -25,6 +25,12 @@ struct DateTime {
     year, month, day, hour, minute, second, unix, weekday
 }
 
+// nowNanos returns the current time in nanoseconds (high-resolution).
+// Use for accurate benchmarking and timing measurements.
+fn nowNanos() {
+    return _timeNanos()
+}
+
 // now returns a DateTime representing the current local time.
 fn now() {
     year, month, day, hour, minute, second, unix, weekday = _timeNow()

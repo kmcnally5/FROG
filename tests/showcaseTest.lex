@@ -49,7 +49,7 @@ const REPORT_OUT = "/tmp/frog_report.txt"
 fn rule(char = "─") {
     return s.repeat(char, COL_WIDTH)
 }
-
+// Print a section header with a title
 fn section(title) {
     println("")
     println(rule("─"))
@@ -314,7 +314,7 @@ println(format("  Total tasks: %d", len(tasks)))
 // --- Filter active (not done) tasks, sort by priority score ---
 activeTasks = tasks
     |> filter(fn(t) { return !t.isDone() })
-    |> arr.sortBy(fn(a, b) {
+    |> sortBy(fn(a, b) {
         return priorityScore(a.priority) > priorityScore(b.priority)
     })
 
@@ -352,7 +352,7 @@ printBarChart("Tasks by Status:", byStatus,
 // --- Points per owner using pipeline ---
 println("")
 println("  Points by Owner:")
-ownerNames = arr.sortBy(keys(byOwner), fn(a, b) {
+ownerNames = sortBy(keys(byOwner), fn(a, b) {
     return byOwner[b] < byOwner[a]
 })
 maxOwnerPts = reduce(ownerNames, fn(mx, k) {
@@ -399,7 +399,7 @@ println("")
 println("  Word frequency in task titles (top 5):")
 titles     = map(tasks, getTitle)
 freq       = wordFreq(titles)
-freqWords  = arr.sortBy(keys(freq), fn(a, b) { return freq[b] < freq[a] })
+freqWords  = sortBy(keys(freq), fn(a, b) { return freq[b] < freq[a] })
 topN       = math.min(5, len(freqWords))
 i = 0
 while i < topN {
@@ -481,7 +481,7 @@ if networkOk {
     println("  Top 5 words across post titles:")
     postTitles = map(posts, fn(p) { return p["title"] })
     postFreq   = wordFreq(postTitles)
-    postWords  = arr.sortBy(keys(postFreq), fn(a, b) {
+    postWords  = sortBy(keys(postFreq), fn(a, b) {
         return postFreq[b] < postFreq[a]
     })
     topPost = math.min(5, len(postWords))
@@ -506,7 +506,7 @@ if networkOk {
         acc[pAuthor] = acc[pAuthor] + 1
         return acc
     }, {})
-    ppuNames = arr.sortBy(keys(postsPerUser),
+    ppuNames = sortBy(keys(postsPerUser),
         fn(a, b) { return postsPerUser[b] < postsPerUser[a] })
     maxPPU = reduce(ppuNames,
         fn(mx, k) {
@@ -534,7 +534,7 @@ keyword = lower(trim(keyword))
 if len(keyword) > 0 && networkOk {
     println("")
     matched = posts |> filter(fn(p) {
-        return s.contains(lower(p["title"]), keyword)
+        return indexOf(lower(p["title"]), keyword) != -1
     })
     if len(matched) == 0 {
         println(format("  No posts matched \"%s\".", keyword))

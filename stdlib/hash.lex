@@ -3,14 +3,15 @@
 // =====================================
 //
 // Combines:
-// - map utilities (has, merge, pick, etc.)
-// - hashing functions (FNV-1a)
+// - map utilities (merge, pick, omit, invert, values)
+// - hashing functions (FNV-1a: hash, hashBytes, combineHash)
 //
 // Usage:
 //   import "hash.lex" as h
 //
-//   h.has(map, key)
+//   h.merge(map1, map2)
 //   h.hash("hello")
+//   h.combineHash(h1, h2)
 //
 // =====================================
 
@@ -20,19 +21,6 @@ import "encoding.lex" as enc
 // =====================================
 // MAP UTILITIES
 // =====================================
-
-// has returns true if key exists in h
-fn has(h, key) {
-    for k in keys(h) {
-        if k == key { return true }
-    }
-    return false
-}
-
-// size returns number of keys
-fn size(h) {
-    return len(keys(h))
-}
 
 // values returns all values (order not guaranteed)
 fn values(h) {
@@ -74,7 +62,7 @@ fn pick(h, arr) {
     result = {}
 
     for k in arr {
-        if has(h, k) {
+        if hasKey(h, k) {
             result[k] = h[k]
         }
     }
@@ -82,20 +70,16 @@ fn pick(h, arr) {
     return result
 }
 
-// omit selected keys
+// omit selected keys (O(n) with hash-based lookup)
 fn omit(h, arr) {
+    excluded = {}
+    for k in arr {
+        excluded[k] = true
+    }
+
     result = {}
-
     for k in keys(h) {
-        include = true
-
-        for x in arr {
-            if x == k {
-                include = false
-            }
-        }
-
-        if include {
+        if !hasKey(excluded, k) {
             result[k] = h[k]
         }
     }
@@ -179,14 +163,6 @@ fn hashBytes(arr) {
     }
 
     return h
-}
-
-
-// -------------------------------------
-// hashFile(content string)
-// -------------------------------------
-fn hashFile(content) {
-    return hash(content)
 }
 
 

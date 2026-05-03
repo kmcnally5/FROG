@@ -29,11 +29,13 @@ fn contains(arr, val) {
 
 // reverse returns a new array with elements in reverse order.
 fn reverse(arr) {
-    result = []
+    result = makeArray(len(arr), null)
     i = len(arr) - 1
+    j = 0
     while i >= 0 {
-        result = push(result, arr[i])
+        result[j] = arr[i]
         i = i - 1
+        j = j + 1
     }
     return result
 }
@@ -41,83 +43,56 @@ fn reverse(arr) {
 // unique returns a new array with duplicate values removed.
 // First occurrence of each value is kept; order is preserved.
 fn unique(arr) {
-    result = []
+    result = makeArray(len(arr), null)
+    idx = 0
     for x in arr {
-        if !contains(result, x) {
-            result = push(result, x)
+        if !contains(slice(result, 0, idx), x) {
+            result[idx] = x
+            idx = idx + 1
         }
     }
-    return result
+    return slice(result, 0, idx)
 }
 
 // flatten returns a new array with one level of nesting removed.
 // Non-array elements are included as-is.
 // flatten([[1, 2], [3, 4], 5]) => [1, 2, 3, 4, 5]
 fn flatten(arr) {
-    result = []
+    result = makeArray(len(arr) * 2, null)
+    idx = 0
     for x in arr {
         if type(x) == "ARRAY" {
             for item in x {
-                result = push(result, item)
+                result[idx] = item
+                idx = idx + 1
             }
         } else {
-            result = push(result, x)
+            result[idx] = x
+            idx = idx + 1
         }
     }
-    return result
+    return slice(result, 0, idx)
 }
 
 // zip pairs elements from two arrays by index into an array of two-element arrays.
 // Stops at the shorter array's length.
 // zip([1, 2, 3], ["a", "b", "c"]) => [[1, "a"], [2, "b"], [3, "c"]]
 fn zip(a, b) {
-    result = []
     n = len(a)
     if len(b) < n { n = len(b) }
+    result = makeArray(n, null)
     i = 0
     while i < n {
-        result = push(result, [a[i], b[i]])
+        result[i] = [a[i], b[i]]
         i = i + 1
     }
     return result
 }
 
-// sortBy returns a new array sorted by a caller-supplied comparator.
-// compareFn(a, b) must return true if a should come before b.
-// Uses bubble sort — suitable for small arrays.
-//
-//   sortBy(nums,  fn(a, b) { return a < b })          // ascending
-//   sortBy(nums,  fn(a, b) { return a > b })          // descending
-//   sortBy(users, fn(a, b) { return a.age < b.age })  // by struct field
-//   sortBy(words, fn(a, b) { return len(a) < len(b) }) // by derived key
-fn sortBy(arr, compareFn) {
-    result = []
-    for x in arr {
-        result = push(result, x)
-    }
-    n = len(result)
-    i = 0
-    while i < n {
-        j = 0
-        while j < n - i - 1 {
-            if compareFn(result[j + 1], result[j]) {
-                tmp = result[j]
-                result[j] = result[j + 1]
-                result[j + 1] = tmp
-            }
-            j = j + 1
-        }
-        i = i + 1
-    }
-    return result
-}
-
-// sort returns a new array sorted in ascending order.
-// Works for integers and strings. For structs, custom ordering,
-// or descending sorts use sortBy.
-fn sort(arr) {
-    return sortBy(arr, fn(a, b) { return a < b })
-}
+// sort and sortBy are built into the interpreter — no import needed.
+// sort(arr)              → ascending order (integers, floats, strings)
+// sortBy(arr, compareFn) → custom order; compareFn(a, b) returns true if a < b
+// Both use a stable O(n log n) sort.
 
 // splitArray splits an array on a separator value.
 // Example:
@@ -125,25 +100,30 @@ fn sort(arr) {
 //   => [[1, 2], [3, 4]]
 
 fn split(arr, sep) {
-    result = []
-    current = []
+    result = makeArray(len(arr), null)
+    current = makeArray(len(arr), null)
+    resultIdx = 0
+    currentIdx = 0
 
     i = 0
     while i < len(arr) {
         x = arr[i]
 
         if type(x) == type(sep) && x == sep {
-            result = push(result, current)
-            current = []
+            result[resultIdx] = slice(current, 0, currentIdx)
+            resultIdx = resultIdx + 1
+            currentIdx = 0
         } else {
-            current = push(current, x)
+            current[currentIdx] = x
+            currentIdx = currentIdx + 1
         }
 
         i = i + 1
     }
 
-    // push final chunk
-    result = push(result, current)
+    // add final chunk
+    result[resultIdx] = slice(current, 0, currentIdx)
+    resultIdx = resultIdx + 1
 
-    return result
+    return slice(result, 0, resultIdx)
 }

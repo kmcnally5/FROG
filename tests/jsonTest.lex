@@ -1,9 +1,9 @@
 import "json.lex" as json
 
 // --- parse object ---
-data, err = json.parse("\{\"name\":\"Karl\",\"age\":42}")
+data, err = json.parse("\{\"name\":\"Frog\",\"age\":42}")
 println(err == null)          // true
-println(data["name"])         // Karl
+println(data["name"])         // Frog
 println(data["age"])          // 42
 
 // --- stringify ---

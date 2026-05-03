@@ -7,9 +7,17 @@ I wrote FROG in an effort to explore a development environment better suited for
 
 It is my hope that by enforcing a more rigid, opinionated syntax, I can improve LLM efficiency and make the human-AI collaboration process more reliable. To put this theory to the test, I developed the kLex interpreter almost entirely using AI, treating the creation of the engine as my first real-world trial of this workflow.
 
-FROG demonstrates the complete pipeline of a programming language: Lexer → Parser → AST → Evaluator → Environment.  For indepth language reading please find the KLEX_GRAMMER.TXT and KLEX_LANGUAGE.TXT files in the /docs/ folder.
+FROG demonstrates the complete pipeline of a programming language: Lexer → Parser → AST → Evaluator → Environment.  For indepth language reading please find the KLEX_GRAMMER.MD and KLEX_LANGUAGE.TXT files in the 'docs/' folder.
 
-Architected and Designed by Karl McNally. Implementation assisted by AI-augmented workflows.
+Architected and Designed by Karl McNally. Implementation assisted by AI-augmented workflows.  
+
+---
+
+<div align="center">
+  <img src="./docs/images/frog_art1.png" alt="FROG - Functional, Reactive, Opinionated, Governed" width="600">
+</div>
+
+---
 
 ## Try it Online
 
@@ -25,6 +33,18 @@ Syntax highlighting is available for both **Vim** and **VSCode**:
 - **Vim**: Download the syntax files from [`editors/vim/`](editors/vim/) — see included instructions for setup.
 
 These syntax plugins provide language-aware highlighting and integrate `.lex` file recognition into your editor.
+
+## Language Server
+
+**froglsp** is the official Language Server Protocol (LSP) implementation for kLex, providing real-time language features in supported editors:
+
+- **Syntax Highlighting** — Context-aware token coloring
+- **Error Diagnostics** — Real-time parsing and type-checking
+- **Code Completion** — Intelligent suggestions for builtins and symbols
+- **Hover Information** — Inline documentation for functions
+- **Go-to-Definition** — Jump to function and variable definitions
+
+For installation and configuration instructions, see the **[froglsp README](snowball/froglsp/README.md)**.
 
 ## Quick Start
 

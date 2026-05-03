@@ -21,6 +21,16 @@ func timeToTuple(t time.Time) *Tuple {
 }
 
 func init() {
+	// _timeNanos() → integer
+	// Returns the current time in nanoseconds since an arbitrary epoch.
+	// Suitable for high-resolution timing and benchmarking.
+	Builtins["_timeNanos"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 0 {
+			return runtimeError("_timeNanos expects no arguments", ast.Pos{})
+		}
+		return &Integer{Value: int(time.Now().UnixNano())}
+	}}
+
 	// _timeNow() → (year, month, day, hour, minute, second, unix, weekday)
 	// Returns the current local time as an 8-element tuple.
 	// unix is integer seconds since 1970-01-01 00:00:00 UTC.

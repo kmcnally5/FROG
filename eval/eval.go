@@ -30,13 +30,16 @@ import (
 	"klex/ast"
 	"klex/lexer"
 	"klex/parser"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // stdinReader is shared across all input() calls so buffered bytes are not lost.
@@ -45,6 +48,19 @@ var stdinReader = bufio.NewReader(os.Stdin)
 // importingFiles tracks which files are currently mid-import to detect cycles.
 // It is package-level because import evaluation recurses through Eval itself.
 var importingFiles = map[string]bool{}
+
+// EnableAsyncYield controls whether loop statements (while, for-in) yield to Go's
+// scheduler periodically. When true, runtime.Gosched() is called to allow
+// goroutines to be preempted and distributed across CPU cores for better
+// parallelization with async tasks. When false, loops run tightly without yielding,
+// which is faster for single-threaded or CPU-bound work.
+const EnableAsyncYield = true
+
+// AsyncYieldInterval controls how often to call runtime.Gosched() in loops.
+// A value of 1000 means yield every 1000 iterations.
+// Yielding too frequently (e.g., every iteration) kills performance for CPU-bound loops.
+// Yielding too rarely (e.g., never) causes unfair scheduling with many concurrent tasks.
+const AsyncYieldInterval = 1000
 
 // KLexVersion is the interpreter version, set by main.go at startup.
 // Exposed as the __version__ builtin so FROG programs can read it.
@@ -78,7 +94,8 @@ var Builtins = map[string]*Builtin{
 			return &Integer{Value: len(arg.Elements)}
 		case *String:
 			// Count Unicode code points, not bytes, so len("café") == 4.
-			return &Integer{Value: len([]rune(arg.Value))}
+			// Use utf8.RuneCountInString to avoid allocating a rune array.
+			return &Integer{Value: utf8.RuneCountInString(arg.Value)}
 		case *Hash:
 			return &Integer{Value: len(arg.Pairs)}
 		default:
@@ -280,6 +297,49 @@ var Builtins = map[string]*Builtin{
 		newElements[len(arr.Elements)] = args[1]
 		return &Array{Elements: newElements}
 	}},
+	// makeArray allocates an array of n elements in a single allocation, all set to defaultVal.
+	// Use this instead of building with push() in a loop — push is O(n) per call (O(n²) total),
+	// makeArray is O(n) once. Fill elements with arr[i] = val afterwards.
+	// Usage: arr = makeArray(1000000, 0)   — 1M zeros, O(n)
+	"makeArray": {Fn: func(args []Object) Object {
+		if len(args) < 1 || len(args) > 2 {
+			return runtimeError("makeArray expects 1 or 2 arguments: makeArray(n) or makeArray(n, defaultVal)", ast.Pos{})
+		}
+		nObj, ok := args[0].(*Integer)
+		if !ok {
+			return typeError(fmt.Sprintf("makeArray: first argument must be integer, got %s", args[0].Type()), ast.Pos{})
+		}
+		n := nObj.Value
+		if n < 0 {
+			return runtimeError("makeArray: size must be non-negative", ast.Pos{})
+		}
+		var fill Object = NULL
+		if len(args) == 2 {
+			fill = args[1]
+		}
+		elements := make([]Object, n)
+		for i := range elements {
+			elements[i] = fill
+		}
+		return &Array{Elements: elements}
+	}},
+	// concat merges two arrays into a new array in a single allocation.
+	// Faster than looping push when combining two existing arrays.
+	// Usage: concat(arr1, arr2) -> new array containing all elements of arr1 followed by arr2.
+	"concat": {Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError(fmt.Sprintf("concat expects 2 arguments, got %d", len(args)), ast.Pos{})
+		}
+		arr1, ok1 := args[0].(*Array)
+		arr2, ok2 := args[1].(*Array)
+		if !ok1 || !ok2 {
+			return typeError(fmt.Sprintf("concat: both arguments must be array, got %s and %s", args[0].Type(), args[1].Type()), ast.Pos{})
+		}
+		newElements := make([]Object, len(arr1.Elements)+len(arr2.Elements))
+		copy(newElements, arr1.Elements)
+		copy(newElements[len(arr1.Elements):], arr2.Elements)
+		return &Array{Elements: newElements}
+	}},
 	// upper returns a copy of a string with all letters converted to uppercase.
 	"upper": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
@@ -377,12 +437,20 @@ var Builtins = map[string]*Builtin{
 				return runtimeError("range: step cannot be zero", ast.Pos{})
 			}
 		}
-		var elements []Object
+		// Pre-calculate size to avoid repeated allocations
+		var count int
+		if step > 0 {
+			if start < stop {
+				count = (stop - start + step - 1) / step
+			}
+		} else {
+			if start > stop {
+				count = (start - stop - step - 1) / (-step)
+			}
+		}
+		elements := make([]Object, 0, count)
 		for i := start; (step > 0 && i < stop) || (step < 0 && i > stop); i += step {
 			elements = append(elements, &Integer{Value: i})
-		}
-		if elements == nil {
-			elements = []Object{}
 		}
 		return &Array{Elements: elements}
 	}},
@@ -432,24 +500,17 @@ var Builtins = map[string]*Builtin{
 		if !ok {
 			return typeError(fmt.Sprintf("indexOf: second argument must be string, got %s", args[1].Type()), ast.Pos{})
 		}
-		runes := []rune(s.Value)
-		subRunes := []rune(sub.Value)
-		if len(subRunes) == 0 {
+		if sub.Value == "" {
 			return &Integer{Value: 0}
 		}
-		for i := 0; i <= len(runes)-len(subRunes); i++ {
-			match := true
-			for j, r := range subRunes {
-				if runes[i+j] != r {
-					match = false
-					break
-				}
-			}
-			if match {
-				return &Integer{Value: i}
-			}
+		// Find byte index, then convert to rune index
+		byteIdx := strings.Index(s.Value, sub.Value)
+		if byteIdx == -1 {
+			return &Integer{Value: -1}
 		}
-		return &Integer{Value: -1}
+		// Convert byte index to rune index by counting runes up to that position
+		runeIdx := len([]rune(s.Value[:byteIdx]))
+		return &Integer{Value: runeIdx}
 	}},
 	// startsWith returns true if str begins with the given prefix.
 	// startsWith("hello", "he") → true
@@ -741,6 +802,27 @@ var Builtins = map[string]*Builtin{
 		return &Tuple{Elements: []Object{val, TRUE}}
 	}},
 
+	// recvNonBlock attempts to receive from a channel without blocking.
+	// Returns the value if one is immediately available.
+	// Returns null if the channel is empty (no value available yet).
+	// Returns null if the channel is closed with no buffered values.
+	// Used for cooperative cancellation signaling in parallel workers.
+	"recvNonBlock": {Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("recvNonBlock expects 1 argument", ast.Pos{})
+		}
+		ch, ok := args[0].(*Channel)
+		if !ok {
+			return typeError(fmt.Sprintf("recvNonBlock: argument must be a channel, got %s", args[0].Type()), ast.Pos{})
+		}
+		select {
+		case val := <-ch.ch:
+			return val
+		default:
+			return NULL
+		}
+	}},
+
 	// close signals that no more values will be sent on the channel.
 	// Receivers will drain any buffered values then get (null, false) from recv.
 	// Returns null on success. RuntimeError if the channel is already closed.
@@ -804,7 +886,7 @@ func init() {
 		default:
 			return typeError(fmt.Sprintf("filter: second argument must be function, got %s", args[1].Type()), ast.Pos{})
 		}
-		out := []Object{}
+		out := make([]Object, 0, len(arr.Elements))
 		for _, el := range arr.Elements {
 			result, err := callCallable(args[1], []Object{el})
 			if err != nil {
@@ -948,16 +1030,16 @@ func init() {
 	// async launches a function in a background goroutine and returns a Task
 	// immediately. Accepts both user-defined functions and builtins.
 	// Usage: task = async(fn, arg1, arg2, ...)
-	// Constraint: the function must not mutate shared mutable state (arrays,
-	// hashes) that the calling goroutine also accesses — communicate only via
-	// the return value, which await() delivers.
+	// The function runs in a snapshotted environment: it can read globals from the
+	// time the task was launched, but mutations are task-local and not visible to
+	// the caller. This eliminates mutex contention and prevents shared mutable state bugs.
 	// Note: do not call input() from async — it shares a global stdin reader.
 	Builtins["async"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 1 {
 			return runtimeError("async expects at least 1 argument", ast.Pos{})
 		}
 		fnArgs := args[1:]
-		task := &Task{done: make(chan struct{})}
+		task := getTask()
 		switch fn := args[0].(type) {
 		case *Function:
 			go func() {
@@ -967,17 +1049,82 @@ func init() {
 				} else {
 					task.result = result
 				}
-				close(task.done)
+				task.done.Store(true)
 			}()
 		case *Builtin:
 			go func() {
 				task.result = fn.Fn(fnArgs)
-				close(task.done)
+				task.done.Store(true)
 			}()
 		default:
+			returnTask(task)
 			return typeError(fmt.Sprintf("async: first argument must be a function, got %s", args[0].Type()), ast.Pos{})
 		}
 		return task
+	}}
+}
+
+// evalAsync handles the async builtin with environment snapshots.
+// It receives the snapshotted environment from evalCall and launches the task
+// in that isolated environment, eliminating mutex contention.
+func evalAsync(args []Object, env *Environment) Object {
+	if len(args) < 1 {
+		return runtimeError("async expects at least 1 argument", ast.Pos{})
+	}
+	fnArgs := args[1:]
+	task := getTask()
+
+	// Snapshot the current environment for this task.
+	// The task will run in this snapshot: it can read globals but mutations are local.
+	taskEnv := env.Snapshot()
+
+	switch fn := args[0].(type) {
+	case *Function:
+		go func() {
+			result, err := applyFunctionInEnv(fn, fnArgs, taskEnv)
+			if err != nil {
+				task.result = err
+			} else {
+				task.result = result
+			}
+			task.done.Store(true)
+		}()
+	case *Builtin:
+		go func() {
+			task.result = fn.Fn(fnArgs)
+			task.done.Store(true)
+		}()
+	default:
+		returnTask(task)
+		return typeError(fmt.Sprintf("async: first argument must be a function, got %s", args[0].Type()), ast.Pos{})
+	}
+	return task
+}
+
+// ============================================================================
+// BUILTIN INITIALIZATION
+// ============================================================================
+
+func init() {
+	// sqrt returns the square root of a number (integer or float).
+	// Usage: sqrt(16) → 4.0   sqrt(2) → 1.414...
+	Builtins["sqrt"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("sqrt expects 1 argument", ast.Pos{})
+		}
+		var f float64
+		switch x := args[0].(type) {
+		case *Integer:
+			f = float64(x.Value)
+		case *Float:
+			f = x.Value
+		default:
+			return typeError(fmt.Sprintf("sqrt: argument must be number, got %s", args[0].Type()), ast.Pos{})
+		}
+		if f < 0 {
+			return runtimeError("sqrt: cannot take square root of negative number", ast.Pos{})
+		}
+		return &Float{Value: math.Sqrt(f)}
 	}}
 
 	// await blocks until the given task completes and returns its result.
@@ -991,8 +1138,21 @@ func init() {
 		if !ok {
 			return typeError(fmt.Sprintf("await: argument must be a task, got %s", args[0].Type()), ast.Pos{})
 		}
-		<-task.done
-		return task.result
+		// Hybrid strategy: spin briefly (fast-path for quick completions),
+		// then sleep (prevents busy-waiting for slower tasks).
+		for i := 0; i < 100; i++ {
+			if task.done.Load() {
+				result := task.result
+				returnTask(task)
+				return result
+			}
+		}
+		for !task.done.Load() {
+			time.Sleep(100 * time.Microsecond)
+		}
+		result := task.result
+		returnTask(task)
+		return result
 	}}
 }
 
@@ -1047,8 +1207,51 @@ func bindArgs(fn *Function, args []Object, env *Environment) Object {
 // Returns (result, nil) on success, or (nil, *Error) on failure.
 func applyFunction(fn *Function, args []Object) (Object, Object) {
 	env := &Environment{
-		store: make(map[string]Object),
-		outer: fn.Env,
+		store:  make(map[string]Object, len(fn.Params)),
+		outer:  fn.Env,
+		shared: fn.Env.shared,
+	}
+	if fn.Variadic {
+		required := len(fn.Params) - 1
+		if len(args) < required {
+			return nil, runtimeError(
+				fmt.Sprintf("function expects at least %d argument(s), got %d", required, len(args)),
+				ast.Pos{},
+			)
+		}
+		for i := 0; i < required; i++ {
+			env.Set(fn.Params[i], args[i])
+		}
+		env.Set(fn.Params[required], &Array{Elements: args[required:]})
+	} else {
+		req := numRequired(fn)
+		if len(args) < req || len(args) > len(fn.Params) {
+			return nil, arityError("function", fn, len(args), ast.Pos{})
+		}
+		if errObj := bindArgs(fn, args, env); errObj != nil {
+			return nil, errObj
+		}
+	}
+	var result Object = NULL
+	for _, node := range fn.Body {
+		result = Eval(node, env)
+		if isReturn(result) {
+			return result.(*ReturnValue).Value, nil
+		}
+		if isError(result) {
+			return nil, result
+		}
+	}
+	return result, nil
+}
+
+// applyFunctionInEnv is like applyFunction but runs the function in an explicit
+// environment instead of fn.Env. Used by async tasks to run in a snapshotted env.
+func applyFunctionInEnv(fn *Function, args []Object, taskEnv *Environment) (Object, Object) {
+	env := &Environment{
+		store:  make(map[string]Object, len(fn.Params)),
+		outer:  taskEnv,
+		shared: taskEnv.shared,
 	}
 	if fn.Variadic {
 		required := len(fn.Params) - 1
@@ -1348,8 +1551,25 @@ func evalCall(c *ast.CallExpr, env *Environment) Object {
 		return fnObj
 	}
 
+	// Special handling for async: it needs access to the environment to snapshot it.
+	if _, ok := fnObj.(*Builtin); ok {
+		if ident, ok := c.Function.(*ast.Ident); ok && ident.Value == "async" {
+			// Evaluate all arguments before calling.
+			args := make([]Object, 0, len(c.Args))
+			for _, argNode := range c.Args {
+				val := Eval(argNode, env)
+				if isError(val) {
+					return val
+				}
+				args = append(args, val)
+			}
+			// Handle async with environment snapshot.
+			return evalAsync(args, env)
+		}
+	}
+
 	// Evaluate all arguments before calling — arguments are eager, not lazy.
-	args := []Object{}
+	args := make([]Object, 0, len(c.Args))
 	for _, argNode := range c.Args {
 		val := Eval(argNode, env)
 		if isError(val) {
@@ -1368,8 +1588,9 @@ func evalCall(c *ast.CallExpr, env *Environment) Object {
 			name = "anonymous"
 		}
 		newEnv := &Environment{
-			store: make(map[string]Object),
-			outer: fn.Env,
+			store:  make(map[string]Object, len(fn.Params)),
+			outer:  fn.Env,
+			shared: fn.Env.shared,
 		}
 		if selfReceiver != nil {
 			newEnv.Set("self", selfReceiver)
@@ -1619,11 +1840,11 @@ func Eval(node ast.Node, env *Environment) Object {
 	// remembers where it was created, not where it will be called.
 	case *ast.FunctionLiteral:
 		return &Function{
-			Params:    n.Params,
-			Defaults:  n.Defaults,
-			Variadic:  n.Variadic,
-			Body:      n.Body,
-			Env:       env, // closure captured here
+			Params:   n.Params,
+			Defaults: n.Defaults,
+			Variadic: n.Variadic,
+			Body:     n.Body,
+			Env:      env, // closure captured here
 		}
 
 	// ---------------- SWITCH ----------------
@@ -1672,7 +1893,7 @@ func Eval(node ast.Node, env *Environment) Object {
 							inst.TypeName, inst.VariantName, len(inst.FieldNames), len(pat.Bindings),
 						), pat.Pos)
 					}
-					childEnv := &Environment{store: make(map[string]Object), outer: env}
+					childEnv := &Environment{store: make(map[string]Object, len(pat.Bindings)), outer: env}
 					for i, name := range pat.Bindings {
 						childEnv.Set(name, inst.Fields[inst.FieldNames[i]])
 					}
@@ -1868,6 +2089,7 @@ func Eval(node ast.Node, env *Environment) Object {
 		}
 
 		var result Object = NULL
+		iterCount := 0
 
 		addBinding := func(m map[string]Object, name string, val Object) {
 			if name != "_" {
@@ -1878,7 +2100,7 @@ func Eval(node ast.Node, env *Environment) Object {
 		switch coll := collection.(type) {
 		case *Array:
 			for i, el := range coll.Elements {
-				bindings := map[string]Object{}
+				bindings := make(map[string]Object, 2)
 				if n.ValueVar == "" {
 					addBinding(bindings, n.Variable, el)
 				} else {
@@ -1891,13 +2113,17 @@ func Eval(node ast.Node, env *Environment) Object {
 					}
 					return r
 				}
+				iterCount++
+				if EnableAsyncYield && iterCount%AsyncYieldInterval == 0 {
+					runtime.Gosched()
+				}
 			}
 		case *Hash:
 			if n.ValueVar == "" {
 				return typeError("for-in over a hash requires two variables: for k, v in hash", n.Pos)
 			}
 			for _, pair := range coll.Pairs {
-				bindings := map[string]Object{}
+				bindings := make(map[string]Object, 2)
 				addBinding(bindings, n.Variable, pair.Key)
 				addBinding(bindings, n.ValueVar, pair.Value)
 				if r := runBody(bindings); r != nil {
@@ -1906,13 +2132,19 @@ func Eval(node ast.Node, env *Environment) Object {
 					}
 					return r
 				}
+				iterCount++
+				if EnableAsyncYield && iterCount%AsyncYieldInterval == 0 {
+					runtime.Gosched()
+				}
 			}
 		case *Channel:
 			if n.ValueVar != "" {
 				return typeError("for-in over a channel does not support two variables", n.Pos)
 			}
 			for val := range coll.ch {
-				if r := runBody(map[string]Object{n.Variable: val}); r != nil {
+				bindings := make(map[string]Object, 1)
+				addBinding(bindings, n.Variable, val)
+				if r := runBody(bindings); r != nil {
 					if isBreak(r) {
 						// Signal the producer that the consumer is done.
 						// Closing done is idempotent via recover.
@@ -1923,6 +2155,10 @@ func Eval(node ast.Node, env *Environment) Object {
 						return NULL
 					}
 					return r
+				}
+				iterCount++
+				if EnableAsyncYield && iterCount%AsyncYieldInterval == 0 {
+					runtime.Gosched()
 				}
 			}
 		default:
@@ -1938,6 +2174,7 @@ func Eval(node ast.Node, env *Environment) Object {
 	// ReturnValue and errors pass through unchanged — they unwind the call stack.
 	case *ast.WhileStmt:
 		var result Object = NULL
+		iterCount := 0
 		for {
 			cond := Eval(n.Condition, env)
 			if isError(cond) {
@@ -1968,6 +2205,12 @@ func Eval(node ast.Node, env *Environment) Object {
 				if isContinue(result) {
 					break // skip remaining stmts, outer for{} re-evaluates condition
 				}
+			}
+
+			iterCount++
+			// Yield to scheduler only every N iterations to balance fairness with performance.
+			if EnableAsyncYield && iterCount%AsyncYieldInterval == 0 {
+				runtime.Gosched()
 			}
 		}
 		return result
@@ -2074,20 +2317,20 @@ func Eval(node ast.Node, env *Environment) Object {
 	// ---------------- ARRAY LITERAL ----------------
 	// Evaluate each element expression and collect the results into an Array.
 	case *ast.ArrayLiteral:
-		elements := []Object{}
-		for _, el := range n.Elements {
+		elements := make([]Object, len(n.Elements))
+		for i, el := range n.Elements {
 			val := Eval(el, env)
 			if isError(val) {
 				return val
 			}
-			elements = append(elements, val)
+			elements[i] = val
 		}
 		return &Array{Elements: elements}
 
 	// ---------------- HASH LITERAL ----------------
 	// Evaluate each key and value, convert the key to a HashKey, store the pair.
 	case *ast.HashLiteral:
-		pairs := make(map[HashKey]HashPair)
+		pairs := make(map[HashKey]HashPair, len(n.Pairs))
 		for _, p := range n.Pairs {
 			key := Eval(p.Key, env)
 			if isError(key) {
@@ -2366,19 +2609,19 @@ func Eval(node ast.Node, env *Environment) Object {
 		return &String{Value: n.Value}
 
 	case *ast.InterpolatedString:
-		var result []byte
+		var buf strings.Builder
 		for _, seg := range n.Segments {
 			if !seg.IsExpr {
-				result = append(result, seg.Text...)
+				buf.WriteString(seg.Text)
 			} else {
 				val := Eval(seg.Expr, env)
 				if isError(val) {
 					return val
 				}
-				result = append(result, val.Inspect()...)
+				buf.WriteString(val.Inspect())
 			}
 		}
-		return &String{Value: string(result)}
+		return &String{Value: buf.String()}
 
 	// ---------------- CALL ----------------
 	case *ast.CallExpr:
@@ -2508,9 +2751,6 @@ func Eval(node ast.Node, env *Environment) Object {
 			return left
 		}
 
-		// Build args: piped value is always first.
-		pipeArgs := []Object{left}
-
 		// Determine the callable and any extra arguments from the right side.
 		var fnNode ast.Node
 		var extraArgs []ast.Node
@@ -2520,6 +2760,10 @@ func Eval(node ast.Node, env *Environment) Object {
 		} else {
 			fnNode = n.Right
 		}
+
+		// Build args: piped value is always first, with pre-allocated capacity.
+		pipeArgs := make([]Object, 1, 1+len(extraArgs))
+		pipeArgs[0] = left
 
 		for _, argNode := range extraArgs {
 			val := Eval(argNode, env)

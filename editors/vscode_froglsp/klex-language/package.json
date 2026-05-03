@@ -1,0 +1,34 @@
+{
+  "name": "klex-lsp",
+  "displayName": "kLex Language Support (LSP)",
+  "description": "Full IDE support for .lex files (kLex / FROG interpreter) with hover, completion, go-to-definition, and diagnostics via Language Server Protocol",
+  "version": "0.7.0",
+  "publisher": "klex",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:klex"],
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  },
+  "devDependencies": {
+    "vscode": "^1.1.37"
+  },
+  "contributes": {
+    "languages": [{
+      "id": "klex",
+      "aliases": ["kLex", "klex"],
+      "extensions": [".lex"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "klex",
+      "scopeName": "source.klex",
+      "path": "./syntaxes/klex.tmLanguage.json"
+    }],
+    "snippets": [{
+      "language": "klex",
+      "path": "./snippets/klex.json"
+    }]
+  }
+}

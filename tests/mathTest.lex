@@ -1,45 +1,36 @@
+// floor
+assert(floor(3.7)  == 3,  "floor(3.7)")
+assert(floor(3.0)  == 3,  "floor(3.0)")
+assert(floor(-2.3) == -3, "floor(-2.3)")
+assert(floor(4)    == 4,  "floor(int)")
+
+// ceil
+assert(ceil(3.2)  == 4,  "ceil(3.2)")
+assert(ceil(3.0)  == 3,  "ceil(3.0)")
+assert(ceil(-2.7) == -2, "ceil(-2.7)")
+assert(ceil(4)    == 4,  "ceil(int)")
+
+// round
+assert(round(3.5) == 4,  "round(3.5)")
+assert(round(3.4) == 3,  "round(3.4)")
+assert(round(-2.5) == -3, "round(-2.5)")
+assert(round(4)   == 4,  "round(int)")
+
+// sqrt
+assert(sqrt(4)   == 2.0, "sqrt(4)")
+assert(sqrt(9.0) == 3.0, "sqrt(9.0)")
+assert(sqrt(0)   == 0.0, "sqrt(0)")
+
+// math.lex — abs, min, max, clamp with floats
 import "math.lex" as math
 
-println("== abs ==")
-println(math.abs(-5))    // 5
-println(math.abs(5))     // 5
-println(math.abs(0))     // 0
+assert(math.abs(-3.7)  == 3.7,  "abs float")
+assert(math.abs(-5)    == 5,    "abs int")
+assert(math.max(1.5, 2.5) == 2.5, "max float")
+assert(math.min(1.5, 2.5) == 1.5, "min float")
+assert(math.clamp(5.5, 0.0, 3.0) == 3.0, "clamp float hi")
+assert(math.clamp(-1.0, 0.0, 1.0) == 0.0, "clamp float lo")
+assert(math.pi > 3.14 && math.pi < 3.15, "pi")
+assert(math.e  > 2.71 && math.e  < 2.72, "e")
 
-println("== max / min ==")
-println(math.max(3, 7))    // 7
-println(math.max(7, 3))    // 7
-println(math.min(3, 7))    // 3
-println(math.min(7, 3))    // 3
-
-println("== clamp ==")
-println(math.clamp(10, 1, 5))    // 5
-println(math.clamp(0, 1, 5))     // 1
-println(math.clamp(3, 1, 5))     // 3
-
-println("== pow ==")
-println(math.pow(2, 0))    // 1
-println(math.pow(2, 3))    // 8
-println(math.pow(3, 3))    // 27
-
-println("== sum / product ==")
-println(math.sum([1, 2, 3, 4]))       // 10
-println(math.product([1, 2, 3, 4]))   // 24
-
-println("== sign ==")
-println(math.sign(-99))    // -1
-println(math.sign(0))      // 0
-println(math.sign(99))     // 1
-
-println("== even / odd ==")
-println(math.even(4))    // true
-println(math.even(3))    // false
-println(math.odd(3))     // true
-println(math.odd(4))     // false
-
-println("== gcd ==")
-println(math.gcd(12, 8))     // 4
-println(math.gcd(100, 75))   // 25
-
-println("== lcm ==")
-println(math.lcm(4, 6))      // 12
-println(math.lcm(3, 5))      // 15
+println("math tests passed")

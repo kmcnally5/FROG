@@ -1,0 +1,602 @@
+// stdlib/parallel.lex — high-performance parallel data processing
+//
+// Parallel map, filter, reduce with custom merge strategies, and early termination.
+// Built on async Tasks and eager evaluation (collecting final results before returning Stream).
+//
+// Usage:
+//   import "parallel.lex" as p
+//   import "stream.lex" as s
+//
+//   result, err = s.collect(p.pmap([1..1000], fn(x) { x * 2 }, 4))
+//   sum, err = p.parallel_reduce([1..1000], fn(a,x){a+x}, fn(a,b){a+b}, 4, 0)
+
+
+// ========================================
+// Helper: chunk(arr, n) — split array into n sub-arrays
+// ========================================
+struct Stream {
+    ch
+    errCh
+}
+
+
+fn pmap(arr, func, numWorkers) {
+    if numWorkers <= 0 { numWorkers = 1 }
+
+    chunks = chunk(arr, numWorkers)
+    tasks = []
+
+    for chunkIdx in range(len(chunks)) {
+        let idx = chunkIdx
+        let chk = chunks[idx]
+        let task = async(fn() {
+            let results = []
+
+            for elemIdx in range(len(chk)) {
+                let elem = chk[elemIdx]
+                result, callErr = safe(func, elem)
+                if callErr != null {
+                    return callErr
+                }
+                if isError(result) {
+                    return result
+                }
+
+                results = push(results, result)
+            }
+
+            return results
+        })
+        tasks = push(tasks, task)
+    }
+
+    out = channel(64)
+    errCh = channel(1)
+
+    async(fn() {
+        let finalResults = []
+        let myErr = null
+
+        for t in tasks {
+            chunkResults = await(t)
+            if isError(chunkResults) {
+                myErr = chunkResults
+                break
+            }
+            finalResults = push(finalResults, chunkResults)
+        }
+
+        if myErr != null {
+            send(errCh, myErr)
+        } else {
+            for chunk in finalResults {
+                for item in chunk {
+                    if send(out, item) == false {
+                        break
+                    }
+                }
+            }
+            send(errCh, null)
+        }
+
+        close(out)
+    })
+
+    return Stream { ch: out, errCh: errCh }
+}
+
+
+
+// ========================================
+// parallel_filter(arr, func, numWorkers) -> Stream
+//
+// Keep only elements where func(element) returns true.
+// Returns Stream of matching elements (order-preserving).
+// Early termination on error.
+// ========================================
+fn parallel_filter(arr, func, numWorkers) {
+    if numWorkers <= 0 { numWorkers = 1 }
+
+    chunks = chunk(arr, numWorkers)
+    tasks = []
+
+    for chunkIdx in range(len(chunks)) {
+        let idx = chunkIdx
+        let chk = chunks[idx]
+        let task = async(fn() {
+            let results = []
+
+            for elemIdx in range(len(chk)) {
+                let elem = chk[elemIdx]
+                keep, callErr = safe(func, elem)
+                if callErr != null {
+                    return callErr
+                }
+                if isError(keep) {
+                    return keep
+                }
+                if keep {
+                    results = push(results, elem)
+                }
+            }
+
+            return results
+        })
+        tasks = push(tasks, task)
+    }
+
+    out = channel(64)
+    errCh = channel(1)
+
+    async(fn() {
+        let finalResults = []
+        let myErr = null
+
+        for t in tasks {
+            chunkResults = await(t)
+            if isError(chunkResults) {
+                myErr = chunkResults
+                break
+            }
+            finalResults = push(finalResults, chunkResults)
+        }
+
+        if myErr != null {
+            send(errCh, myErr)
+        } else {
+            for chunk in finalResults {
+                for item in chunk {
+                    if send(out, item) == false {
+                        break
+                    }
+                }
+            }
+            send(errCh, null)
+        }
+
+        close(out)
+    })
+
+    return Stream { ch: out, errCh: errCh }
+}
+
+// ========================================
+// Helper: _makeReduceWorker — properly captures range to avoid closure bugs
+// ========================================
+fn _makeReduceWorker(startIdx, endIdx, arr, init, chunkReduceFn) {
+    return async(fn() {
+        let acc = init
+
+        let i = startIdx
+        while i < endIdx {
+            let elem = arr[i]
+
+            result, callErr = safe(chunkReduceFn, acc, elem)
+            if callErr != null {
+                return callErr
+            }
+            if isError(result) {
+                return result
+            }
+
+            acc = result
+            i = i + 1
+        }
+
+        return acc
+    })
+}
+
+// ========================================
+// parallel_reduce(arr, chunkReduceFn, mergeFn, numWorkers, init) -> (value, error)
+//
+// Parallel fold with custom merge strategy.
+// Each worker reduces its chunk independently.
+// A merge phase combines partial results.
+//
+// Example (sum):
+//   sum, err = parallel_reduce([1..1000], fn(a,x){a+x}, fn(a,b){a+b}, 4, 0)
+//
+// Example (string concat):
+//   result, err = parallel_reduce(strs, fn(a,x){a+x}, fn(a,b){a+b}, 4, "")
+// ========================================
+fn parallel_reduce(arr, chunkReduceFn, mergeFn, numWorkers, init) {
+    if numWorkers <= 0 { numWorkers = 1 }
+
+    let n = len(arr)
+    if n == 0 { return init, null }
+
+    if numWorkers > n { numWorkers = n }
+
+    // ----------------------------------------
+    // Work partitioning (no chunk copying)
+    // ----------------------------------------
+    let base = n / numWorkers
+    let rem = n % numWorkers
+
+    let tasks = makeArray(numWorkers, null)
+
+    let start = 0
+    let w = 0
+
+    while w < numWorkers {
+        let size = base
+        if w < rem { size = size + 1 }
+
+        let s = start
+        let e = start + size
+
+        // Use helper to properly capture range values
+        tasks[w] = _makeReduceWorker(s, e, arr, init, chunkReduceFn)
+
+        start = e
+        w = w + 1
+    }
+
+    // ----------------------------------------
+    // Collect partial results (preallocated)
+    // ----------------------------------------
+    let partialResults = makeArray(numWorkers, null)
+
+    let i = 0
+    while i < numWorkers {
+        let result = await(tasks[i])
+
+        if isError(result) {
+            return null, result
+        }
+
+        partialResults[i] = result
+        i = i + 1
+    }
+
+    // ----------------------------------------
+    // Merge phase
+    // ----------------------------------------
+    let merged = init
+
+    let j = 0
+    while j < numWorkers {
+        let pr = partialResults[j]
+
+        mergeResult, mergeErr = safe(mergeFn, merged, pr)
+        if mergeErr != null { return null, mergeErr }
+        if isError(mergeResult) { return null, mergeResult }
+
+        merged = mergeResult
+        j = j + 1
+    }
+
+    return merged, null
+}
+
+
+// ========================================
+// Helper: _makeEveryWorker — properly captures range
+// ========================================
+fn _makeEveryWorker(startIdx, endIdx, arr, func, done) {
+    return async(fn() {
+        let i = startIdx
+        while i < endIdx {
+            // cooperative cancellation
+            if recvNonBlock(done) != null {
+                return false
+            }
+
+            let elem = arr[i]
+            result, callErr = safe(func, elem)
+
+            if callErr != null {
+                send(done, true)
+                return false
+            }
+
+            if isError(result) {
+                send(done, true)
+                return false
+            }
+
+            if result != true {
+                send(done, true)
+                return false
+            }
+
+            i = i + 1
+        }
+
+        return true
+    })
+}
+
+// ========================================
+// parallel_every(arr, func, numWorkers) -> bool
+//
+// Returns true iff func returns true for all elements.
+// Short-circuits: first false result cancels remaining workers.
+// ========================================
+fn parallel_every(arr, func, numWorkers) {
+    if numWorkers <= 0 { numWorkers = 1 }
+
+    let n = len(arr)
+    if n == 0 { return true }
+
+    if numWorkers > n { numWorkers = n }
+
+    // ----------------------------------------
+    // Work partitioning (no chunk copying)
+    // ----------------------------------------
+    let base = n / numWorkers
+    let rem = n % numWorkers
+
+    let tasks = makeArray(numWorkers, null)
+
+    // cancellation signal
+    let done = channel(1)
+
+    let start = 0
+    let w = 0
+
+    while w < numWorkers {
+        let size = base
+        if w < rem { size = size + 1 }
+
+        let s = start
+        let e = start + size
+
+        tasks[w] = _makeEveryWorker(s, e, arr, func, done)
+
+        start = e
+        w = w + 1
+    }
+
+    // ----------------------------------------
+    // Collect results (early exit)
+    // ----------------------------------------
+    let i = 0
+    while i < numWorkers {
+        let result = await(tasks[i])
+
+        if result != true {
+            send(done, true)
+            return false
+        }
+
+        i = i + 1
+    }
+
+    return true
+}
+
+// ========================================
+// Helper: _makeSomeWorker — properly captures range
+// ========================================
+fn _makeSomeWorker(startIdx, endIdx, arr, func, done) {
+    return async(fn() {
+        let i = startIdx
+        while i < endIdx {
+            // cooperative cancellation
+            if recvNonBlock(done) != null {
+                return false
+            }
+
+            let elem = arr[i]
+            result, callErr = safe(func, elem)
+
+            if callErr != null {
+                send(done, true)
+                return false
+            }
+
+            if isError(result) {
+                send(done, true)
+                return false
+            }
+
+            if result == true {
+                // success: signal others to stop
+                send(done, true)
+                return true
+            }
+
+            i = i + 1
+        }
+
+        return false
+    })
+}
+
+// ========================================
+// parallel_some(arr, func, numWorkers) -> bool
+//
+// Returns true if func returns true for any element.
+// Short-circuits: first true result cancels remaining workers.
+// ========================================
+fn parallel_some(arr, func, numWorkers) {
+    if numWorkers <= 0 { numWorkers = 1 }
+
+    let n = len(arr)
+    if n == 0 { return false }
+
+    if numWorkers > n { numWorkers = n }
+
+    // ----------------------------------------
+    // Work partitioning (no chunk copying)
+    // ----------------------------------------
+    let base = n / numWorkers
+    let rem = n % numWorkers
+
+    let tasks = makeArray(numWorkers, null)
+
+    // cancellation signal
+    let done = channel(1)
+
+    let start = 0
+    let w = 0
+
+    while w < numWorkers {
+        let size = base
+        if w < rem { size = size + 1 }
+
+        let s = start
+        let e = start + size
+
+        tasks[w] = _makeSomeWorker(s, e, arr, func, done)
+
+        start = e
+        w = w + 1
+    }
+
+    // ----------------------------------------
+    // Collect results (early success)
+    // ----------------------------------------
+    let i = 0
+    while i < numWorkers {
+        let result = await(tasks[i])
+
+        if result == true {
+            send(done, true)
+            return true
+        }
+
+        i = i + 1
+    }
+
+    return false
+}
+
+
+// ========================================
+// Helper: _makeFindWorker — properly captures range
+// ========================================
+fn _makeFindWorker(startIdx, endIdx, arr, func, done) {
+    return async(fn() {
+        let i = startIdx
+        while i < endIdx {
+            // cooperative cancellation
+            if recvNonBlock(done) != null {
+                return null
+            }
+
+            let elem = arr[i]
+
+            result, callErr = safe(func, elem)
+            if callErr != null {
+                send(done, true)
+                return null
+            }
+            if isError(result) {
+                send(done, true)
+                return null
+            }
+
+            if result == true {
+                // found match → cancel others
+                send(done, true)
+                return elem
+            }
+
+            i = i + 1
+        }
+
+        return null
+    })
+}
+
+// ========================================
+// parallel_find(arr, func, numWorkers) -> (value, null) | (null, null)
+//
+// Returns first element where func returns true.
+// Short-circuits: first match cancels remaining workers.
+// ========================================
+fn parallel_find(arr, func, numWorkers) {
+    if numWorkers <= 0 { numWorkers = 1 }
+
+    let n = len(arr)
+    if n == 0 { return null, null }
+
+    if numWorkers > n { numWorkers = n }
+
+    // ----------------------------------------
+    // Work partitioning (no chunk copying)
+    // ----------------------------------------
+    let base = n / numWorkers
+    let rem = n % numWorkers
+
+    let tasks = makeArray(numWorkers, null)
+
+    // cancellation signal
+    let done = channel(1)
+
+    let start = 0
+    let w = 0
+
+    while w < numWorkers {
+        let size = base
+        if w < rem { size = size + 1 }
+
+        let s = start
+        let e = start + size
+
+        tasks[w] = _makeFindWorker(s, e, arr, func, done)
+
+        start = e
+        w = w + 1
+    }
+
+    // ----------------------------------------
+    // Collect results (early success)
+    // ----------------------------------------
+    let i = 0
+    while i < numWorkers {
+        let result = await(tasks[i])
+
+        if result != null {
+            send(done, true)
+            return result, null
+        }
+
+        i = i + 1
+    }
+
+    return null, null
+}
+
+
+
+// HELPERS - used by functions above
+/ ========================================
+// Helper: chunk(arr, n) — split array into n sub-arrays
+// ========================================
+fn chunk(arr, n) {
+    if n <= 0 { return [] }
+    if len(arr) == 0 { return [] }
+    if n > len(arr) { n = len(arr) }
+
+    let arrLen = len(arr)
+    let chunkSize = arrLen / n
+    let remainder = arrLen % n
+
+    let result = makeArray(n, null)
+    let start = 0
+
+    let i = 0
+    while i < n {
+        let size = chunkSize
+        if i < remainder { size = size + 1 }
+
+        let end = start + size
+        let sub = makeArray(size, null)
+
+        let j = 0
+        while j < size {
+            sub[j] = arr[start + j]
+            j = j + 1
+        }
+
+        result[i] = sub
+        start = end
+        i = i + 1
+    }
+
+    return result
+}

@@ -5,7 +5,7 @@ println(format("integer: %d", 42))
 println(format("padded:  %05d", 42))
 println(format("float:   %.2f", 3.14159))
 println(format("bool:    %t", true))
-println(format("%s is %d years old", "Karl", 99))
+println(format("%s is %d years old", "Frog", 99))
 
 // substr() tests
 println("")

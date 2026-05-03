@@ -34,6 +34,28 @@
 
     KLEX_PATH=/path/to/stdlib ./klex myprogram.lex
 
+  Performance tuning:
+
+    MAXPROCS environment variable controls the number of OS threads used for
+    parallel execution. Defaults to 12 (empirically optimized). Override to
+    match your CPU core count or for benchmarking:
+
+      MAXPROCS=8 ./klex myprogram.lex      use 8 OS threads
+      MAXPROCS=16 ./klex myprogram.lex     use 16 OS threads
+
+    -cpuprofile flag generates a CPU profile for performance analysis. Useful
+    when debugging slow programs or tuning parallel workloads. Run with:
+
+      ./klex -cpuprofile=cpu.prof myprogram.lex
+
+    This writes a binary profile file to cpu.prof. Analyze it with:
+
+      go tool pprof cpu.prof
+
+    Use MAXPROCS and -cpuprofile together when optimizing:
+
+      MAXPROCS=12 ./klex -cpuprofile=cpu.prof myprogram.lex
+
   Error messages include the line and column number where the problem occurred.
 
   Exit codes:
@@ -655,6 +677,16 @@
     Functions with default parameters accept between the number of required
     parameters and the total number of parameters (inclusive).
 
+    RESERVED PARAMETER NAMES
+
+    The keyword "fn" is reserved and cannot be used as a parameter name.
+    Using "fn" as a parameter causes the parser to miscount the function's
+    arity, leading to confusing "expects N argument(s), got M" errors.
+    Use alternative names: "func", "f", "callback", "fn_arg", etc.
+
+      fn bad(arr, fn, numWorkers) { ... }      // WRONG: fn is reserved
+      fn good(arr, func, numWorkers) { ... }   // RIGHT
+
 
   DEFAULT PARAMETER VALUES
 
@@ -677,6 +709,50 @@
       environment — they are not frozen at definition time.
     - Defaults work in named functions, anonymous functions, and struct methods.
     - Variadic (...) is incompatible with defaults on the variadic parameter itself.
+
+
+  OPTIONAL TYPE ANNOTATIONS
+
+    Function parameters and return types can be annotated with type names.
+    Type annotations are optional and purely for documentation and IDE support —
+    they are not enforced at runtime.
+
+    Syntax: type-first, with return type after the closing parenthesis.
+
+      fn add(integer a, integer b): integer {
+          return a + b
+      }
+
+      fn greet(string name): string {
+          return "hello, " + name
+      }
+
+      fn process(array data) {
+          for item in data { println(item) }
+      }
+
+    Valid type names: integer, float, string, boolean, array, hash, function,
+    null, task, channel, error, tuple, struct
+
+    Rules:
+    - Type annotations are optional (not required).
+    - If any parameter has a type annotation, ALL parameters must be annotated
+      (all-or-nothing rule).
+    - Return type annotation is optional even if parameters are annotated.
+    - Annotations apply to named functions, anonymous functions, and struct methods.
+    - Type annotations improve IDE hover tooltips and enable better code
+      documentation without changing runtime behavior.
+
+    Example with mixed features:
+
+      fn divide(integer a, integer b): array {
+          if b == 0 { return null, "division by zero" }
+          return a / b, null
+      }
+
+      fn joinWith(string sep, parts...): string {
+          return join(parts, sep)
+      }
 
 
   VARIADIC FUNCTIONS
@@ -875,6 +951,26 @@
     len(array)               number of elements
     push(array, value)       new array with value appended (does not mutate)
     pop(array)               new array with last element removed (does not mutate)
+    concat(array1, array2)   new array containing all elements of array1 followed by
+                             array2; single allocation, faster than looping push
+    makeArray(size)          create array of given size with null elements
+    makeArray(size, default) create array of given size with default value in each element
+      Pre-allocates an array in O(n) time. Essential for performance: using push() in a
+      loop is O(n²) and extremely slow for large arrays (100x slower for 1M elements).
+        arr = makeArray(10)          → [null, null, null, null, null, null, null, null, null, null]
+        arr = makeArray(5, 0)        → [0, 0, 0, 0, 0]
+        arr = makeArray(1000000, 0)
+        i = 0
+        while i < 1000000 {
+          arr[i] = i  // Fast: O(n) total
+          i = i + 1
+        }
+      Avoid this (very slow):
+        arr = []
+        while i < 1000000 {
+          arr = push(arr, i)  // Slow: O(n²) total - creates new array each iteration
+          i = i + 1
+        }
 
     range(stop)
     range(start, stop)
@@ -1387,6 +1483,72 @@
     urlDecode(s)            returns (string, err)
 
 
+  compress.lex — data compression (gzip and deflate)
+
+    compress(data)          gzip compress string, returns (compressed, err)
+    decompress(data)        gzip decompress, returns (decompressed, err)
+    deflate(data)           deflate compress, returns (compressed, err)
+    inflate(data)           deflate decompress, returns (decompressed, err)
+    compressionRatio(orig, comp)    returns ratio original/compressed
+    compressedSize(data)    returns size after gzip compression
+    savings(orig, comp)     returns human-readable savings string
+    compressFile(path)      read file and return gzip-compressed contents
+    decompressFile(path)    read gzip file and return decompressed contents
+    compressMany(items)     compress array of strings, returns (array, err)
+    decompressMany(items)   decompress array of strings, returns (array, err)
+
+
+  csv.lex — CSV and TSV parsing and formatting (RFC 4180)
+
+    PARSING:
+    parse(data)             parse comma-delimited CSV, returns (rows, err)
+    parseTSV(data)          parse tab-delimited TSV, returns (rows, err)
+    parseDelimited(data, d) parse with custom delimiter, returns (rows, err)
+
+    FORMATTING:
+    format(rows)            format array of arrays to CSV, returns (string, err)
+    formatTSV(rows)         format array of arrays to TSV, returns (string, err)
+    formatDelimited(rows,d) format with custom delimiter, returns (string, err)
+
+    HEADER-AWARE:
+    parseWithHeaders(data)  parse CSV, first row as keys, returns (records, err)
+    headers(data)           extract first row as array, returns (headers, err)
+    dataRows(data)          extract all rows except first, returns (rows, err)
+
+    UTILITIES:
+    rowCount(data)          count rows in CSV data, returns (count, err)
+    columnCount(data)       count columns (from first row), returns (count, err)
+    column(rows, idx)       extract single column by index, returns (col, err)
+    isEmpty(data)           check if CSV is empty, returns boolean
+
+
+  crypto.lex — cryptographic functions (hashing, HMAC, bcrypt, random tokens)
+
+    HASHING:
+    hash(data)              SHA256 hash, returns hex string
+    sha256(data)            SHA256 hash (64 hex chars)
+    sha512(data)            SHA512 hash (128 hex chars)
+    md5(data)               MD5 hash (DEPRECATED: use SHA256)
+
+    HMAC (Message Authentication):
+    hmac(key, data)         HMAC-SHA256, returns hex string
+    hmacSha256(key, data)   HMAC-SHA256 (64 hex chars)
+    hmacSha512(key, data)   HMAC-SHA512 (128 hex chars)
+
+    PASSWORD HASHING (bcrypt):
+    hashPassword(pwd)       hash password with bcrypt, returns (hash, err)
+    verifyPassword(pwd, h)  verify password against bcrypt hash, returns (bool, err)
+
+    SECURE RANDOM:
+    randomToken(length)     generate random hex token, returns (token, err)
+    randomHex(byteCount)    alias for randomToken
+
+    SECURITY UTILITIES:
+    areEqual(a, b)          constant-time string comparison (timing-attack resistant)
+    isValidHash(h, type)    check if string looks like hash (type: sha256, sha512, md5, bcrypt)
+    hashSize(type)          returns expected hash size in hex chars
+
+
   cache.lex — in-memory key/value cache (instantiable)
 
     c = cache.newCache()
@@ -1405,6 +1567,7 @@
   datetime.lex — date and time
 
     now()                   DateTime for current UTC time
+    nowNanos()              current time in nanoseconds (high-resolution timing)
     fromUnix(unix)          DateTime from unix timestamp
     format(dt, layout)      formatted string; layout uses Go time format
     parse(s, layout)        returns (DateTime, err)
@@ -1442,17 +1605,42 @@
     read(path)              returns (content, err)
     write(path, content)    returns (null, err) — creates or truncates
     append(path, content)   returns (null, err)
-    exists(path)            returns bool
-    remove(path)            returns (null, err)
-    removeAll(path)         returns (null, err)
-    mkdir(path)             returns (null, err)
-    mkdirAll(path)          returns (null, err)
-    listDir(path)           returns (array_of_names, err)
+    exists(path)            returns bool — false means absent or inaccessible
+    remove(path)            returns (null, err) — file or empty directory
+    removeAll(path)         returns (null, err) — removes path and all contents
+    mkdir(path)             returns (null, err) — parent must exist
+    mkdirAll(path)          returns (null, err) — creates all missing parents
+    listDir(path)           returns (array_of_names, err) — names only, sorted
     rename(src, dst)        returns (null, err)
-    stat(path)              returns (FileInfo, err)
-    copy(src, dst)          returns (null, err)
+    copy(src, dst)          returns (null, err) — byte-for-byte copy
 
-    FileInfo fields: name, size, isDir, modTime (unix seconds)
+    stat(path)              returns (FileInfo, err) — follows symbolic links
+    lstat(path)             returns (FileInfo, err) — does not follow symlinks;
+                            if path is a symlink, FileInfo describes the link
+                            itself with isSymlink == true
+
+    chmod(path, mode)       returns (null, err) — mode is an octal string
+                            e.g. "755", "644"
+
+    readDir(path)           returns (array_of_FileInfo, err) — full metadata
+                            per entry; use instead of listDir when size, mode
+                            or type information is needed
+
+    symlink(target, link)   returns (null, err) — creates a symbolic link
+    readlink(path)          returns (target, err) — reads a symlink's target
+
+    tmpFile(dir, pattern)   returns (path, err) — creates and closes a new
+                            temp file; pass "" for dir to use system temp dir
+    tmpDir(dir, pattern)    returns (path, err) — creates a new temp directory;
+                            pass "" for dir to use system temp dir
+
+    FileInfo fields:
+      name       string — filename without directory
+      size       integer — size in bytes
+      isDir      bool
+      isSymlink  bool — true only from lstat when path is a symlink
+      modTime    integer — unix timestamp in seconds (compatible with datetime.lex fromUnix)
+      mode       string — octal permission string, e.g. "0755", "0644"
 
 
   functional.lex — higher-order function utilities
@@ -1466,6 +1654,40 @@
                             maximum 3 total arguments (fixed + remaining)
     flip(fnRef)             returns fn with first two args swapped
                             maximum 3 total arguments
+
+
+  frogray.lex — high-performance ray tracing
+
+    Vector math (using [x, y, z] arrays):
+      vec3_add(a, b)           vector addition
+      vec3_sub(a, b)           vector subtraction
+      vec3_scale(v, scalar)    scalar multiplication
+      vec3_dot(a, b)           dot product
+      vec3_cross(a, b)         cross product
+      vec3_length(v)           Euclidean length
+      vec3_normalize(v)        unit vector
+      vec3_reflect(v, normal)  reflection formula
+
+    Materials and lights:
+      create_material(r, g, b, reflectance, shininess)
+                               create a material with RGB, reflectance factor, and shininess
+      create_light(x, y, z, r, g, b, intensity)
+                               create a point light at (x, y, z)
+
+    Shapes:
+      create_sphere(cx, cy, cz, radius, material)
+                               create a sphere primitive
+      create_plane(px, py, pz, nx, ny, nz, material)
+                               create a plane primitive (pos and normal)
+
+    Rendering:
+      render_parallel(width, height, camera, objects, lights, samples, numWorkers)
+                               render with MSAA and parallel tile-based processing
+      write_ppm(filename, width, height, pixels)
+                               write render output to PPM file
+
+    Usage: pre-allocate objects and lights arrays, set up camera and light position,
+    call render_parallel to get pixel buffer, call write_ppm to save result.
 
 
   graph.lex — reactive dependency graph (instantiable)
@@ -1482,20 +1704,22 @@
     g.debug()               print full graph state
 
 
-  hash.lex — hash/dictionary utilities
+  hash.lex — hash functions and map utilities
 
-    merge(a, b)             new hash combining a and b (b wins on conflicts)
-    invert(h)               new hash with keys and values swapped
-    pick(h, keys)           new hash with only the listed keys
-    omit(h, keys)           new hash without the listed keys
-    has(h, key)             alias for hasKey
-    size(h)                 number of keys
-    xor(a, b)               bitwise XOR of two integers (32-bit; used internally
-                            by the hashing functions)
-    hash(s)                 FNV-1a hash of string, returns integer
-    hashBytes(arr)          FNV-1a hash of byte array
-    hashFile(content)       FNV-1a hash of file content string
-    combineHash(a, b)       combine two hash integers
+    Map utilities:
+      merge(a, b)           new hash combining a and b (b wins on conflicts)
+      invert(h)             new hash with keys and values swapped
+      pick(h, keys)         new hash with only the listed keys
+      omit(h, keys)         new hash without the listed keys
+      values(h)             array of all values
+
+    Hashing (FNV-1a):
+      hash(s)               hash of string, returns integer
+      hashBytes(arr)        hash of byte array
+      combineHash(a, b)     combine two hash integers
+
+    For key existence checks, use builtin hasKey(h, key).
+    For map size, use builtin len(h).
 
 
   http.lex — low-level HTTP client
@@ -1568,12 +1792,19 @@
                             current values from all sources
 
 
-  os.lex — operating system interface
+  OPERATING SYSTEM BUILTINS
 
-    getenv(key)    setenv(key, val)    cwd()    hostname()
-    pid()          args()              exit(code)
+    _osGetenv(key)           returns environment variable value, or null if unset
+    _osSetenv(key, val)      set environment variable, returns (null, err)
+    _osCwd()                 current working directory, returns (path, err)
+    _osHostname()            machine host name, returns (name, err)
+    _osPid()                 process ID of running interpreter
+    _osArgs()                command-line arguments as array of strings
+    _osExit(code)            terminate process with exit code (does not return)
 
-    args() returns full os.Args: index 0 = binary, 1 = script, 2+ = user args.
+    _osArgs() returns full os.Args: index 0 = binary, 1 = script, 2+ = user args.
+    _osGetenv returns null for unset variables (absence is information, not an error).
+    All other fallible operations follow the (value, err) tuple convention.
 
 
   path.lex — file path manipulation
@@ -1581,13 +1812,6 @@
     normalize(p)  parts(p)   join(a,b)   joinAll(parts...)
     basename(p)   dirname(p) ext(p)      stripExt(p)
     isAbsolute(p) isRelative(p)          clean(p)
-
-
-  process.lex — subprocess execution
-
-    run(cmd, args)              returns (stdout, err)
-    exec(cmd, args)             returns (stdout, stderr, exitCode, err)
-    shell(cmdStr)               returns (stdout, err) via /bin/sh -c
 
 
   regex.lex — regular expressions (Go RE2 syntax)
@@ -1602,15 +1826,43 @@
     groupsAll(pattern, str)     returns (array, err)
 
 
-  rest.lex — JSON REST client
+  rest.lex — JSON REST client with authentication
 
-    get(url)                    returns (RestResponse, err)
-    getWith(url, headers)       returns (RestResponse, err)
-    post(url, body)             returns (RestResponse, err)
-    put(url, body)              returns (RestResponse, err)
-    patch(url, body)            returns (RestResponse, err)
-    del(url)                    returns (RestResponse, err)
-    isOk(resp)                  true if status 200-299
+    Basic requests:
+      get(url)                  returns (RestResponse, err)
+      post(url, body)           returns (RestResponse, err)
+      put(url, body)            returns (RestResponse, err)
+      patch(url, body)          returns (RestResponse, err)
+      del(url)                  returns (RestResponse, err)
+
+    With custom headers:
+      getWith(url, headers)     returns (RestResponse, err)
+      postWith(url, body, headers)
+      putWith(url, body, headers)
+      patchWith(url, body, headers)
+      delWith(url, headers)
+
+    Authentication helpers — create Authorization header values:
+      bearerToken(token)        returns "Bearer <token>"
+      basicAuth(username, password)  returns "Basic <base64>"
+      apiKeyHeader(key)         returns key as-is (user specifies header name)
+
+    Convenience wrappers with Bearer auth:
+      getBearer(url, token)
+      postBearer(url, body, token)
+      putBearer(url, body, token)
+      patchBearer(url, body, token)
+      delBearer(url, token)
+
+    Convenience wrappers with Basic auth:
+      getBasic(url, username, password)
+      postBasic(url, body, username, password)
+      putBasic(url, body, username, password)
+      patchBasic(url, body, username, password)
+      delBasic(url, username, password)
+
+    Utilities:
+      isOk(resp)                true if status 200-299
 
     RestResponse fields: status, data, headers
     data is parsed JSON when Content-Type is application/json, else raw string.
@@ -1667,6 +1919,36 @@
       Curried builders: Map(f)  Filter(f)  Take(n)  Tap(f)  FlatMap(f)
 
 
+  parallel.lex — parallel data processing
+
+    Transform operations (return Stream):
+      pmap(arr, func, numWorkers)      map across array in parallel, returns Stream
+      parallel_filter(arr, func, numWorkers)
+                                       filter in parallel, returns Stream
+
+    Aggregation operations (return value):
+      parallel_reduce(arr, chunkReduceFn, mergeFn, numWorkers, init)
+                                       reduce with custom merge; returns (value, err)
+                                       Example: parallel_reduce([1..1000],
+                                                fn(a,x){a+x}, fn(a,b){a+b}, 4, 0)
+
+    Termination operations (return bool):
+      parallel_every(arr, func, numWorkers)   true if fn returns true for all
+      parallel_some(arr, func, numWorkers)    true if fn returns true for any
+      parallel_find(arr, func, numWorkers)    returns (first_match, null) or (null, null)
+
+    Design: Each transform chunked into numWorkers parallel tasks. Results
+    returned as a Stream for use with stream.lex's collect() or other
+    stream operations. Aggregations await all tasks before merging results.
+    Early termination: errors in any worker cancel remaining workers.
+
+      import "parallel.lex" as p
+      import "stream.lex" as s
+
+      result, err = s.collect(p.pmap([1..1000], fn(x) { x * 2 }, 4))
+      allEven = p.parallel_every([2, 4, 6, 8], fn(x) { x % 2 == 0 }, 2)
+
+
   stream_fusion.lex — single-pass eager stream fusion
 
     fuse(arr, steps...)       run arr through a pipeline of step functions
@@ -1686,13 +1968,25 @@
       )
 
 
-  strings.lex — string utilities
+  strings.lex — string utilities (not provided by builtins)
 
-    contains(str, sub)         repeat(str, n)      count(str, sub)
-    trimLeft(str)              trimRight(str)      trimSpace(str)
-    padLeft(str, width, char)  padRight(str, width, char)
-    toUpper(str)               toLower(str)
-    lines(str)                 words(str)
+    repeat(str, n)             str concatenated n times
+    count(str, sub)            number of non-overlapping occurrences
+    trimLeft(str)              remove leading whitespace
+    trimRight(str)             remove trailing whitespace
+    padLeft(str, width, char)  left-pad with char to width
+    padRight(str, width, char) right-pad with char to width
+    lines(str)                 split on newline
+    words(str)                 split on space
+
+    For string operations provided by builtins, use them directly:
+      startsWith(str, prefix)  use builtin
+      endsWith(str, suffix)    use builtin
+      indexOf(str, sub)        use builtin
+      replace(str, old, new)   use builtin
+      upper(str)               use builtin
+      lower(str)               use builtin
+      trim(str)                use builtin
 
 
   url.lex — URL encoding
@@ -1700,9 +1994,10 @@
     encode(s)   decode(s)   build(base, params)   joinPath(base, path)
 
 
-  uuid.lex — UUID generation
+  UUID GENERATION
 
-    v4()     returns a random UUID v4 string
+    _uuid()     returns a random UUID v4 string in format xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+                uses crypto/rand for proper randomness (not math/rand)
 
 
 --------------------------------------------------------------------------------

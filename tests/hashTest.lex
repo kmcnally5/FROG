@@ -1,14 +1,14 @@
 import "hash.lex" as h
 
 // 1. map utilities
-println("== has ==")
+println("== hasKey (builtin) ==")
 m = {"a": 1, "b": 2}
-println(h.has(m, "a"))    // true
-println(h.has(m, "z"))    // false
+println(hasKey(m, "a"))    // true
+println(hasKey(m, "z"))    // false
 
-println("== size ==")
-println(h.size(m))        // 2
-println(h.size({}))       // 0
+println("== len (builtin) ==")
+println(len(m))        // 2
+println(len({}))       // 0
 
 println("== values ==")
 single = {"x": 99}
@@ -33,13 +33,13 @@ println("== pick ==")
 picked = h.pick({"a": 1, "b": 2, "c": 3}, ["a", "c"])
 println(picked["a"])      // 1
 println(picked["c"])      // 3
-println(h.has(picked, "b"))  // false
+println(hasKey(picked, "b"))  // false
 
 println("== omit ==")
 omitted = h.omit({"a": 1, "b": 2, "c": 3}, ["b"])
 println(omitted["a"])     // 1
 println(omitted["c"])     // 3
-println(h.has(omitted, "b"))  // false
+println(hasKey(omitted, "b"))  // false
 
 // 2. hash functions
 println("== hash ==")
@@ -55,10 +55,6 @@ b1 = h.hashBytes([104, 101, 108, 108, 111])   // ord values of "hello"
 b2 = h.hashBytes([104, 101, 108, 108, 111])
 println(b1 == b2)         // true
 println(type(b1))         // INTEGER
-
-println("== hashFile ==")
-fh = h.hashFile("content")
-println(type(fh))         // INTEGER
 
 println("== combineHash ==")
 c1 = h.combineHash(100, 200)

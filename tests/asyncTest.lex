@@ -1,5 +1,8 @@
 import "async.lex" as a
 
+// Testing how reliable kLex is at running async tasks in parallel and collecting results with await_all() and parallel().
+// Hand tested/written in an effort to squeeze every last bit of performance and reliability out of the async system.
+
 println("== await_all ==")
 t1 = async(fn() { return 10 })
 t2 = async(fn() { return 20 })
@@ -12,8 +15,8 @@ println(results[1])      // 20
 println(results[2])      // 30
 
 println("== await_all preserves order ==")
-s1 = async(fn() { sleep(50)   return "slow" })
-s2 = async(fn() { sleep(10)   return "fast" })
+s1 = async(fn() { sleep(50) return "slow" })
+s2 = async(fn() { sleep(10) return "fast" })
 
 ordered = a.await_all([s1, s2])
 println(ordered[0])    // slow  (first task, even though it finished second)

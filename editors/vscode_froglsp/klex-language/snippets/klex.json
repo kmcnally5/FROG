@@ -1,0 +1,484 @@
+{
+
+  // ─── CONTROL FLOW ────────────────────────────────────────────────────────────
+
+  "if": {
+    "prefix": "if",
+    "body": ["if ${1:condition} {", "\t$0", "}"],
+    "description": "if statement"
+  },
+
+  "if/else": {
+    "prefix": "ife",
+    "body": ["if ${1:condition} {", "\t$2", "} else {", "\t$0", "}"],
+    "description": "if / else statement"
+  },
+
+  "while": {
+    "prefix": "while",
+    "body": ["while ${1:condition} {", "\t$0", "}"],
+    "description": "while loop"
+  },
+
+  "for-in": {
+    "prefix": "for",
+    "body": ["for ${1:item} in ${2:collection} {", "\t$0", "}"],
+    "description": "for-in loop"
+  },
+
+  "for-in with index": {
+    "prefix": "fori",
+    "body": ["for ${1:i}, ${2:val} in ${3:collection} {", "\t$0", "}"],
+    "description": "for-in loop with index variable"
+  },
+
+  "switch": {
+    "prefix": "switch",
+    "body": [
+      "switch ${1:expr} {",
+      "case ${2:value}:",
+      "\t$3",
+      "default:",
+      "\t$0",
+      "}"
+    ],
+    "description": "switch statement"
+  },
+
+  "return": {
+    "prefix": "return",
+    "body": ["return $0"],
+    "description": "return statement"
+  },
+
+  // ─── DECLARATIONS ────────────────────────────────────────────────────────────
+
+  "named function": {
+    "prefix": "fn",
+    "body": ["fn ${1:name}(${2:args}) {", "\t$0", "}"],
+    "description": "named function declaration"
+  },
+
+  "anonymous function": {
+    "prefix": "fna",
+    "body": ["fn(${1:args}) {", "\t$0", "}"],
+    "description": "anonymous function literal"
+  },
+
+  "let": {
+    "prefix": "let",
+    "body": ["let ${1:name} = $0"],
+    "description": "let binding (current scope only)"
+  },
+
+  "const": {
+    "prefix": "const",
+    "body": ["const ${1:NAME} = $0"],
+    "description": "constant declaration (immutable)"
+  },
+
+  "struct": {
+    "prefix": "struct",
+    "body": ["struct ${1:Name} {", "\t${2:field}", "}"],
+    "description": "struct definition"
+  },
+
+  "enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name} {", "\t${2:Variant}", "}"],
+    "description": "enum definition"
+  },
+
+  "import": {
+    "prefix": "import",
+    "body": ["import \"${1:module}\" as ${2:alias}"],
+    "description": "import a stdlib module"
+  },
+
+  // ─── ASYNC / CONCURRENCY ─────────────────────────────────────────────────────
+
+  "async": {
+    "prefix": "async",
+    "body": ["let ${1:task} = async(${2:fn}${3:, args})"],
+    "description": "launch a task asynchronously"
+  },
+
+  "await": {
+    "prefix": "await",
+    "body": ["await(${1:task})"],
+    "description": "block until task completes and return its result"
+  },
+
+  "async inline fn": {
+    "prefix": "asyncfn",
+    "body": ["async(fn() {", "\t$0", "})"],
+    "description": "async with an inline anonymous function"
+  },
+
+  "channel": {
+    "prefix": "channel",
+    "body": ["let ${1:ch} = channel()"],
+    "description": "unbuffered channel"
+  },
+
+  "buffered channel": {
+    "prefix": "chanb",
+    "body": ["let ${1:ch} = channel(${2:64})"],
+    "description": "buffered channel with capacity"
+  },
+
+  "send": {
+    "prefix": "send",
+    "body": ["send(${1:ch}, ${2:value})"],
+    "description": "send a value into a channel"
+  },
+
+  "recv": {
+    "prefix": "recv",
+    "body": ["${1:val}, ${2:ok} = recv(${3:ch})"],
+    "description": "receive a value from a channel"
+  },
+
+  "close": {
+    "prefix": "close",
+    "body": ["close(${1:ch})"],
+    "description": "close a channel"
+  },
+
+  "cancel": {
+    "prefix": "cancel",
+    "body": ["cancel(${1:ch})"],
+    "description": "cancel a channel (signal done to producer)"
+  },
+
+  "safe": {
+    "prefix": "safe",
+    "body": ["${1:result}, ${2:err} = safe(${3:fn}, ${4:args})"],
+    "description": "call fn safely; returns (result, null) or (null, error)"
+  },
+
+  "select": {
+    "prefix": "select",
+    "body": [
+      "select {",
+      "case ${1:val} = recv(${2:ch}):",
+      "\t$3",
+      "default:",
+      "\t$0",
+      "}"
+    ],
+    "description": "select statement for channel operations"
+  },
+
+  // ─── OUTPUT ──────────────────────────────────────────────────────────────────
+
+  "println": {
+    "prefix": "println",
+    "body": ["println($0)"],
+    "description": "print values each on its own line"
+  },
+
+  "print": {
+    "prefix": "print",
+    "body": ["print($0)"],
+    "description": "print values with no newline"
+  },
+
+  "format": {
+    "prefix": "format",
+    "body": ["format(\"${1:template}\", ${2:args})"],
+    "description": "format a string with positional placeholders"
+  },
+
+  // ─── ARRAY OPERATIONS ────────────────────────────────────────────────────────
+
+  "len": {
+    "prefix": "len",
+    "body": ["len(${1:collection})"],
+    "description": "number of elements in array, string, or hash"
+  },
+
+  "push": {
+    "prefix": "push",
+    "body": ["push(${1:arr}, ${2:value})"],
+    "description": "new array with value appended (non-mutating)"
+  },
+
+  "pop": {
+    "prefix": "pop",
+    "body": ["pop(${1:arr})"],
+    "description": "new array without last element (non-mutating)"
+  },
+
+  "concat": {
+    "prefix": "concat",
+    "body": ["concat(${1:arr1}, ${2:arr2})"],
+    "description": "merge two arrays into a new array (single allocation)"
+  },
+
+  "makeArray": {
+    "prefix": "makeArray",
+    "body": ["makeArray(${1:size}, ${2:default})"],
+    "description": "create array of size elements, each initialized to default (O(n) pre-allocation; use instead of push() in loops)"
+  },
+
+  "range": {
+    "prefix": "range",
+    "body": ["range(${1:n})"],
+    "description": "array of integers [0, n)"
+  },
+
+  "range start/stop": {
+    "prefix": "ranges",
+    "body": ["range(${1:start}, ${2:stop})"],
+    "description": "array of integers [start, stop)"
+  },
+
+  "range start/stop/step": {
+    "prefix": "rangest",
+    "body": ["range(${1:start}, ${2:stop}, ${3:step})"],
+    "description": "array of integers with step"
+  },
+
+  "slice": {
+    "prefix": "slice",
+    "body": ["slice(${1:arr}, ${2:start}, ${3:end})"],
+    "description": "sub-array by 0-based index, end exclusive"
+  },
+
+  "filter": {
+    "prefix": "filter",
+    "body": ["filter(${1:arr}, fn(${2:x}) { $0 })"],
+    "description": "return elements where predicate is true"
+  },
+
+  "map": {
+    "prefix": "map",
+    "body": ["map(${1:arr}, fn(${2:x}) { $0 })"],
+    "description": "apply function to every element, return new array"
+  },
+
+  "reduce": {
+    "prefix": "reduce",
+    "body": ["reduce(${1:arr}, fn(${2:acc}, ${3:x}) { $0 }, ${4:init})"],
+    "description": "fold array to a single value"
+  },
+
+  // ─── STRING OPERATIONS ───────────────────────────────────────────────────────
+
+  "split": {
+    "prefix": "split",
+    "body": ["split(${1:str}, \"${2:sep}\")"],
+    "description": "split string on separator, returns array"
+  },
+
+  "join": {
+    "prefix": "join",
+    "body": ["join(${1:arr}, \"${2:sep}\")"],
+    "description": "join array of strings with separator"
+  },
+
+  "substr": {
+    "prefix": "substr",
+    "body": ["substr(${1:str}, ${2:start}, ${3:end})"],
+    "description": "substring by 0-based index, end exclusive"
+  },
+
+  "upper": {
+    "prefix": "upper",
+    "body": ["upper(${1:str})"],
+    "description": "convert string to uppercase"
+  },
+
+  "lower": {
+    "prefix": "lower",
+    "body": ["lower(${1:str})"],
+    "description": "convert string to lowercase"
+  },
+
+  "trim": {
+    "prefix": "trim",
+    "body": ["trim(${1:str})"],
+    "description": "remove leading and trailing whitespace"
+  },
+
+  "replace": {
+    "prefix": "replace",
+    "body": ["replace(${1:str}, \"${2:old}\", \"${3:new}\")"],
+    "description": "replace all occurrences of old with new"
+  },
+
+  "indexOf": {
+    "prefix": "indexOf",
+    "body": ["indexOf(${1:str}, \"${2:sub}\")"],
+    "description": "index of first occurrence, or -1 if not found"
+  },
+
+  "startsWith": {
+    "prefix": "startsWith",
+    "body": ["startsWith(${1:str}, \"${2:prefix}\")"],
+    "description": "true if string starts with prefix"
+  },
+
+  "endsWith": {
+    "prefix": "endsWith",
+    "body": ["endsWith(${1:str}, \"${2:suffix}\")"],
+    "description": "true if string ends with suffix"
+  },
+
+  // ─── HASH OPERATIONS ─────────────────────────────────────────────────────────
+
+  "keys": {
+    "prefix": "keys",
+    "body": ["keys(${1:hash})"],
+    "description": "array of all keys in hash"
+  },
+
+  "values": {
+    "prefix": "values",
+    "body": ["values(${1:hash})"],
+    "description": "array of all values in hash"
+  },
+
+  "hasKey": {
+    "prefix": "hasKey",
+    "body": ["hasKey(${1:hash}, \"${2:key}\")"],
+    "description": "true if key exists in hash"
+  },
+
+  "delete": {
+    "prefix": "delete",
+    "body": ["delete(${1:hash}, \"${2:key}\")"],
+    "description": "new hash without the given key (non-mutating)"
+  },
+
+  // ─── TYPE CONVERSION ─────────────────────────────────────────────────────────
+
+  "str": {
+    "prefix": "str",
+    "body": ["str(${1:val})"],
+    "description": "convert value to string"
+  },
+
+  "int": {
+    "prefix": "int",
+    "body": ["int(${1:val})"],
+    "description": "convert value to integer"
+  },
+
+  "float": {
+    "prefix": "float",
+    "body": ["float(${1:val})"],
+    "description": "convert value to float"
+  },
+
+  "type": {
+    "prefix": "type",
+    "body": ["type(${1:val})"],
+    "description": "returns runtime type name as a string"
+  },
+
+  // ─── ERROR HANDLING ──────────────────────────────────────────────────────────
+
+  "error": {
+    "prefix": "error",
+    "body": ["error(\"${1:code}\", \"${2:message}\")"],
+    "description": "create a user error value"
+  },
+
+  "isError": {
+    "prefix": "isError",
+    "body": ["isError(${1:val})"],
+    "description": "true if val is an error object"
+  },
+
+  "assert": {
+    "prefix": "assert",
+    "body": ["assert(${1:condition}, \"${2:message}\")"],
+    "description": "halt with message if condition is false"
+  },
+
+  // ─── FILE I/O ────────────────────────────────────────────────────────────────
+
+  "readFile": {
+    "prefix": "readFile",
+    "body": ["${1:content}, ${2:err} = readFile(\"${3:path}\")"],
+    "description": "read entire file as a string"
+  },
+
+  "writeFile": {
+    "prefix": "writeFile",
+    "body": ["${1:_, err} = writeFile(\"${2:path}\", ${3:content})"],
+    "description": "write string to file (overwrites)"
+  },
+
+  "appendFile": {
+    "prefix": "appendFile",
+    "body": ["${1:_, err} = appendFile(\"${2:path}\", ${3:content})"],
+    "description": "append string to file"
+  },
+
+  // ─── SYSTEM ──────────────────────────────────────────────────────────────────
+
+  "input": {
+    "prefix": "input",
+    "body": ["input(\"${1:prompt}\")"],
+    "description": "read a line from stdin"
+  },
+
+  "env": {
+    "prefix": "env",
+    "body": ["env(\"${1:VAR}\")"],
+    "description": "read an environment variable"
+  },
+
+  "exec": {
+    "prefix": "exec",
+    "body": ["${1:out}, ${2:err} = exec(\"${3:command}\")"],
+    "description": "run a shell command, return stdout"
+  },
+
+  "sleep": {
+    "prefix": "sleep",
+    "body": ["sleep(${1:ms})"],
+    "description": "pause execution for ms milliseconds"
+  },
+
+  // ─── COMMON PATTERNS ─────────────────────────────────────────────────────────
+
+  "parallel fan-out": {
+    "prefix": "parallel",
+    "body": [
+      "fn ${1:worker}(${2:args}) {",
+      "\t$3",
+      "}",
+      "",
+      "let ${4:tasks} = []",
+      "for ${5:i} in range(${6:threads}) {",
+      "\t${4:tasks} = push(${4:tasks}, async(${1:worker}, ${5:i}))",
+      "}",
+      "",
+      "let ${7:results} = []",
+      "for ${8:t} in ${4:tasks} {",
+      "\t${7:results} = concat(${7:results}, await(${8:t}))",
+      "}"
+    ],
+    "description": "parallel fan-out pattern using async/await/concat"
+  },
+
+  "stream pipe": {
+    "prefix": "pipe",
+    "body": [
+      "import \"stream.lex\" as s",
+      "",
+      "let ${1:result}, ${2:err} = s.pipe(",
+      "\t${3:source},",
+      "\ts.Filter(fn(${4:x}) { $5 }),",
+      "\ts.Map(fn(${6:x}) { $7 }),",
+      "\ts.collect",
+      ")"
+    ],
+    "description": "stream pipeline using stream.lex"
+  }
+
+}

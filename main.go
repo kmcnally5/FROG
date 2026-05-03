@@ -21,38 +21,74 @@ package main
 //   klex <file>    — run a .lex source file
 
 import (
+	"flag"
 	"fmt"
 	"klex/eval"
 	"klex/lexer"
 	"klex/parser"
 	"klex/repl"
 	"os"
+	"runtime"
+	"runtime/pprof"
 )
 
-const Version = "v0.3.1"
+const Version = "v0.3.11x"
 
 func main() {
 	eval.KLexVersion = Version
 
+	// Optimize for parallelism: empirically tuned to 12 based on GOMAXPROCS benchmarking.
+	// This accounts for hyperthreading and scheduler oversubscription benefits.
+	// Users can override via MAXPROCS environment variable.
+	if os.Getenv("MAXPROCS") == "" {
+		runtime.GOMAXPROCS(12)
+	} else {
+		var procs int
+		if _, err := fmt.Sscanf(os.Getenv("MAXPROCS"), "%d", &procs); err == nil && procs > 0 {
+			runtime.GOMAXPROCS(procs)
+		}
+	}
+
+	cpuprofile := flag.String("cpuprofile", "", "write CPU profile to file")
+	flag.Parse()
+
+	// Start CPU profiling if requested.
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: cannot create CPU profile: %v\n", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Fprintf(os.Stderr, "error: cannot start CPU profile: %v\n", err)
+			os.Exit(1)
+		}
+		defer pprof.StopCPUProfile()
+	}
+
+	// Get remaining positional arguments after flag parsing.
+	args := flag.Args()
+
 	// No arguments — launch the interactive REPL.
-	if len(os.Args) == 1 {
+	if len(args) == 0 {
 		repl.Start()
 		return
 	}
 
 	// --version / -v — print version and exit.
-	if os.Args[1] == "--version" || os.Args[1] == "-v" {
+	if args[0] == "--version" || args[0] == "-v" {
 		fmt.Println("kLex (FROG) " + Version)
 		return
 	}
 
-	if len(os.Args) > 2 {
+	if len(args) > 1 {
 		fmt.Fprintln(os.Stderr, "usage: klex [file.lex]")
 		os.Exit(1)
 	}
 
 	// One argument — run the given source file.
-	path := os.Args[1]
+	path := args[0]
 	src, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: cannot read %s: %v\n", path, err)

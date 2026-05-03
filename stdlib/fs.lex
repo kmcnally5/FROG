@@ -16,7 +16,7 @@
 //   println(content)
 
 struct FileInfo {
-    name, size, isDir, modTime
+    name, size, isDir, isSymlink, modTime, mode
 }
 
 // read reads an entire file and returns (content, err).
@@ -70,16 +70,83 @@ fn rename(src, dst) {
     return _fsRename(src, dst)
 }
 
-// stat returns (FileInfo, err) for the given path.
+// stat returns (FileInfo, err) for the given path. Follows symbolic links.
 fn stat(path) {
     info, err = _fsStat(path)
     if err != null { return null, err }
     return FileInfo {
-        name:    info["name"],
-        size:    info["size"],
-        isDir:   info["isDir"],
-        modTime: info["modTime"]
+        name:      info["name"],
+        size:      info["size"],
+        isDir:     info["isDir"],
+        isSymlink: info["isSymlink"],
+        modTime:   info["modTime"],
+        mode:      info["mode"]
     }, null
+}
+
+// lstat returns (FileInfo, err) like stat, but does not follow symbolic links.
+// If path names a symlink, FileInfo describes the link itself (isSymlink == true).
+fn lstat(path) {
+    info, err = _fsLstat(path)
+    if err != null { return null, err }
+    return FileInfo {
+        name:      info["name"],
+        size:      info["size"],
+        isDir:     info["isDir"],
+        isSymlink: info["isSymlink"],
+        modTime:   info["modTime"],
+        mode:      info["mode"]
+    }, null
+}
+
+// chmod changes the permission bits of the named file.
+// mode is an octal string such as "755" or "644". Returns (null, err).
+fn chmod(path, mode) {
+    return _fsChmod(path, mode)
+}
+
+// readDir returns (array_of_FileInfo, err) for the given directory.
+// Unlike listDir, each entry is a full FileInfo including size, mode, and isSymlink.
+fn readDir(path) {
+    raw, err = _fsReadDir(path)
+    if err != null { return null, err }
+    out = []
+    i = 0
+    while i < len(raw) {
+        info = raw[i]
+        out = push(out, FileInfo {
+            name:      info["name"],
+            size:      info["size"],
+            isDir:     info["isDir"],
+            isSymlink: info["isSymlink"],
+            modTime:   info["modTime"],
+            mode:      info["mode"]
+        })
+        i = i + 1
+    }
+    return out, null
+}
+
+// symlink creates a symbolic link named link pointing to target. Returns (null, err).
+fn symlink(target, link) {
+    return _fsSymlink(target, link)
+}
+
+// readlink returns (target, err) — the destination of a symbolic link.
+fn readlink(path) {
+    return _fsReadlink(path)
+}
+
+// tmpFile creates a new temporary file in dir with a name matching pattern,
+// closes it, and returns (path, err). Pass "" for dir to use the system temp directory.
+fn tmpFile(dir, pattern) {
+    return _fsTmpFile(dir, pattern)
+}
+
+// tmpDir creates a new temporary directory in dir with a name matching pattern.
+// Returns (path, err). Pass "" for dir to use the system temp directory.
+fn tmpDir(dir, pattern) {
+    return _fsTmpDir(dir, pattern)
 }
 
 // copy copies src to dst byte-for-byte. Returns (null, err).

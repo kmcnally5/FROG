@@ -12,6 +12,12 @@
 //   s.post("/echo", fn(req) { return srv.ok(req["body"]) })
 //   s.start(8080)
 //
+// Async handlers (non-blocking routes):
+//   s.get_async("/work", fn(req) { ... expensive work ... })
+//   s.post_async("/work", fn(req) { ... expensive work ... })
+//   Returns 202 Accepted immediately; handler runs in background.
+//   Handlers should use channels to send results to coordinator.
+//
 // Request fields (hash):
 //   req["method"]   — HTTP verb, e.g. "GET"
 //   req["path"]     — URL path, e.g. "/hello"
@@ -24,27 +30,88 @@
 //   srv.json(body)                 — 200 with Content-Type: application/json
 //   srv.status(code, body)         — custom status, plain body
 //   srv.respond(code, body, hdrs)  — custom status, body, and headers hash
+//   srv.accepted()                 — 202 Accepted (async handler response)
 
 struct Server {
     routes
 
     fn get(path, handler) {
-        self.routes = push(self.routes, {"method": "GET", "path": path, "handler": handler})
+        self.routes = push(self.routes, {
+            "method": "GET",
+            "path": path,
+            "handler": handler,
+            "async": false
+        })
         return null
     }
 
     fn post(path, handler) {
-        self.routes = push(self.routes, {"method": "POST", "path": path, "handler": handler})
+        self.routes = push(self.routes, {
+            "method": "POST",
+            "path": path,
+            "handler": handler,
+            "async": false
+        })
         return null
     }
 
     fn put(path, handler) {
-        self.routes = push(self.routes, {"method": "PUT", "path": path, "handler": handler})
+        self.routes = push(self.routes, {
+            "method": "PUT",
+            "path": path,
+            "handler": handler,
+            "async": false
+        })
         return null
     }
 
     fn del(path, handler) {
-        self.routes = push(self.routes, {"method": "DELETE", "path": path, "handler": handler})
+        self.routes = push(self.routes, {
+            "method": "DELETE",
+            "path": path,
+            "handler": handler,
+            "async": false
+        })
+        return null
+    }
+
+    fn get_async(path, handler) {
+        self.routes = push(self.routes, {
+            "method": "GET",
+            "path": path,
+            "handler": handler,
+            "async": true
+        })
+        return null
+    }
+
+    fn post_async(path, handler) {
+        self.routes = push(self.routes, {
+            "method": "POST",
+            "path": path,
+            "handler": handler,
+            "async": true
+        })
+        return null
+    }
+
+    fn put_async(path, handler) {
+        self.routes = push(self.routes, {
+            "method": "PUT",
+            "path": path,
+            "handler": handler,
+            "async": true
+        })
+        return null
+    }
+
+    fn del_async(path, handler) {
+        self.routes = push(self.routes, {
+            "method": "DELETE",
+            "path": path,
+            "handler": handler,
+            "async": true
+        })
         return null
     }
 
@@ -54,7 +121,12 @@ struct Server {
             while i < len(self.routes) {
                 route = self.routes[i]
                 if route["method"] == req["method"] && route["path"] == req["path"] {
-                    return route["handler"](req)
+                    if route["async"] {
+                        async(route["handler"], req)
+                        return {"status": 202, "body": "Accepted", "headers": {}}
+                    } else {
+                        return route["handler"](req)
+                    }
                 }
                 i = i + 1
             }
@@ -81,4 +153,8 @@ fn status(code, body) {
 
 fn respond(code, body, headers) {
     return {"status": code, "body": body, "headers": headers}
+}
+
+fn accepted() {
+    return {"status": 202, "body": "Accepted", "headers": {}}
 }

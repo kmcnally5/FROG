@@ -1,10 +1,8 @@
 import "fs.lex"      as fs
-import "process.lex" as proc
-import "os.lex"      as osmod
 
 // Resolve the interpreter path from our own argv[0] so sub-processes
 // use the exact same binary (works with both `go run .` and `./klex`).
-allArgs = osmod.args()
+allArgs = _osArgs()
 interpreter = allArgs[0]
 
 // Discover test files — listDir returns names sorted alphabetically.
@@ -72,7 +70,7 @@ while i < total {
     print(badge + label + " " + dots + " ")
 
     // Run the sub-script, capturing all output so nothing leaks to the terminal.
-    stdout, stderr, exitCode, runErr = proc.exec(interpreter, ["tests/" + name])
+    stdout, stderr, exitCode, runErr = _processExec(interpreter, ["tests/" + name])
 
     // Determine pass/fail.
     // exitCode != 0 → parse error (main.go calls os.Exit(1) on parse failures).
