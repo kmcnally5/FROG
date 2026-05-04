@@ -340,8 +340,9 @@ fn zip(streams...) {
         let myErr        = null
         let outCancelled = false
         while true {
-            let vals = []
+            let vals = makeArray(len(streams), null)
             let done = false
+            let idx = 0
             for st in streams {
                 val, ok = recv(st.ch)
                 if ok == false {
@@ -350,7 +351,8 @@ fn zip(streams...) {
                     done = true
                     break
                 }
-                vals = push(vals, val)
+                vals[idx] = val
+                idx = idx + 1
             }
             if done {
                 for st in streams { cancel(st.ch) }
@@ -376,12 +378,36 @@ fn zip(streams...) {
 // -------------------------------------
 // collect — drain stream into an array (terminal)
 // Returns (array, null) on success, (null, error) on failure.
+// Uses pre-allocated buffer with doubling to avoid O(n²) push() overhead.
 // -------------------------------------
 fn collect(stream) {
-    out = []
+    let capacity = 1024
+    let buffer = makeArray(capacity, null)
+    let count = 0
+
     for x in stream.ch {
-        out = push(out, x)
+        if count >= capacity {
+            let newCapacity = capacity * 2
+            let newBuffer = makeArray(newCapacity, null)
+            let i = 0
+            while i < count {
+                newBuffer[i] = buffer[i]
+                i = i + 1
+            }
+            buffer = newBuffer
+            capacity = newCapacity
+        }
+        buffer[count] = x
+        count = count + 1
     }
+
+    let out = makeArray(count, null)
+    let i = 0
+    while i < count {
+        out[i] = buffer[i]
+        i = i + 1
+    }
+
     errVal, _ = recv(stream.errCh)
     if errVal != null { return null, errVal }
     return out, null
