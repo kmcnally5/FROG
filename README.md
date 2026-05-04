@@ -1,4 +1,4 @@
-# kLex (The Frog Engin)
+# kLex (The Frog Engine)
 Frog is a high-performance, parallel-first scripting language that bridges the gap between the simplicity of a shell and the computational power of a systems language. By ditching traditional syntax overhead like semicolons it offers a lean, "zero-friction" coding experience while hiding a remarkably sophisticated engine capable of true multi-core scaling. Frog is designed to saturate modern hardware, leveraging an asynchronous architecture to handle heavy data processing and streaming workloads with surgical efficiency.
 
 Frog is a Go-native, tree-walking interpreter I designed for developers who value absolute clarity over cleverness. It is built on the kLex engine and follows a core philosophy of being Functional, Reactive, Opinionated, and Governed.
