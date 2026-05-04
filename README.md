@@ -1,17 +1,15 @@
 # kLex (The Frog Engine)
-Frog is a high-performance, parallel-first scripting language that bridges the gap between the simplicity of a shell and the computational power of a systems language. By ditching traditional syntax overhead like semicolons it offers a lean, "zero-friction" coding experience while hiding a remarkably sophisticated engine capable of true multi-core scaling. Frog is designed to saturate modern hardware, leveraging an asynchronous architecture to handle heavy data processing and streaming workloads with surgical efficiency.
+kLex is a high-performance, parallel-first scripting language that bridges the gap between the simplicity of a shell and the power of a systems language. By stripping away traditional syntax overhead—such as semicolons—it delivers a lean, low-friction coding experience, while running on a sophisticated engine capable of real multi-core scaling. Frog is built to fully utilize modern hardware, using an asynchronous architecture to handle data processing and streaming workloads efficiently.
 
-Frog is a Go-native, tree-walking interpreter I designed for developers who value absolute clarity over cleverness. It is built on the kLex engine and follows a core philosophy of being Functional, Reactive, Opinionated, and Governed.
+kLex is a Go-native, tree-walking interpreter built on the kLex engine. It is designed for developers who value clarity over cleverness, and it follows a core philosophy: Functional, Reactive, Opinionated, and Governed.
+The language enforces strict typing with no implicit coercion, and treats errors as first-class values. Its “governed” design emphasizes predictability and explicit behavior, avoiding hidden magic or shorthand that can obscure intent.
 
-In FROG, types are strict, coercion is non-existent, and errors are handled as first-class values. I’ve prioritized a "Governed" structure where the language's behavior is predictable and explicit, rather than hidden behind shorthand or magic.
+Frog was also created to explore a development model better suited to AI-assisted programming. In practice, loosely defined languages can lead even strong language models into ambiguity or inconsistent outputs. By enforcing a more rigid and opinionated structure, Frog aims to improve reliability and reduce those failure modes in human–AI collaboration.
+As part of this experiment, the kLex interpreter itself was developed largely through AI-assisted workflows, serving as a real-world test of this approach.
 
-I wrote FROG in an effort to explore a development environment better suited for AI-assisted coding. In my experience, the "looseness" of many modern languages can occasionally lead even the most capable LLMs into cycles of ambiguity and hallucination.
+Frog demonstrates the full pipeline of a programming language—Lexer → Parser → AST → Evaluator → Environment. For more detailed documentation, see KLEX_GRAMMAR.MD and KLEX_LANGUAGE.TXT in the docs/ directory.
 
-It is my hope that by enforcing a more rigid, opinionated syntax, I can improve LLM efficiency and make the human-AI collaboration process more reliable. To put this theory to the test, I developed the kLex interpreter almost entirely using AI, treating the creation of the engine as my first real-world trial of this workflow.
-
-FROG demonstrates the complete pipeline of a programming language: Lexer → Parser → AST → Evaluator → Environment.  For indepth language reading please find the KLEX_GRAMMER.MD and KLEX_LANGUAGE.TXT files in the 'docs/' folder.
-
-Architected and Designed by Karl McNally. Implementation assisted by AI-augmented workflows.  
+Architected and designed by Karl McNally. Implementation supported by AI-augmented workflows.
 
 ---
 
