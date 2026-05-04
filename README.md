@@ -1,5 +1,7 @@
 # kLex
-FROG is a Go-native, tree-walking interpreter I designed for developers who value absolute clarity over cleverness. It is built on the kLex engine and follows a core philosophy of being Functional, Reactive, Opinionated, and Governed.
+Frog is a high-performance, parallel-first scripting language that bridges the gap between the simplicity of a shell and the computational power of a systems language. By ditching traditional syntax overhead like semicolons it offers a lean, "zero-friction" coding experience while hiding a remarkably sophisticated engine capable of true multi-core scaling. Frog is designed to saturate modern hardware, leveraging an asynchronous architecture to handle heavy data processing and streaming workloads with surgical efficiency.
+
+Frog is a Go-native, tree-walking interpreter I designed for developers who value absolute clarity over cleverness. It is built on the kLex engine and follows a core philosophy of being Functional, Reactive, Opinionated, and Governed.
 
 In FROG, types are strict, coercion is non-existent, and errors are handled as first-class values. I’ve prioritized a "Governed" structure where the language's behavior is predictable and explicit, rather than hidden behind shorthand or magic.
 
@@ -14,7 +16,7 @@ Architected and Designed by Karl McNally. Implementation assisted by AI-augmente
 ---
 
 <div align="center">
-  <img src="./docs/images/frog_art1.png" alt="FROG - Functional, Reactive, Opinionated, Governed" width="600">
+  <img src="./docs/images/frog_art1.png" alt="FROG - Functional, Reactive, Opinionated, Governed" width="300">
 </div>
 
 ---
