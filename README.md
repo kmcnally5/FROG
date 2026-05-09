@@ -142,6 +142,168 @@ result = numbers
 println(result)
 ```
 
+### Async and Parallel Programming
+
+#### Concurrent Tasks with `async` and `await`
+```klex
+fn fetchUser(id) {
+  user = {}
+  user["id"] = id
+  user["name"] = "User_" + str(id)
+  user["active"] = true
+  return user
+}
+
+fn fetchPosts(userId) {
+  p1 = {}
+  p1["postId"] = 1
+  p1["userId"] = userId
+  p1["title"] = "First Post"
+  
+  p2 = {}
+  p2["postId"] = 2
+  p2["userId"] = userId
+  p2["title"] = "Second Post"
+  
+  return [p1, p2]
+}
+
+// Launch multiple async tasks in parallel
+task1 = async(fn() { return fetchUser(101) })
+task2 = async(fn() { return fetchUser(102) })
+task3 = async(fn() { return fetchPosts(101) })
+
+// Wait for all results
+user1 = await(task1)
+user2 = await(task2)
+posts = await(task3)
+
+println(user1)
+println(posts)
+```
+
+#### Lock-Free Atomic Operations for Concurrent Counters
+```klex
+// Create a lock-free counter array (no mutexes needed)
+stats = atomicIntArray(3)
+
+// Process a range of items, updating atomic counters
+fn processItems(items, start, end, stats_array) {
+  i = start
+  while i < end {
+    if items[i] > 100 {
+      atomicAdd(stats_array, 0, 1)   // high count
+    } else if items[i] > 50 {
+      atomicAdd(stats_array, 1, 1)   // medium count
+    } else {
+      atomicAdd(stats_array, 2, 1)   // low count
+    }
+    i = i + 1
+  }
+}
+
+items = [150, 75, 30, 120, 55, 10, 200, 45]
+
+// Split work across workers - each processes a different range
+task1 = async(fn() { return processItems(items, 0, 4, stats) })
+task2 = async(fn() { return processItems(items, 4, 8, stats) })
+
+await(task1)
+await(task2)
+
+high   = atomicLoad(stats, 0)
+medium = atomicLoad(stats, 1)
+low    = atomicLoad(stats, 2)
+
+println("High: " + str(high) + ", Medium: " + str(medium) + ", Low: " + str(low))
+```
+
+#### Parallel Reduce with Atomic Aggregation
+```klex
+fn sumRange(arr, start, end, accumulator) {
+  i = start
+  result = 0
+  while i < end {
+    result = result + arr[i]
+    i = i + 1
+  }
+  atomicAdd(accumulator, 0, result)
+}
+
+numbers = [1, 2, 3, 4, 5, 6, 7, 8]
+total = atomicIntArray(1)
+
+// Parallel reduce: split work across workers
+task1 = async(fn() { return sumRange(numbers, 0, 4, total) })
+task2 = async(fn() { return sumRange(numbers, 4, 8, total) })
+
+await(task1)
+await(task2)
+
+result = atomicLoad(total, 0)
+println(result)  // 36
+```
+
+#### Streaming with Concurrent Workers
+```klex
+fn worker(workerId, inputChannel, outputChannel) {
+  item, ok = recv(inputChannel)
+  while ok {
+    // Process: double the value
+    processed = {}
+    processed["original"] = item
+    processed["workerId"] = workerId
+    processed["doubled"] = item * 2
+    send(outputChannel, processed)
+    item, ok = recv(inputChannel)
+  }
+}
+
+// Create channels with buffer size (allows async sends/recvs without blocking)
+input = channel(10)
+output = channel(10)
+
+// Launch 4 concurrent workers
+numWorkers = 4
+workers = makeArray(numWorkers, null)
+i = 0
+while i < numWorkers {
+  workers[i] = async(fn() { return worker(i, input, output) })
+  i = i + 1
+}
+
+// Feed work into the channel
+values = [10, 20, 30, 40, 50]
+i = 0
+while i < len(values) {
+  send(input, values[i])
+  i = i + 1
+}
+
+// Close input to signal workers that no more work is coming
+close(input)
+
+// Collect results from output channel
+results = makeArray(len(values), null)
+i = 0
+while i < len(values) {
+  result, ok = recv(output)
+  if ok {
+    results[i] = result
+  }
+  i = i + 1
+}
+
+// Wait for all workers to finish
+i = 0
+while i < numWorkers {
+  await(workers[i])
+  i = i + 1
+}
+
+println(results)
+```
+
 ### Structs with Methods
 ```klex
 struct Point {
