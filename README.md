@@ -148,7 +148,7 @@ struct Point {
   x, y
 
   fn distance() {
-    return math.sqrt(self.x * self.x + self.y * self.y)
+    return sqrt(self.x * self.x + self.y * self.y)
   }
 
   fn scale(factor) {
@@ -190,13 +190,13 @@ result = 1 == "1"  // TypeError: cannot compare int and string
 
 These snippets are excerpted from the test suite. For comprehensive examples and full feature exploration, check out:
 
-- **[`tests/showcaseTest.lex`](tests/showcaseTest.lex)** — The complete FROG Report: enums, structs, pipelines, closures, async/await, HTTP requests, file I/O, JSON parsing, and interactive input. This is the most comprehensive demonstration of the language.
-- **[`tests/functionalTest.lex`](tests/functionalTest.lex)** — Higher-order functions: `compose`, `pipe`, `tap`, `partial`, `flip`, and real-world pipeline examples.
-- **[`tests/patternTest.lex`](tests/patternTest.lex)** — Enum pattern matching with data binding and exhaustive switch statements.
-- **[`tests/httpTest.lex`](tests/httpTest.lex)** — HTTP client usage and async requests.
-- **[`tests/fsTest.lex`](tests/fsTest.lex)** — File system operations (read, write, stat).
-- **[`tests/arrayTest.lex`](tests/arrayTest.lex)** — Array operations and built-in functions.
-- **[`tests/assertTest.lex`](tests/assertTest.lex)** — Assertion and error handling patterns.
+- **[`tests/showcaseTest.lex`](tests/unit/showcaseTest.lex)** — The complete FROG Report: enums, structs, pipelines, closures, async/await, HTTP requests, file I/O, JSON parsing, and interactive input. This is the most comprehensive demonstration of the language.
+- **[`tests/functionalTest.lex`](tests/unit/functionalTest.lex)** — Higher-order functions: `compose`, `pipe`, `tap`, `partial`, `flip`, and real-world pipeline examples.
+- **[`tests/patternTest.lex`](tests/unit/patternTest.lex)** — Enum pattern matching with data binding and exhaustive switch statements.
+- **[`tests/httpTest.lex`](tests/unit/httpTest.lex)** — HTTP client usage and async requests.
+- **[`tests/fsTest.lex`](tests/unit/fsTest.lex)** — File system operations (read, write, stat).
+- **[`tests/arrayTest.lex`](tests/unit/arrayTest.lex)** — Array operations and built-in functions.
+- **[`tests/assertTest.lex`](tests/unit/assertTest.lex)** — Assertion and error handling patterns.
 
 ## Testing
 

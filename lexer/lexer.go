@@ -487,6 +487,27 @@ func (l *Lexer) readString() (string, bool) {
 				procBuf = append(procBuf, '\b')
 			case '{':
 				procBuf = append(procBuf, '{') // \{ in a plain string is just {
+			case 'x':
+				// \xHH hex escape: read 2 hex digits
+				if l.position+2 < len(l.input) {
+					hex1 := l.input[l.position+1]
+					hex2 := l.input[l.position+2]
+					val1 := hexCharToInt(hex1)
+					val2 := hexCharToInt(hex2)
+					if val1 >= 0 && val2 >= 0 {
+						// Valid hex digits: consume them and append the byte
+						l.readChar() // advance to hex1
+						l.readChar() // advance to hex2
+						byteVal := byte((val1 << 4) | val2)
+						procBuf = append(procBuf, byteVal)
+					} else {
+						// Invalid hex: preserve as literal
+						procBuf = append(procBuf, '\\', 'x')
+					}
+				} else {
+					// Not enough chars for hex escape: preserve as literal
+					procBuf = append(procBuf, '\\', 'x')
+				}
 			default:
 				procBuf = append(procBuf, '\\', l.ch)
 			}
@@ -552,4 +573,17 @@ func isLetter(ch byte) bool {
 
 func isDigit(ch byte) bool {
 	return ch >= '0' && ch <= '9'
+}
+
+func hexCharToInt(ch byte) int {
+	if ch >= '0' && ch <= '9' {
+		return int(ch - '0')
+	}
+	if ch >= 'a' && ch <= 'f' {
+		return int(ch - 'a' + 10)
+	}
+	if ch >= 'A' && ch <= 'F' {
+		return int(ch - 'A' + 10)
+	}
+	return -1
 }

@@ -194,16 +194,31 @@ func (s *Server) handleHover(msg *Message) {
 		return
 	}
 
+	LogMessage("HOVER REQUEST: line=%d char=%d uri=%s", params.Position.Line, params.Position.Character, params.TextDocument.URI)
+
 	s.mu.RLock()
 	doc, exists := s.documents[params.TextDocument.URI]
 	s.mu.RUnlock()
 
 	if !exists {
+		LogMessage("HOVER: document not found")
 		s.transport.SendResponse(msg.ID, nil, nil)
 		return
 	}
 
+	LogMessage("HOVER: document exists, calling HoverAtPosition")
 	result := HoverAtPosition(doc, params.Position)
+
+	if result != nil {
+		content := result.Contents.Value
+		if len(content) > 100 {
+			content = content[:100]
+		}
+		LogMessage("HOVER RESULT: contents=%s", content)
+	} else {
+		LogMessage("HOVER RESULT: nil")
+	}
+
 	s.transport.SendResponse(msg.ID, result, nil)
 }
 

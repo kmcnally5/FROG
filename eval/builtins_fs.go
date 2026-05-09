@@ -5,8 +5,29 @@ import (
 	"io"
 	"klex/ast"
 	"os"
+	"runtime"
 	"strconv"
+	"syscall"
+	"unsafe"
 )
+
+// tryFadviseSequential hints sequential access to the kernel to reduce cache eviction.
+// Linux: uses fadvise64 syscall with POSIX_FADV_SEQUENTIAL (value 2)
+// macOS: uses fcntl F_RDAHEAD to enable readahead
+// Errors are ignored since these are purely advisory hints.
+func tryFadviseSequential(fd int, offset int64, length int64) {
+	switch runtime.GOOS {
+	case "linux":
+		// fadvise64 syscall 221 on Linux x86_64 tells kernel:
+		// "I'm reading sequentially—don't keep old pages in cache"
+		syscall.Syscall6(uintptr(221), uintptr(fd), uintptr(offset), uintptr(length), uintptr(2), 0, 0)
+	case "darwin":
+		// macOS: F_RDAHEAD would enable aggressive caching (opposite of what we need).
+		// No equivalent to POSIX_FADV_SEQUENTIAL on macOS; skip optimization.
+		// The sequential read pattern itself is efficient enough on modern macOS.
+	}
+	// Other systems: no optimization available
+}
 
 func fsInfoHash(fi os.FileInfo, isSymlink bool) *Hash {
 	h := &Hash{Pairs: make(map[HashKey]HashPair)}
@@ -385,5 +406,125 @@ func init() {
 			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
 		}
 		return &Tuple{Elements: []Object{&String{Value: path}, NULL}}
+	}}
+
+	// _fsMap(path) → (content, err)
+	// Memory-maps a file and returns its content as a string.
+	// The string is backed by the mmap'd region—no copying.
+	// Perfect for analyzing large files in parallel (each worker accesses different ranges).
+	Builtins["_fsMap"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("_fsMap expects 1 argument", ast.Pos{})
+		}
+		p, ok := args[0].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("_fsMap: argument must be string, got %s", args[0].Type()), ast.Pos{})
+		}
+
+		// Open file for reading
+		f, err := os.Open(p.Value)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		defer f.Close()
+
+		// Get file size
+		fi, err := f.Stat()
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		size := fi.Size()
+
+		if size == 0 {
+			return &Tuple{Elements: []Object{&String{Value: ""}, NULL}}
+		}
+
+		// Memory-map the file
+		data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+
+		// Convert byte slice to string without copying (unsafe but necessary for mmap)
+		str := (*String)(unsafe.Pointer(&struct {
+			data uintptr
+			len  int
+			cap  int
+		}{
+			data: uintptr(unsafe.Pointer(&data[0])),
+			len:  len(data),
+			cap:  len(data),
+		}))
+
+		return &Tuple{Elements: []Object{str, NULL}}
+	}}
+
+	// _fsReadChunk(path, offset, byteCount) → (content, isEOF, err)
+	// Reads up to byteCount bytes from file starting at offset.
+	// Returns tuple: (content_string, isEOF_bool, error_or_null)
+	// isEOF is true if the returned chunk reaches the end of the file.
+	// Useful for streaming large files without loading entirely into memory.
+	Builtins["_fsReadChunk"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 3 {
+			return runtimeError("_fsReadChunk expects 3 arguments (path, offset, byteCount)", ast.Pos{})
+		}
+		p, ok := args[0].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("_fsReadChunk: first argument must be string, got %s", args[0].Type()), ast.Pos{})
+		}
+		offsetObj, ok := args[1].(*Integer)
+		if !ok {
+			return typeError(fmt.Sprintf("_fsReadChunk: second argument must be integer, got %s", args[1].Type()), ast.Pos{})
+		}
+		byteCountObj, ok := args[2].(*Integer)
+		if !ok {
+			return typeError(fmt.Sprintf("_fsReadChunk: third argument must be integer, got %s", args[2].Type()), ast.Pos{})
+		}
+
+		offset := int64(offsetObj.Value)
+		byteCount := int(byteCountObj.Value)
+
+		if offset < 0 {
+			return runtimeError("_fsReadChunk: offset cannot be negative", ast.Pos{})
+		}
+		if byteCount < 0 {
+			return runtimeError("_fsReadChunk: byteCount cannot be negative", ast.Pos{})
+		}
+
+		f, err := os.Open(p.Value)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, NULL, &String{Value: err.Error()}}}
+		}
+		defer f.Close()
+
+		// Seek to offset
+		if _, err := f.Seek(offset, 0); err != nil {
+			return &Tuple{Elements: []Object{NULL, NULL, &String{Value: err.Error()}}}
+		}
+
+		// Hint to kernel: sequential access pattern (only on first chunk to avoid syscall overhead).
+		// Reduces cache eviction overhead by telling kernel not to keep pages we won't revisit.
+		// Only called once per file (when offset == 0) to minimize syscall overhead.
+		fd := int(f.Fd())
+		if offset == 0 {
+			tryFadviseSequential(fd, offset, int64(byteCount))
+		}
+
+		// Read up to byteCount bytes
+		buf := make([]byte, byteCount)
+		n, err := f.Read(buf)
+		if err != nil && err != io.EOF {
+			return &Tuple{Elements: []Object{NULL, NULL, &String{Value: err.Error()}}}
+		}
+
+		// Check if we've reached EOF
+		// If n < byteCount, we've hit EOF
+		isEOF := n < byteCount
+
+		return &Tuple{Elements: []Object{
+			&String{Value: string(buf[:n])},
+			&Boolean{Value: isEOF},
+			NULL,
+		}}
 	}}
 }

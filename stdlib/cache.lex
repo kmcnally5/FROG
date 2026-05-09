@@ -4,7 +4,7 @@
 // Multiple independent caches can coexist in the same program.
 //
 // Usage:
-//   import "cache.lex" as cache
+//   import "stdlib/cache.lex" as cache
 //   c = cache.newCache()
 //   c.set("key", 42)
 //   println(c.get("key"))   // 42

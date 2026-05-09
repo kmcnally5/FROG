@@ -3,7 +3,7 @@ import "parallel.lex" as p
 
 z = makeArray(10000)
 iterations = 1000
-workers = 10
+workers = 4
 arrayCount = 50000
 
 fn heavyCompute(acc, x) {

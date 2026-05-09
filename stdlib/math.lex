@@ -7,7 +7,7 @@
 // This module provides additional utilities built on top of those primitives.
 //
 // Usage:
-//   import "math.lex" as math
+//   import "stdlib/math.lex" as math
 //   println(math.abs(-5.5))    // 5.5
 //   println(math.max(3, 7))    // 7
 //   println(math.pi)           // 3.141592653589793

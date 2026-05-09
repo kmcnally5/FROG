@@ -157,6 +157,8 @@
       \"    double quote
       \\    backslash
       \{    literal left brace (prevents interpolation)
+      \xHH  byte with hex value HH (e.g. \x1b for ESC, \x00 for null)
+            valid hex digits: 0-9, a-f, A-F. Unknown escapes preserved as literal.
 
 
   RAW STRINGS (backtick)
@@ -360,8 +362,9 @@
 
   IMMUTABLE BINDINGS — const
 
-  Use const to declare a binding that can never be reassigned. Any attempt to
-  reassign it from any scope is a RuntimeError.
+  Use const to declare a binding that can never be reassigned AND to make the
+  value immutable (deep-frozen). Any attempt to rebind a const name, or to
+  mutate a frozen value, is a RuntimeError.
 
     const PI = 3.14159
     const MAX_RETRIES = 3
@@ -369,6 +372,31 @@
 
     PI = 3          // RuntimeError: cannot reassign constant PI
     fn tryIt() { PI = 0 }  // RuntimeError even from inside a function
+
+  Deep-freeze semantics:
+    When you declare a const that binds an array, hash, or struct, the entire
+    object graph becomes frozen (immutable). This means:
+
+      const arr = [1, 2, 3]
+      arr[0] = 99          // RuntimeError: cannot mutate frozen array
+
+      const h = {"a": 1}
+      h["a"] = 2           // RuntimeError: cannot mutate frozen hash
+
+      struct Point { x Integer, y Integer }
+      const p = Point { x: 1, y: 2 }
+      p.x = 10             // RuntimeError: cannot mutate frozen struct
+
+    Nested (deep) freezing is also enforced:
+
+      const nested = [[1, 2], [3, 4]]
+      nested[0][0] = 99    // RuntimeError: inner array is also frozen
+
+    Primitives (integers, floats, strings, booleans, null) are always immutable
+    and are unaffected by const:
+
+      const x = 42         // const x blocks rebinding, value is already immutable
+      const s = "hello"    // const s blocks rebinding, string is already immutable
 
   const always creates in the current scope (like let — never walks the chain).
   A let or bare assignment in an inner scope may shadow a const without
@@ -381,11 +409,19 @@
     }
     println(LIMIT)        // 100
 
+  Deep-freeze and async safety:
+    When an async task snapshots the environment, frozen objects are safe to
+    share across task boundaries without mutation. Non-const mutable objects
+    retain their sharing semantics; mutations inside a task can be visible
+    outside if the object was shared before the snapshot.
+
   Rule of thumb:
-    - Use const for configuration values, mathematical constants, and anything
-      that must not change after initialisation.
+    - Use const for configuration values, mathematical constants, and any
+      array/hash/struct that must not change after initialisation. This makes
+      the value safe to pass into async tasks without fear of mutation.
     - Use let for mutable locals that must not bleed into outer scope.
     - Use bare assignment to update captured variables across closure boundaries.
+    - For data that must be passed safely into parallel tasks, bind it to const.
 
 
 --------------------------------------------------------------------------------
@@ -877,7 +913,84 @@
     readFile(path)           read entire file; RuntimeError on failure
     writeFile(path, content) create or truncate and write
     appendFile(path, content) create or append
+    _fsMap(path)             memory-map file for large-file processing
+                             returns (content, err) tuple; content is backed by mmap
+                             perfect for parallel analysis of files up to ~1GB
+    _fsReadChunk(path, offset, byteCount)
+                             stream-read file in fixed-size chunks
+                             returns (content, isEOF, err) tuple
+                             essential for processing multi-GB files without memory explosion
     exec(command, args)      run binary; returns stdout; RuntimeError on failure
+
+    _fsMap() details:
+      _fsMap uses OS memory mapping (mmap) to access files without loading them
+      entirely into memory. The returned string is backed by the mmap'd region.
+      This enables efficient parallel processing of large files by allowing
+      multiple workers to access different ranges of the file in parallel.
+      The OS intelligently pages in/out chunks as needed.
+
+      Usage example for analyzing a large log file:
+        content, err = _fsMap("huge.log")
+        if err != null { ... }
+        lines = split(content, "\n")
+        // Distribute line ranges across workers for parallel processing
+
+      Performance characteristics:
+        - Zero-copy: no data duplication from disk to memory
+        - Lazy paging: only accessed portions are loaded into RAM
+        - Parallel-friendly: workers can access different byte ranges simultaneously
+        - Ideal for: files up to ~1GB, or multiple-worker analysis of larger files
+
+      Limitations:
+        - Cannot mmap files larger than virtual address space (~8TB on 64-bit)
+        - On some systems, split() on very large mmap'd strings may be slow
+        - For multi-GB files, use _fsReadChunk() instead for better memory efficiency
+
+    _fsReadChunk(path, offset, byteCount) details:
+      _fsReadChunk reads a fixed-size byte range from a file without loading it
+      entirely into memory. Each call returns up to byteCount bytes starting at
+      offset, enabling streaming reads for files of any size.
+
+      Arguments:
+        path      string, file path to read from
+        offset    integer, byte offset (0-based); must be non-negative
+        byteCount integer, maximum bytes to read; must be non-negative
+
+      Returns:
+        (content, isEOF, err) tuple where:
+        - content is the read bytes as a string (length <= byteCount)
+        - isEOF is true if this chunk reaches end-of-file (read < byteCount requested)
+        - err is null on success, or error message string on failure
+
+      Usage example for processing a 30GB log file:
+        chunk_size = 67108864  // 64MB
+        offset = 0
+        while true {
+          chunk, is_eof, err = _fsReadChunk("massive.log", offset, chunk_size)
+          if err != null { println("Error: " + err); break }
+
+          // Process chunk (search, parse, analyze)
+          lines = split(chunk, "\n")
+          for i in range(len(lines)) {
+            // Handle line...
+          }
+
+          if is_eof { break }
+          offset = offset + len(chunk)
+        }
+
+      Performance characteristics:
+        - Constant memory: only one chunk in memory at a time
+        - Parallel-ready: different chunks can be read simultaneously by async workers
+        - Scalable: handles files larger than RAM or virtual address space
+        - Ideal for: 10GB+ files, batch log analysis, streaming processing
+
+      Chunk boundary handling:
+        When splitting chunks by "\n", lines spanning boundaries may be split
+        across consecutive calls. For robust line processing:
+        - Store incomplete final lines (last line if no trailing newline)
+        - Prepend to next chunk before splitting
+        - Skip incomplete first line if not the first chunk (handled by previous chunk)
 
 
   SYSTEM
@@ -944,6 +1057,48 @@
 
     String index access:
       "hello"[1]   → "e"    (returns single character as string)
+
+
+  CONSOLE (Text Colorization)
+
+    Foreground Colors:
+      color_red()              returns ANSI red escape code
+      color_green()            returns ANSI green escape code
+      color_blue()             returns ANSI blue escape code
+      color_yellow()           returns ANSI yellow escape code
+      color_magenta()          returns ANSI magenta escape code
+      color_cyan()             returns ANSI cyan escape code
+      color_white()            returns ANSI white escape code
+      color_black()            returns ANSI black escape code
+
+    Text Styles:
+      color_bold()             returns ANSI bold escape code
+      color_dim()              returns ANSI dim escape code
+      color_underline()        returns ANSI underline escape code
+      color_reset()            returns ANSI reset escape code (clears all formatting)
+
+    Background Colors:
+      color_bg_red()           returns ANSI red background escape code
+      color_bg_green()         returns ANSI green background escape code
+      color_bg_blue()          returns ANSI blue background escape code
+      color_bg_yellow()        returns ANSI yellow background escape code
+      color_bg_magenta()       returns ANSI magenta background escape code
+      color_bg_cyan()          returns ANSI cyan background escape code
+      color_bg_white()         returns ANSI white background escape code
+      color_bg_black()         returns ANSI black background escape code
+
+    Colorization Utility:
+      colorize(text, colorCode)
+      Wraps text with a color code and automatically resets to default.
+      Returns a new string suitable for direct printing.
+        colorize("error", color_red())           → "\033[31merror\033[0m"
+        colorize("warning", color_yellow())      → "\033[33mwarning\033[0m"
+        colorize("OK", color_bg_green())         → "\033[42mOK\033[0m"
+
+      These functions return ANSI escape sequences (strings) that can be
+      concatenated with other strings for composable text formatting:
+        result = color_bold() + color_green() + "Success!" + color_reset()
+        println(colorize("ERROR", color_red()))
 
 
   ARRAYS
@@ -1790,6 +1945,191 @@
       merge(sources...)     any source fires → output fires with that value
       combine(sources...)   any source fires → output fires with array of
                             current values from all sources
+
+
+  PARALLEL ARRAY BUILTINS
+
+    These primitives partition an array across runtime.NumCPU() goroutines for
+    true CPU-parallel computation on dense data. They sit alongside async() but
+    are simpler: no channels, no manual orchestration, no Task objects.
+
+    Workers run in lock-free environment snapshots (same isolation model as
+    async), so user-defined callback functions can read globals without hitting
+    the shared env mutex.
+
+    parallelArrayUpdate(arr, fn)
+                              Mutates arr in place. fn(value, index) is called
+                              for every element; the return value replaces that
+                              element. Returns the same array (mutated).
+
+                              Use for dense data-parallel updates (e.g. virus
+                              map decay, vector scaling, batch normalization):
+
+                                parallelArrayUpdate(cells, fn(v, i) {
+                                  v * (1.0 - decay_rate)
+                                })
+
+    parallelArrayMap(arr, fn)
+                              Like parallelArrayUpdate but returns a new array
+                              of the same length; the input array is untouched.
+                              fn(value, index) → new value.
+
+                                doubled = parallelArrayMap(nums, fn(v, i) {
+                                  v * 2
+                                })
+
+    parallelArrayReduce(arr, fn, initial)
+                              Parallel reduction. fn(acc, element) MUST be
+                              associative (e.g. add, multiply, max). Each
+                              worker reduces its chunk starting from initial,
+                              then a final serial reduce combines partials.
+
+                              Non-associative functions produce undefined
+                              results because chunk processing order is not
+                              guaranteed.
+
+                                total = parallelArrayReduce(nums,
+                                  fn(a, b) { a + b }, 0)
+
+    parallelArrayForEach(arr, fn)
+                              Like parallelArrayMap but discards return
+                              values. Use when the callback exists for its
+                              side effects (typically atomic updates to
+                              shared state) rather than producing a new
+                              array. Avoids the result-array allocation.
+
+                                parallelArrayForEach(rodents, fn(r, i) {
+                                  if r.state == "infected" {
+                                    atomicAdd(virus_cells, cellIdx, shed)
+                                  }
+                                })
+
+    Performance notes:
+
+      - Workers count is fixed at runtime.NumCPU(). Smaller arrays use fewer
+        workers (one per element minimum).
+      - Lock-free snapshot is taken once before workers start, so user
+        callbacks running in parallel do not contend on the global env mutex.
+      - First error wins; remaining workers may finish their chunks before
+        the error is observed by the caller.
+      - For numeric kernels (multiply, add, scale) on arrays of 10K+ elements,
+        expect near-linear speedup with core count.
+
+
+  ATOMIC ARRAY BUILTINS
+
+    Lock-free atomic operations on fixed-size arrays of integers or floats.
+    Multiple goroutines can read AND write to these arrays simultaneously
+    without locks - the underlying CPU compare-and-swap instructions ensure
+    correctness.
+
+    Use these to build lock-free shared counters, accumulators, and merge
+    targets that workers running under parallelArray* or async() can update
+    concurrently. They are the bridge that lets parallel workers efficiently
+    write to shared mutable state, eliminating the channel/serial-merge
+    bottleneck.
+
+    Two backing types exist:
+
+      AtomicIntArray   - integer values; uses sync/atomic.AddInt64 directly
+      AtomicFloatArray - float64 values stored as int64 bits; atomic adds
+                         use a CAS retry loop (still lock-free)
+
+    atomicIntArray(size, [initial])
+                              Creates AtomicIntArray of given size, optional
+                              initial fill value (default 0).
+
+    atomicFloatArray(size, [initial])
+                              Creates AtomicFloatArray of given size, optional
+                              initial fill value (default 0.0).
+
+    atomicLoad(arr, idx)      Atomically reads arr[idx]. Returns Integer or
+                              Float matching the array type.
+
+    atomicStore(arr, idx, val)
+                              Atomically writes val at arr[idx]. Returns null.
+
+    atomicAdd(arr, idx, delta)
+                              Atomically adds delta to arr[idx], returns the
+                              new value. Multiple goroutines can call this
+                              simultaneously without losing updates - the
+                              defining feature of these arrays.
+
+    atomicCAS(arr, idx, old, new)
+                              Compare-and-swap. If arr[idx] == old, replaces
+                              with new and returns true; otherwise returns
+                              false. Building block for custom lock-free
+                              algorithms (Treiber stacks, bounded counters,
+                              spin-locks etc.).
+
+    len(arr)                  Returns size of the atomic array.
+
+    Worked example - parallel histogram with no merge step:
+
+        bins = atomicIntArray(256)
+        parallelArrayForEach(image_pixels, fn(p, i) {
+          atomicAdd(bins, p, 1)
+        })
+        // bins now holds the histogram - no serial merge needed
+
+    Performance:
+
+      - 1,000,000 atomic float adds across N CPU cores: ~70ms on M-class chip
+      - Lock-free, so workers do not block each other on uncontended slots
+      - Under heavy contention on the SAME slot, throughput is limited by the
+        cache-line ping-pong between cores (still faster than mutex)
+
+
+  CONCURRENT HASH BUILTINS
+
+    Lock-free shared hash map for cross-goroutine state with arbitrary keys.
+    Backed by Go's sync.Map (atomic CAS per entry). Use this when:
+      - Key set is dynamic (not known up front like AtomicIntArray)
+      - Multiple goroutines need to share state without channel coordination
+      - You want O(1) lookup by string/int/bool key
+
+    Reads (ch[key]) and writes (ch[key] = val) integrate with normal kLex
+    indexing syntax and are atomic. The arithmetic helpers do CAS-loops
+    internally so increments survive concurrent contention.
+
+    concurrentHash()          Creates an empty ConcurrentHash.
+
+    ch[key]                   Atomic read; returns null if key absent.
+
+    ch[key] = value           Atomic write (Swap semantics).
+
+    delete(ch, key)           Atomic delete; decrements size if present.
+
+    len(ch)                   O(1) atomic-counter-backed size.
+
+    keys(ch)                  Snapshot of current keys as an Array. Order
+                              is non-deterministic; entries added/removed
+                              during iteration may or may not be visible.
+
+    atomicHashIncr(ch, key, delta)
+                              Atomically adds integer delta to value at key
+                              (treats missing key as 0). Returns new value.
+                              Use for shared counters.
+
+    atomicHashAdd(ch, key, delta)
+                              Float version of atomicHashIncr.
+
+    atomicHashCAS(ch, key, old, new)
+                              Compare-and-swap: only swaps if current value
+                              matches old. Returns true on success, false if
+                              key missing or value differs.
+
+    Worked example - cross-goroutine event counter, dynamic event types:
+
+        events = concurrentHash()
+        // 16 workers logging events as they come in
+        // No channels, no summary task - direct lock-free updates
+        atomicHashIncr(events, event_type, 1)
+
+        // After workers finish:
+        for k in keys(events) {
+          println(k + ": " + str(events[k]))
+        }
 
 
   OPERATING SYSTEM BUILTINS

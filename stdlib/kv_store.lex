@@ -9,7 +9,7 @@
 //   store.set("x", 42)
 //   println(store.get("x"))   // 42
 
-import "cache.lex" as cache_mod
+import "stdlib/cache.lex" as cache_mod
 
 struct KVStore {
     store

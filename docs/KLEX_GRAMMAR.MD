@@ -91,6 +91,7 @@ escape_seq   = '\"'         (* literal double quote          *)
              | '\r'         (* carriage return                *)
              | '\b'         (* backspace                      *)
              | '\{'         (* literal "{" — NOT interpolation *)
+             | '\x' HEX HEX (* byte with hex value (e.g. \x1b for ESC) *)
 interp_expr  = "{" expression "}"
 
 RAW_STR      = '`' { any_char_except_backtick } '`'
@@ -589,6 +590,13 @@ These are not grammar rules but are listed here because they shape what programs
 * `print(val, ...)` — prints each argument with no newline
 * `input(prompt)` — reads a line from stdin
 
+### Console Output (Text Colorization)
+
+* `color_red()` `color_green()` `color_blue()` `color_yellow()` `color_magenta()` `color_cyan()` `color_white()` `color_black()` — foreground color codes
+* `color_bold()` `color_dim()` `color_underline()` `color_reset()` — text style codes
+* `color_bg_red()` `color_bg_green()` `color_bg_blue()` `color_bg_yellow()` `color_bg_magenta()` `color_bg_cyan()` `color_bg_white()` `color_bg_black()` — background color codes
+* `colorize(text, colorCode)` — wraps text with color code and auto-resets
+
 ### Type Conversion
 
 * `type(val)` — returns type name as `STRING`
@@ -679,7 +687,7 @@ These are not grammar rules but are listed here because they shape what programs
 
 ### Parallel Processing
 
-From `parallel.lex`:
+From `parallel.lex` (stdlib, built on `async()` and channels):
 
 * `pmap(arr, func, numWorkers)` — `STREAM` of transformed elements (parallel)
 * `parallel_filter(arr, func, numWorkers)` — `STREAM` of filtered elements (parallel)
@@ -688,10 +696,57 @@ From `parallel.lex`:
 * `parallel_some(arr, func, numWorkers)` — `BOOLEAN` — true iff `func(el)` true for any
 * `parallel_find(arr, func, numWorkers)` — `TUPLE` `(element, null)` or `(null, null)`
 
+### Parallel Array Primitives (built-in)
+
+Native Go builtins that partition an array across `runtime.NumCPU()` goroutines.
+No channels, no `Task` wrappers — workers run in lock-free env snapshots so user
+callbacks do not contend on the global env mutex. Use these for dense data-parallel
+numeric kernels (vector scaling, element-wise transforms, reductions).
+
+* `parallelArrayUpdate(arr, fn)` — mutates `arr` in place; `fn(value, index)` return value replaces element. Returns the same array.
+* `parallelArrayMap(arr, fn)` — returns new `ARRAY`; source unchanged. `fn(value, index) → new value`.
+* `parallelArrayReduce(arr, fn, init)` — parallel fold; `fn(acc, element)` MUST be associative. Each worker reduces a chunk from `init`, then a final serial pass combines partials.
+* `parallelArrayForEach(arr, fn)` — parallel iteration with no return value collection. Pairs naturally with atomic ops for lock-free shared-state updates.
+
+### Atomic Arrays (lock-free shared state)
+
+Fixed-size integer/float arrays whose elements can be read and written safely
+from multiple goroutines without locks. Backed by `sync/atomic` (int64 ops, with
+float64 stored as int64 bits and updated via CAS-loop).
+
+These are the primitive that lets workers running under `parallelArray*` or
+`async()` write to shared mutable state without channel overhead or serial
+merge phases.
+
+* `atomicIntArray(size, [initial])` — new `AtomicIntArray`
+* `atomicFloatArray(size, [initial])` — new `AtomicFloatArray`
+* `atomicLoad(arr, idx)` — atomic read; returns `INTEGER` or `FLOAT`
+* `atomicStore(arr, idx, value)` — atomic write; returns `null`
+* `atomicAdd(arr, idx, delta)` — atomic add; returns the new value
+* `atomicCAS(arr, idx, old, new)` — compare-and-swap; returns `BOOLEAN`
+* `len(arr)` — returns the array's size
+
+### Concurrent Hash (lock-free shared key/value)
+
+A thread-safe hash map backed by Go's `sync.Map`. Use when keys are dynamic
+(not known up front) and multiple goroutines need to share state. Integrates
+with normal `[]` indexing syntax — reads and writes are atomic.
+
+* `concurrentHash()` — new `ConcurrentHash`
+* `ch[key]` — atomic read; returns the value or `null`
+* `ch[key] = value` — atomic write (Swap semantics)
+* `delete(ch, key)` — atomic delete
+* `len(ch)` — O(1) atomic-counter-backed size
+* `keys(ch)` — snapshot `ARRAY` of current keys
+* `atomicHashIncr(ch, key, delta)` — atomic integer increment; returns new value
+* `atomicHashAdd(ch, key, delta)` — atomic float add; returns new value
+* `atomicHashCAS(ch, key, old, new)` — compare-and-swap; returns `BOOLEAN`
+
 ### File System (Low-level)
 
 * `_fsExists(path)` — `BOOLEAN`
-* `_fsRead(path)` → `(STRING, error)`
+* `_fsRead(path)` → `(STRING, error)` — entire file; load all into memory
+* `_fsReadChunk(path, offset, byteCount)` → `(STRING, BOOLEAN, error)` — stream read; (content, isEOF, err)
 * `_fsWrite(path, content)` → `(null, error)`
 * `_fsAppend(path, content)` → `(null, error)`
 * `_fsRemove(path)` → `(null, error)`

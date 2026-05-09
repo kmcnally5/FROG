@@ -429,10 +429,15 @@ func FindNodeAtPosition(program *ast.Program, line, col int) ast.Node {
 		}
 
 		// Check if cursor is on or after this node's start position
+		// Only accept nodes that actually start before or at the cursor
 		if nodePos.Line < line || (nodePos.Line == line && nodePos.Col <= col) {
 			// Calculate "distance" (prefer closer/more specific nodes)
+			// Distance is: (distance in lines) * 1000 + (distance in columns)
+			// We want the node with the smallest non-negative distance
 			distance := (line - nodePos.Line) * 1000 + (col - nodePos.Col)
-			if closestDist < 0 || distance < closestDist {
+			// Only update if this is the first valid node or a closer match
+			// Ensure distance is non-negative (node starts at or before cursor)
+			if distance >= 0 && (closestDist < 0 || distance < closestDist) {
 				closest = node
 				closestDist = distance
 			}

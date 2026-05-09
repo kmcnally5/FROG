@@ -53,6 +53,9 @@ const (
 	ENUM_DEF_OBJ    ObjectType = "ENUM_DEF"
 	ENUM_VARIANT_OBJ ObjectType = "ENUM_VARIANT"
 	ENUM_OBJ        ObjectType = "ENUM"
+	ATOMIC_INT_ARRAY_OBJ   ObjectType = "ATOMIC_INT_ARRAY"
+	ATOMIC_FLOAT_ARRAY_OBJ ObjectType = "ATOMIC_FLOAT_ARRAY"
+	CONCURRENT_HASH_OBJ    ObjectType = "CONCURRENT_HASH"
 )
 
 // Object is the interface every runtime value implements.
@@ -187,6 +190,65 @@ func (e *Error) Inspect() string {
 	return out
 }
 
+// -------------------- ATOMIC ARRAYS --------------------
+
+// AtomicIntArray is a fixed-size integer array supporting lock-free concurrent
+// updates via the sync/atomic package. Multiple goroutines can call atomicAdd,
+// atomicLoad, atomicStore, atomicCAS on different (or even the same) indices
+// simultaneously without data races.
+//
+// Backed by []int64 because sync/atomic operates on int64. kLex Integer maps
+// directly onto int64 internally.
+type AtomicIntArray struct {
+	Data []int64
+}
+
+func (a *AtomicIntArray) Type() ObjectType { return ATOMIC_INT_ARRAY_OBJ }
+func (a *AtomicIntArray) Inspect() string {
+	return fmt.Sprintf("AtomicIntArray(size=%d)", len(a.Data))
+}
+
+// AtomicFloatArray is a fixed-size float array supporting lock-free concurrent
+// updates. Floats are stored as their IEEE-754 bit representation in int64
+// slots so that sync/atomic.CompareAndSwapInt64 can be used. atomicAdd uses
+// a CAS-loop internally; on contention it retries until the swap succeeds.
+type AtomicFloatArray struct {
+	Bits []int64 // each int64 holds the bits of a float64
+}
+
+func (a *AtomicFloatArray) Type() ObjectType { return ATOMIC_FLOAT_ARRAY_OBJ }
+func (a *AtomicFloatArray) Inspect() string {
+	return fmt.Sprintf("AtomicFloatArray(size=%d)", len(a.Bits))
+}
+
+// -------------------- CONCURRENT HASH --------------------
+
+// ConcurrentHash is a thread-safe hash map for shared mutable state across
+// goroutines. Backed by sync.Map (Go 1.20+) which provides lock-free reads
+// and atomic CAS-based writes per key.
+//
+// Use cases:
+//   - Shared event counter where keys are discovered dynamically (regular
+//     atomic arrays require knowing the size up front)
+//   - Cross-goroutine accumulator with arbitrary string/int keys
+//   - Lock-free deduplication / set-membership checking
+//
+// Like regular Hash, supports string/integer/boolean keys via HashKey.
+// Reads through ch[key] return the value or null. Writes via ch[key] = v
+// are atomic. atomicHashIncr/atomicHashAdd provide lock-free arithmetic
+// using sync.Map.CompareAndSwap.
+//
+// Cnt is an atomic counter so len(ch) is O(1) instead of O(n) iterating sync.Map.
+type ConcurrentHash struct {
+	M   sync.Map // HashKey → Object
+	Cnt int64    // atomic count of live entries
+}
+
+func (c *ConcurrentHash) Type() ObjectType { return CONCURRENT_HASH_OBJ }
+func (c *ConcurrentHash) Inspect() string {
+	return fmt.Sprintf("ConcurrentHash(size=%d)", atomic.LoadInt64(&c.Cnt))
+}
+
 // -------------------- RETURN --------------------
 
 // ReturnValue is a wrapper that carries a value back up the call stack.
@@ -256,6 +318,7 @@ func (f *Function) Inspect() string {
 // mutating one mutates the other.
 type Array struct {
 	Elements []Object
+	frozen   bool
 }
 
 func (a *Array) Type() ObjectType { return ARRAY_OBJ }
@@ -321,7 +384,8 @@ type HashPair struct {
 // and boolean (anything that can be reliably converted to a HashKey).
 // Like arrays, hashes are passed by reference.
 type Hash struct {
-	Pairs map[HashKey]HashPair
+	Pairs  map[HashKey]HashPair
+	frozen bool
 }
 
 func (h *Hash) Type() ObjectType { return HASH_OBJ }
@@ -503,6 +567,7 @@ func (s *StructDef) Inspect() string  { return "struct " + s.Name }
 type StructInstance struct {
 	Def    *StructDef
 	Fields map[string]Object
+	frozen bool
 }
 
 func (s *StructInstance) Type() ObjectType { return STRUCT_INST_OBJ }

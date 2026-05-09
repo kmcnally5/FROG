@@ -5,7 +5,7 @@
 // On success err is null. On failure resp is null and err is a string.
 //
 // Usage:
-//   import "http.lex" as http
+//   import "stdlib/http.lex" as http
 //   resp, err = http.get("https://example.com")
 //   if err != null { println(err)  return null }
 //   println(resp.status)

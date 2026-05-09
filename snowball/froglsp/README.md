@@ -166,7 +166,7 @@ Then restart the Extension Host.
 
 ## License
 
-This is part of the kLex learning project. MIT License.
+This is part of the kLex project. MIT License.
 
 ---
 

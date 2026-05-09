@@ -118,7 +118,7 @@ fn compressionRatio(original, compressed) {
 //       writeFile("large.json.gz", compressed)
 //   }
 fn compressFile(path) {
-    import "fs.lex" as fs
+    import "stdlib/fs.lex" as fs
 
     data, err = fs.read(path)
     if err != null { return null, err }
@@ -133,7 +133,7 @@ fn compressFile(path) {
 // Example:
 //   data, err = decompressFile("large.json.gz")
 fn decompressFile(path) {
-    import "fs.lex" as fs
+    import "stdlib/fs.lex" as fs
 
     data, err = fs.read(path)
     if err != null { return null, err }

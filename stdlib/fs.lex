@@ -10,7 +10,7 @@
 // with datetime.lex fromUnix().
 //
 // Usage:
-//   import "fs.lex" as fs
+//   import "stdlib/fs.lex" as fs
 //   content, err = fs.read("/etc/hostname")
 //   if err != null { println(err)  return null }
 //   println(content)

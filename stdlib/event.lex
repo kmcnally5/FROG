@@ -4,7 +4,7 @@
 // Multiple independent emitters can coexist in the same program.
 //
 // Usage:
-//   import "event.lex" as ev
+//   import "stdlib/event.lex" as ev
 //   e = ev.newEmitter()
 //   e.on("click", fn(data) { println(data) })
 //   e.emit("click", 42)

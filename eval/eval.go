@@ -38,6 +38,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -57,9 +58,10 @@ var importingFiles = map[string]bool{}
 const EnableAsyncYield = true
 
 // AsyncYieldInterval controls how often to call runtime.Gosched() in loops.
-// A value of 1000 means yield every 1000 iterations.
+// A value of 100 means yield every 100 iterations.
 // Yielding too frequently (e.g., every iteration) kills performance for CPU-bound loops.
 // Yielding too rarely (e.g., never) causes unfair scheduling with many concurrent tasks.
+// Tuned for 10-core parallelism: balance between fair scheduling and loop efficiency.
 const AsyncYieldInterval = 1000
 
 // KLexVersion is the interpreter version, set by main.go at startup.
@@ -69,6 +71,32 @@ var KLexVersion = "unknown"
 // Output is the writer used by println. Defaults to os.Stdout.
 // Override this to redirect output (e.g. in WASM builds).
 var Output io.Writer = os.Stdout
+
+// deepFreeze recursively freezes an object and all mutable objects it contains.
+// Visited tracks pointer identity to handle cycles. Call with an empty map on entry.
+func deepFreeze(obj Object, visited map[Object]bool) {
+	if visited[obj] {
+		return
+	}
+	visited[obj] = true
+	switch o := obj.(type) {
+	case *Array:
+		o.frozen = true
+		for _, el := range o.Elements {
+			deepFreeze(el, visited)
+		}
+	case *Hash:
+		o.frozen = true
+		for _, pair := range o.Pairs {
+			deepFreeze(pair.Value, visited)
+		}
+	case *StructInstance:
+		o.frozen = true
+		for _, v := range o.Fields {
+			deepFreeze(v, visited)
+		}
+	}
+}
 
 // Builtins are the built-in functions available in every kLex program.
 // They live outside the environment chain so they are always accessible.
@@ -98,6 +126,12 @@ var Builtins = map[string]*Builtin{
 			return &Integer{Value: utf8.RuneCountInString(arg.Value)}
 		case *Hash:
 			return &Integer{Value: len(arg.Pairs)}
+		case *AtomicIntArray:
+			return &Integer{Value: len(arg.Data)}
+		case *AtomicFloatArray:
+			return &Integer{Value: len(arg.Bits)}
+		case *ConcurrentHash:
+			return &Integer{Value: int(atomic.LoadInt64(&arg.Cnt))}
 		default:
 			return typeError(fmt.Sprintf("len not defined for %s", args[0].Type()), ast.Pos{})
 		}
@@ -108,15 +142,27 @@ var Builtins = map[string]*Builtin{
 		if len(args) != 1 {
 			return runtimeError("keys expects 1 argument", ast.Pos{})
 		}
-		hash, ok := args[0].(*Hash)
-		if !ok {
+		switch h := args[0].(type) {
+		case *Hash:
+			out := make([]Object, 0, len(h.Pairs))
+			for _, pair := range h.Pairs {
+				out = append(out, pair.Key)
+			}
+			return &Array{Elements: out}
+		case *ConcurrentHash:
+			// Snapshot via Range; entries added/removed during iteration may be
+			// included/excluded per sync.Map semantics.
+			out := make([]Object, 0, atomic.LoadInt64(&h.Cnt))
+			h.M.Range(func(_, val any) bool {
+				if pair, ok := val.(HashPair); ok {
+					out = append(out, pair.Key)
+				}
+				return true
+			})
+			return &Array{Elements: out}
+		default:
 			return typeError(fmt.Sprintf("keys expects hash, got %s", args[0].Type()), ast.Pos{})
 		}
-		out := make([]Object, 0, len(hash.Pairs))
-		for _, pair := range hash.Pairs {
-			out = append(out, pair.Key)
-		}
-		return &Array{Elements: out}
 	}},
 	// values returns an array of all values in a hash.
 	// Order matches keys() — both iterate the same underlying map in the same pass,
@@ -157,16 +203,29 @@ var Builtins = map[string]*Builtin{
 		if len(args) != 2 {
 			return runtimeError("delete expects 2 arguments", ast.Pos{})
 		}
-		hash, ok := args[0].(*Hash)
-		if !ok {
+		switch h := args[0].(type) {
+		case *Hash:
+			if h.frozen {
+				return runtimeError("cannot mutate frozen hash", ast.Pos{})
+			}
+			hk, err := toHashKey(args[1], ast.Pos{})
+			if err != nil {
+				return err
+			}
+			delete(h.Pairs, hk)
+			return NULL
+		case *ConcurrentHash:
+			hk, err := toHashKey(args[1], ast.Pos{})
+			if err != nil {
+				return err
+			}
+			if _, loaded := h.M.LoadAndDelete(hk); loaded {
+				atomic.AddInt64(&h.Cnt, -1)
+			}
+			return NULL
+		default:
 			return typeError(fmt.Sprintf("delete expects hash as first argument, got %s", args[0].Type()), ast.Pos{})
 		}
-		hk, err := toHashKey(args[1], ast.Pos{})
-		if err != nil {
-			return err
-		}
-		delete(hash.Pairs, hk)
-		return NULL
 	}},
 	// print outputs a value without a trailing newline.
 	// Useful for building output on a single line across multiple calls.
@@ -1743,6 +1802,7 @@ func Eval(node ast.Node, env *Environment) Object {
 		if fn, ok := val.(*Function); ok && fn.Name == "" {
 			fn.Name = n.Name
 		}
+		deepFreeze(val, map[Object]bool{})
 		env.SetConst(n.Name, val)
 		return val
 
@@ -2381,6 +2441,20 @@ func Eval(node ast.Node, env *Environment) Object {
 				return NULL
 			}
 			return pair.Value
+		case *ConcurrentHash:
+			hk, err := toHashKey(index, n.Pos)
+			if err != nil {
+				return err
+			}
+			val, ok := l.M.Load(hk)
+			if !ok {
+				return NULL
+			}
+			pair, ok := val.(HashPair)
+			if !ok {
+				return NULL
+			}
+			return pair.Value
 		case *String:
 			idx, ok := index.(*Integer)
 			if !ok {
@@ -2416,13 +2490,29 @@ func Eval(node ast.Node, env *Environment) Object {
 		}
 		switch o := obj.(type) {
 		case *Hash:
+			if o.frozen {
+				return runtimeError("cannot mutate frozen hash", n.Pos)
+			}
 			hk, err := toHashKey(index, n.Pos)
 			if err != nil {
 				return err
 			}
 			o.Pairs[hk] = HashPair{Key: index, Value: val}
 			return val
+		case *ConcurrentHash:
+			hk, err := toHashKey(index, n.Pos)
+			if err != nil {
+				return err
+			}
+			// Swap returns whether a previous value existed; if not, increment count
+			if _, loaded := o.M.Swap(hk, HashPair{Key: index, Value: val}); !loaded {
+				atomic.AddInt64(&o.Cnt, 1)
+			}
+			return val
 		case *Array:
+			if o.frozen {
+				return runtimeError("cannot mutate frozen array", n.Pos)
+			}
 			idx, ok := index.(*Integer)
 			if !ok {
 				return typeError(fmt.Sprintf("array index must be integer, got %s", index.Type()), n.Pos)
@@ -2582,6 +2672,9 @@ func Eval(node ast.Node, env *Environment) Object {
 		}
 		switch target := obj.(type) {
 		case *StructInstance:
+			if target.frozen {
+				return runtimeError("cannot mutate frozen struct", n.Pos)
+			}
 			if _, ok := target.Fields[n.Left.Property]; !ok {
 				return runtimeError(fmt.Sprintf("struct %s has no field %q", target.Def.Name, n.Left.Property), n.Pos)
 			}

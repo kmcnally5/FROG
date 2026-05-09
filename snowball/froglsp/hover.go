@@ -5,6 +5,7 @@ import (
 	"klex/ast"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 )
@@ -120,21 +121,83 @@ var (
 )
 
 // HoverAtPosition returns hover information for the identifier at the given position
-func HoverAtPosition(doc *DocumentState, pos Position) *Hover {
+func HoverAtPosition(doc *DocumentState, pos Position) (result *Hover) {
+	defer func() {
+		if r := recover(); r != nil {
+			LogMessage("HOVER PANIC: %v, at line %d char %d", r, pos.Line, pos.Character)
+			LogMessage("HOVER PANIC STACK:\n%s", debug.Stack())
+			result = nil
+		}
+	}()
+
 	if doc.AST == nil || doc.Symbols == nil {
 		return nil
 	}
 
 	// Find the node at this position
+	// LSP uses 0-based positions; convert to 1-based for kLex
+	nodeLine := pos.Line + 1
 	node := FindNodeAtPosition(doc.AST, pos.Line, pos.Character)
 	if node == nil {
+		LogMessage("HOVER: no node found at line=%d(display=%d) char=%d", nodeLine, pos.Line, pos.Character)
 		return nil
+	}
+
+	// DEBUG: Log what node was found
+	LogMessage("HOVER: Found node type=%T", node)
+	if ident, ok := node.(*ast.Ident); ok {
+		LogMessage("HOVER: Found Ident='%s' at (%d,%d)", ident.Value, ident.Pos.Line, ident.Pos.Col)
+	} else if assign, ok := node.(*ast.AssignStmt); ok {
+		LogMessage("HOVER: Found AssignStmt name='%s' at (%d,%d)", assign.Name, assign.Pos.Line, assign.Pos.Col)
+	} else if letStmt, ok := node.(*ast.LetStmt); ok {
+		LogMessage("HOVER: Found LetStmt name='%s' at (%d,%d)", letStmt.Name, letStmt.Pos.Line, letStmt.Pos.Col)
 	}
 
 	// Handle regular identifier first (variables, function names, etc.)
 	// This takes priority over statement keywords
 	if ident, ok := node.(*ast.Ident); ok {
+		LogMessage("HOVER: Returning identifier hover for '%s'", ident.Value)
 		return hoverForIdentifier(doc, ident.Value)
+	}
+
+	// Check MultiAssignStmt before other statement types
+	if multiAssign, ok := node.(*ast.MultiAssignStmt); ok {
+		LogMessage("HOVER: Found MultiAssignStmt at line %d, names: %v", multiAssign.Pos.Line, multiAssign.Names)
+		// Determine which variable the cursor is hovering over
+		// The names are on the left side of the assignment, comma-separated
+		// We need to estimate which name based on cursor position
+
+		// For now, we'll check the document text around the position to find the actual identifier
+		lines := strings.Split(doc.Text, "\n")
+		if pos.Line < len(lines) {
+			line := lines[pos.Line]
+
+			// Find the identifier at the cursor position
+			// Walk backwards to find the start of the identifier
+			start := pos.Character
+			for start > 0 && isIdentifierChar(rune(line[start-1])) {
+				start--
+			}
+
+			// Walk forwards to find the end of the identifier
+			end := pos.Character
+			for end < len(line) && isIdentifierChar(rune(line[end])) {
+				end++
+			}
+
+			if start < len(line) && end <= len(line) && start < end {
+				ident := line[start:end]
+				LogMessage("HOVER: Found identifier '%s' at position %d-%d", ident, start, end)
+				// Check if this identifier is in the Names list
+				for _, name := range multiAssign.Names {
+					if name == ident {
+						LogMessage("HOVER: Found '%s' in MultiAssignStmt names, showing hover", ident)
+						return hoverForIdentifier(doc, name)
+					}
+				}
+				LogMessage("HOVER: Identifier '%s' NOT in MultiAssignStmt names %v", ident, multiAssign.Names)
+			}
+		}
 	}
 
 	// For LetStmt/ConstStmt/AssignStmt, check if cursor is on the variable name
@@ -246,6 +309,10 @@ func getKeywordFromNode(node ast.Node) string {
 	return ""
 }
 
+func isIdentifierChar(ch rune) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_'
+}
+
 func hoverForIdentifier(doc *DocumentState, name string) *Hover {
 	// Check if it's a builtin
 	if info, ok := builtinSignatures[name]; ok {
@@ -259,9 +326,14 @@ func hoverForIdentifier(doc *DocumentState, name string) *Hover {
 
 	// Check if it's a user-defined symbol
 	if sym, ok := doc.Symbols.Symbols[name]; ok {
+		// Skip parameters for now (causing panic in renderSymbolHover)
+		if sym.Kind == KindParameter {
+			return nil
+		}
+
 		// Extract comments from the current document for functions and variables (not parameters)
 		var comments string
-		if sym.Kind == KindFunction || sym.Kind == KindVariable || sym.Kind == KindConst {
+		if (sym.Kind == KindFunction || sym.Kind == KindVariable || sym.Kind == KindConst) && sym.DefPos.Line > 0 {
 			comments = extractCommentsAboveSymbol(doc.Text, sym.DefPos.Line)
 		}
 
@@ -404,13 +476,20 @@ func hoverForDotExpr(doc *DocumentState, dotExpr *ast.DotExpr, pos Position) *Ho
 // Returns markdown formatted with first line as bold
 func extractCommentsAboveSymbol(source string, defLine int) string {
 	lines := strings.Split(source, "\n")
+	// defLine is 1-based; lines array is 0-based
+	// Need at least 2 lines (0-based index 0 and 1) to safely go back
 	if defLine < 2 || defLine > len(lines) {
+		LogMessage("extractComments: defLine %d out of range, total lines: %d", defLine, len(lines))
 		return ""
 	}
 
-	// Start from the line before the definition
+	// Start from the line before the definition (convert 1-based to 0-based)
 	commentLines := []string{}
 	for i := defLine - 2; i >= 0; i-- {
+		if i < 0 || i >= len(lines) {
+			LogMessage("extractComments: index %d out of bounds for %d lines", i, len(lines))
+			break
+		}
 		line := strings.TrimSpace(lines[i])
 		if strings.HasPrefix(line, "//") {
 			// Extract comment text (remove // and trim)

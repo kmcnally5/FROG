@@ -1,4 +1,4 @@
-import "hash.lex" as h
+import "stdlib/hash.lex" as h
 
 CHUNK_SIZE = 16
 

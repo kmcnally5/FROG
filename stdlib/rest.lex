@@ -24,9 +24,9 @@
 //   resp, err = rest.getBearer("https://api.example.com/me", "token123")
 //   println(resp.data["id"])
 
-import "http.lex" as _http
-import "json.lex" as _json
-import "base64.lex" as _b64
+import "stdlib/http.lex" as _http
+import "stdlib/json.lex" as _json
+import "stdlib/base64.lex" as _b64
 
 struct RestResponse {
     status, data, headers

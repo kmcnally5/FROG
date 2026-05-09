@@ -30,7 +30,8 @@ fn pmap(arr, func, numWorkers) {
         let idx = chunkIdx
         let chk = chunks[idx]
         let task = async(fn() {
-            let results = []
+            let results = makeArray(len(chk), null)
+            let resIdx = 0
 
             for elemIdx in range(len(chk)) {
                 let elem = chk[elemIdx]
@@ -42,7 +43,8 @@ fn pmap(arr, func, numWorkers) {
                     return result
                 }
 
-                results = push(results, result)
+                results[resIdx] = result
+                resIdx = resIdx + 1
             }
 
             return results
@@ -104,8 +106,8 @@ fn parallel_filter(arr, func, numWorkers) {
         let idx = chunkIdx
         let chk = chunks[idx]
         let task = async(fn() {
-            let results = []
-
+            // Pass 1: count matches
+            let count = 0
             for elemIdx in range(len(chk)) {
                 let elem = chk[elemIdx]
                 keep, callErr = safe(func, elem)
@@ -116,7 +118,25 @@ fn parallel_filter(arr, func, numWorkers) {
                     return keep
                 }
                 if keep {
-                    results = push(results, elem)
+                    count = count + 1
+                }
+            }
+
+            // Pass 2: allocate and fill
+            let results = makeArray(count, null)
+            let resIdx = 0
+            for elemIdx in range(len(chk)) {
+                let elem = chk[elemIdx]
+                keep, callErr = safe(func, elem)
+                if callErr != null {
+                    return callErr
+                }
+                if isError(keep) {
+                    return keep
+                }
+                if keep {
+                    results[resIdx] = elem
+                    resIdx = resIdx + 1
                 }
             }
 

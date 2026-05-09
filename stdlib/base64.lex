@@ -6,7 +6,7 @@
 // Use URL-safe when embedding in URLs, HTTP headers, or JWT tokens.
 //
 // Usage:
-//   import "base64.lex" as b64
+//   import "stdlib/base64.lex" as b64
 //   encoded = b64.encode("hello")          // "aGVsbG8="
 //   decoded, err = b64.decode(encoded)     // "hello", null
 

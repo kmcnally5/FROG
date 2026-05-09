@@ -17,7 +17,7 @@
 //   count.set(2)   // prints: count is now 2
 //   println(count.get())  // 2
 
-import "event.lex" as ev
+import "stdlib/event.lex" as ev
 
 struct Observable {
     val

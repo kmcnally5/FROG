@@ -106,7 +106,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.klex",
-          "match": "\\b(_base64Decode|_base64Encode|_base64UrlDecode|_base64UrlEncode|_bcryptHash|_bcryptVerify|_constantTimeEquals|_csvFormat|_csvFormatDelim|_csvParse|_csvParseDelim|_csvParseHeaders|_deflateCompress|_deflateDecompress|_fsAppend|_fsChmod|_fsCopy|_fsExists|_fsListDir|_fsLstat|_fsMkdir|_fsMkdirAll|_fsRead|_fsReadDir|_fsReadlink|_fsRemove|_fsRemoveAll|_fsRename|_fsStat|_fsSymlink|_fsTmpDir|_fsTmpFile|_fsWrite|_gzipCompress|_gzipDecompress|_hmacSha256|_hmacSha512|_httpDo|_httpServe|_md5|_osArgs|_osCwd|_osExit|_osGetenv|_osHostname|_osPid|_osSetenv|_processExec|_processRun|_processShell|_randomBytes|_regexFind|_regexFindAll|_regexGroups|_regexGroupsAll|_regexMatch|_regexReplace|_regexReplaceAll|_regexSplit|_sha256|_sha512|_timeFields|_timeFormat|_timeNanos|_timeNow|_timeParse|_tsvFormat|_tsvParse|_urlDecode|_urlEncode|_uuid|async|await|ceil|cos|dnsLookup|error|filter|floor|format|map|max|min|netClose|netRead|netWrite|rand|randInt|reduce|round|safe|shuffle|sin|slice|sort|sortBy|sqrt|substr|tan|tcpDial|tcpListen)\\b(?=\\s*\\()"
+          "match": "\\b(_base64Decode|_base64Encode|_base64UrlDecode|_base64UrlEncode|_bcryptHash|_bcryptVerify|_constantTimeEquals|_csvFirstRowCols|_csvFormat|_csvFormatDelim|_csvHasRows|_csvParse|_csvParseDelim|_csvParseHeaders|_csvStream|_deflateCompress|_deflateDecompress|_fsAppend|_fsChmod|_fsCopy|_fsExists|_fsListDir|_fsLstat|_fsMap|_fsMkdir|_fsMkdirAll|_fsRead|_fsReadChunk|_fsReadDir|_fsReadlink|_fsRemove|_fsRemoveAll|_fsRename|_fsStat|_fsSymlink|_fsTmpDir|_fsTmpFile|_fsWrite|_gzipCompress|_gzipDecompress|_hmacSha256|_hmacSha512|_httpDo|_httpServe|_md5|_osArgs|_osCwd|_osExit|_osGetenv|_osHostname|_osPid|_osSetenv|_processExec|_processRun|_processShell|_randomBytes|_regexFind|_regexFindAll|_regexGroups|_regexGroupsAll|_regexMatch|_regexReplace|_regexReplaceAll|_regexSplit|_sha256|_sha512|_timeFields|_timeFormat|_timeNanos|_timeNow|_timeParse|_tsvFormat|_tsvParse|_urlDecode|_urlEncode|_uuid|async|await|ceil|color_bg_black|color_bg_blue|color_bg_cyan|color_bg_green|color_bg_magenta|color_bg_red|color_bg_white|color_bg_yellow|color_black|color_blue|color_bold|color_cyan|color_dim|color_green|color_magenta|color_red|color_reset|color_underline|color_white|color_yellow|colorize|cos|dnsLookup|error|filter|floor|format|map|max|min|atomicAdd|atomicCAS|atomicFloatArray|atomicHashAdd|atomicHashCAS|atomicHashIncr|atomicIntArray|atomicLoad|atomicStore|concurrentHash|netClose|netRead|netWrite|parallelArrayForEach|parallelArrayMap|parallelArrayReduce|parallelArrayUpdate|rand|randInt|reduce|round|safe|shuffle|sin|slice|sort|sortBy|sqrt|substr|tan|tcpDial|tcpListen)\\b(?=\\s*\\()"
         }
       ]
     },
@@ -119,7 +119,7 @@
           "patterns": [
             {
               "name": "constant.character.escape.klex",
-              "match": "\\\\[nrtb\"\\\\{]"
+              "match": "\\\\(?:[nrtb\"\\\\{]|x[0-9a-fA-F]{2})"
             },
             {
               "name": "meta.embedded.klex",

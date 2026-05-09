@@ -2,6 +2,7 @@
 klex
 klex.exe
 /froglsp
+build_releases.sh
 
 # claude project mantra / claude specific stuff
 CLAUDE.md
@@ -13,6 +14,8 @@ cache.db
 kv_test.txt
 tools/
 projects/
+releases/
+snowball/toad/
 
 # Go toolchain artifacts
 *.test

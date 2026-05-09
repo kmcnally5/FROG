@@ -1,7 +1,7 @@
 // stdlib/encoding.lex — ASCII encoding utilities (printable range 32–126)
 //
 // Usage:
-//   import "encoding.lex" as enc
+//   import "stdlib/encoding.lex" as enc
 //   println(enc.ord("A"))    // 65
 //   println(enc.chr(65))     // A
 

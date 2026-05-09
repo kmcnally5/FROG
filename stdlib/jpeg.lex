@@ -1,4 +1,4 @@
-import "math.lex" as m
+import "stdlib/math.lex" as m
 
 // Standard JPEG Luminance Quantization Table
 // This "Governs" how much data we throw away (Higher numbers = More compression)

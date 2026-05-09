@@ -32,7 +32,7 @@ import (
 	"runtime/pprof"
 )
 
-const Version = "v0.3.31"
+const Version = "v0.3.32"
 
 func main() {
 	eval.KLexVersion = Version
@@ -82,13 +82,10 @@ func main() {
 		return
 	}
 
-	if len(args) > 1 {
-		fmt.Fprintln(os.Stderr, "usage: klex [file.lex]")
-		os.Exit(1)
-	}
-
-	// One argument — run the given source file.
+	// First argument is the file path; remaining arguments are passed to the script.
 	path := args[0]
+	scriptArgs := args[1:]
+
 	src, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: cannot read %s: %v\n", path, err)
@@ -115,6 +112,14 @@ func main() {
 	// Phase 3: evaluate the AST.
 	// NewEnv() creates the top-level (global) variable scope.
 	env := eval.NewEnv()
+
+	// Set the __args__ variable with command-line arguments passed to the script.
+	argsArray := make([]eval.Object, len(scriptArgs))
+	for i, arg := range scriptArgs {
+		argsArray[i] = &eval.String{Value: arg}
+	}
+	env.Set("__args__", &eval.Array{Elements: argsArray})
+
 	result := eval.Eval(program, env)
 	if eval.IsError(result) {
 		os.Exit(1)

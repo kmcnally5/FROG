@@ -1,4 +1,4 @@
-import "server.lex" as srv
+import "stdlib/server.lex" as srv
 
 s = srv.new()
 

@@ -7,7 +7,7 @@
 // - hashing functions (FNV-1a: hash, hashBytes, combineHash)
 //
 // Usage:
-//   import "hash.lex" as h
+//   import "stdlib/hash.lex" as h
 //
 //   h.merge(map1, map2)
 //   h.hash("hello")
@@ -15,7 +15,7 @@
 //
 // =====================================
 
-import "encoding.lex" as enc
+import "stdlib/encoding.lex" as enc
 
 
 // =====================================
