@@ -1,6 +1,8 @@
 package eval
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
@@ -9,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 func init() {
@@ -175,5 +178,107 @@ func init() {
 			return &Boolean{Value: false}
 		}
 		return &Boolean{Value: hmac.Equal([]byte(aObj.Value), []byte(bObj.Value))}
+	}}
+
+	// _aesEncrypt(plaintext, key) → (ciphertext_hex, error)
+	// Encrypts plaintext using AES-256-GCM (authenticated encryption)
+	// key: 32-byte key (will be used as-is; derive from password with pbkdf2 if needed)
+	// Returns: hex-encoded (nonce + ciphertext + tag) or error
+	// Format: 24 hex chars (12 bytes nonce) + ciphertext + tag (always 32 hex chars)
+	Builtins["_aesEncrypt"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return &Tuple{Elements: []Object{NULL, &String{Value: "_aesEncrypt expects 2 arguments (plaintext, key)"}}}
+		}
+		ptObj, ok := args[0].(*String)
+		if !ok {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("_aesEncrypt: plaintext must be string, got %s", args[0].Type())}}}
+		}
+		keyObj, ok := args[1].(*String)
+		if !ok {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("_aesEncrypt: key must be string, got %s", args[1].Type())}}}
+		}
+
+		keyBytes := []byte(keyObj.Value)
+		// Derive 32-byte key from input if needed
+		if len(keyBytes) < 32 {
+			// Key too short, use PBKDF2 to derive it
+			salt := []byte("frog_broker_salt") // Fixed salt; in production use random per-file
+			keyBytes = pbkdf2.Key(keyBytes, salt, 100000, 32, sha256.New)
+		} else if len(keyBytes) > 32 {
+			keyBytes = keyBytes[:32]
+		}
+
+		block, err := aes.NewCipher(keyBytes)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("aes cipher error: %s", err.Error())}}}
+		}
+
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("gcm error: %s", err.Error())}}}
+		}
+
+		nonce := make([]byte, gcm.NonceSize())
+		_, err = rand.Read(nonce)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("random nonce error: %s", err.Error())}}}
+		}
+
+		ciphertext := gcm.Seal(nonce, nonce, []byte(ptObj.Value), nil)
+		return &Tuple{Elements: []Object{&String{Value: hex.EncodeToString(ciphertext)}, NULL}}
+	}}
+
+	// _aesDecrypt(ciphertext_hex, key) → (plaintext, error)
+	// Decrypts AES-256-GCM ciphertext (expects format from _aesEncrypt)
+	// Returns (plaintext, null) on success or (null, error) on failure
+	Builtins["_aesDecrypt"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return &Tuple{Elements: []Object{NULL, &String{Value: "_aesDecrypt expects 2 arguments (ciphertext_hex, key)"}}}
+		}
+		ctObj, ok := args[0].(*String)
+		if !ok {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("_aesDecrypt: ciphertext must be string, got %s", args[0].Type())}}}
+		}
+		keyObj, ok := args[1].(*String)
+		if !ok {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("_aesDecrypt: key must be string, got %s", args[1].Type())}}}
+		}
+
+		cipherBytes, err := hex.DecodeString(ctObj.Value)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("hex decode error: %s", err.Error())}}}
+		}
+
+		keyBytes := []byte(keyObj.Value)
+		// Derive 32-byte key from input if needed (must match encryption)
+		if len(keyBytes) < 32 {
+			salt := []byte("frog_broker_salt") // Must match encryption
+			keyBytes = pbkdf2.Key(keyBytes, salt, 100000, 32, sha256.New)
+		} else if len(keyBytes) > 32 {
+			keyBytes = keyBytes[:32]
+		}
+
+		block, err := aes.NewCipher(keyBytes)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("aes cipher error: %s", err.Error())}}}
+		}
+
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("gcm error: %s", err.Error())}}}
+		}
+
+		nonceSize := gcm.NonceSize()
+		if len(cipherBytes) < nonceSize {
+			return &Tuple{Elements: []Object{NULL, &String{Value: "ciphertext too short"}}}
+		}
+
+		nonce, ciphertext := cipherBytes[:nonceSize], cipherBytes[nonceSize:]
+		plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("decryption failed (corrupted or wrong key): %s", err.Error())}}}
+		}
+
+		return &Tuple{Elements: []Object{&String{Value: string(plaintext)}, NULL}}
 	}}
 }

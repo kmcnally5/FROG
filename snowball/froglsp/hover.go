@@ -403,8 +403,11 @@ func hoverForDotExpr(doc *DocumentState, dotExpr *ast.DotExpr, pos Position) *Ho
 	}
 
 	if importPath == "" {
+		LogMessage("HOVER DotExpr: no import found for alias '%s'", leftName)
 		return nil
 	}
+
+	LogMessage("HOVER DotExpr: alias='%s' property='%s' importPath='%s'", leftName, propertyName, importPath)
 
 	// Resolve the import to a file path
 	docURI := URIToPath(doc.URI)
@@ -416,12 +419,26 @@ func hoverForDotExpr(doc *DocumentState, dotExpr *ast.DotExpr, pos Position) *Ho
 		libFileName = libFileName + ".lex"
 	}
 
-	// Try multiple locations: same dir, then stdlib
+	// Try multiple locations: same dir, stdlib, and project-root-relative paths.
+	// Imports like "projects/frogBroker/broker_auth.lex" are relative to the
+	// project root, not to the importing file's directory. Walk up ancestor
+	// directories until the file is found or we run out of parents.
 	var libFile string
 	candidates := []string{
-		filepath.Join(docDir, libFileName),                    // same directory as importing file
-		filepath.Join(filepath.Dir(filepath.Dir(docDir)), "stdlib", libFileName), // stdlib dir (go up 2 levels from tests)
-		filepath.Join(filepath.Dir(docDir), "stdlib", libFileName), // stdlib dir (go up 1 level)
+		filepath.Join(docDir, libFileName),                                            // same directory
+		filepath.Join(filepath.Dir(filepath.Dir(docDir)), "stdlib", libFileName),      // stdlib (2 up)
+		filepath.Join(filepath.Dir(docDir), "stdlib", libFileName),                    // stdlib (1 up)
+	}
+
+	// Walk up from docDir trying the import path relative to each ancestor
+	ancestor := docDir
+	for i := 0; i < 8; i++ {
+		candidates = append(candidates, filepath.Join(ancestor, libFileName))
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			break
+		}
+		ancestor = parent
 	}
 
 	for _, candidate := range candidates {
@@ -432,8 +449,10 @@ func hoverForDotExpr(doc *DocumentState, dotExpr *ast.DotExpr, pos Position) *Ho
 	}
 
 	if libFile == "" {
+		LogMessage("HOVER DotExpr: could not resolve '%s' — tried %d candidates from docDir='%s'", libFileName, len(candidates), docDir)
 		return nil
 	}
+	LogMessage("HOVER DotExpr: resolved to '%s'", libFile)
 
 	// Get or parse the imported file
 	libContent := getFileContent(libFile)
@@ -450,8 +469,16 @@ func hoverForDotExpr(doc *DocumentState, dotExpr *ast.DotExpr, pos Position) *Ho
 	// Look up the symbol in the library
 	sym, ok := libSymbols.Symbols[propertyName]
 	if !ok {
+		LogMessage("HOVER DotExpr: symbol '%s' not found in '%s' (available: %v)", propertyName, libFile, func() []string {
+			keys := make([]string, 0, len(libSymbols.Symbols))
+			for k := range libSymbols.Symbols {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
 		return nil
 	}
+	LogMessage("HOVER DotExpr: found symbol '%s' at line %d", propertyName, sym.DefPos.Line)
 
 	// Extract comments from the library file
 	comments := extractCommentsAboveSymbol(libContent, sym.DefPos.Line)

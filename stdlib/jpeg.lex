@@ -1,7 +1,35 @@
-import "stdlib/math.lex" as m
+const PI = pi()
+
+// DCT basis function for an 8x8 block
+fn dct_basis(u, v, x, y) {
+    let cu = 1.0
+    if u == 0 { cu = 0.7071 }
+
+    let cv = 1.0
+    if v == 0 { cv = 0.7071 }
+
+    return cu * cv * cos((2 * x + 1) * u * PI / 16) * cos((2 * y + 1) * v * PI / 16)
+}
+
+// Apply Discrete Cosine Transform to a flattened 8x8 block
+fn apply_dct(block8x8) {
+    let output = range(64)
+    for u in range(8) {
+        for v in range(8) {
+            let sum = 0.0
+            for x in range(8) {
+                for y in range(8) {
+                    sum = sum + block8x8[x*8 + y] * dct_basis(u, v, x, y)
+                }
+            }
+            output[u*8 + v] = sum / 4
+        }
+    }
+    return output
+}
 
 // Standard JPEG Luminance Quantization Table
-// This "Governs" how much data we throw away (Higher numbers = More compression)
+// Higher numbers = more compression = more data thrown away
 Q_TABLE = [
     16, 11, 10, 16, 24, 40, 51, 61,
     12, 12, 14, 19, 26, 58, 60, 55,
@@ -13,20 +41,17 @@ Q_TABLE = [
     72, 92, 95, 98, 112, 100, 103, 99
 ]
 
-// Step 1: RGB to Y (Luminance) - Humans see brightness better than color
+// Step 1: RGB to Y (Luminance) — humans see brightness better than colour
 fn rgb_to_y(r, g, b) {
     return 0.299*r + 0.587*g + 0.114*b - 128
 }
 
 // Step 2: Compress a single 8x8 block
 fn compress_block(block8x8) {
-    let dct_coeffs = m.apply_dct(block8x8)
-    let quantized = []
-    
+    let dct_coeffs = apply_dct(block8x8)
+    let quantized = makeArray(64)
     for i in range(64) {
-        // Divide by Q_TABLE to drop high-frequency "noise"
-        let val = round(dct_coeffs[i] / Q_TABLE[i])
-        quantized = push(quantized, val)
+        quantized[i] = round(dct_coeffs[i] / Q_TABLE[i])
     }
     return quantized
 }

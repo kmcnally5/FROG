@@ -639,6 +639,7 @@ These are not grammar rules but are listed here because they shape what programs
 * `range(stop)` `range(start, stop)` `range(start, stop, step)` — `INTEGER` arrays
 * `slice(arr, start [, end])` — sub-array by 0-based index; end exclusive
 * `sort(arr)` — new sorted array (generic sort; elements must be comparable)
+* `sortBy(arr, fn)` — new sorted array using `fn(a, b) -> BOOLEAN`; true = a before b
 * `shuffle(arr)` — new array with elements in random order
 
 ### Hash Operations
@@ -655,17 +656,32 @@ These are not grammar rules but are listed here because they shape what programs
 
 ### Math Functions
 
-* `ceil(x)` — round up
-* `cos(x)` — cosine
-* `floor(x)` — round down
-* `max(a, b)` — maximum of two numbers
-* `min(a, b)` — minimum of two numbers
-* `rand()` — random `FLOAT` in [0, 1)
-* `randInt(min, max)` — random `INTEGER` in [min, max)
-* `round(x)` — round to nearest integer
-* `sin(x)` — sine
-* `sqrt(x)` — square root
-* `tan(x)` — tangent
+* `abs(x)` → same type — absolute value
+* `acos(x)` → `FLOAT` — arc cosine; x in [-1, 1]
+* `asin(x)` → `FLOAT` — arc sine; x in [-1, 1]
+* `atan(x)` → `FLOAT` — arc tangent
+* `atan2(y, x)` → `FLOAT` — arc tangent of y/x, correct quadrant
+* `ceil(x)` → `INTEGER` — round up
+* `cos(x)` → `FLOAT` — cosine (radians)
+* `e()` → `FLOAT` — Euler's number (2.718…)
+* `exp(x)` → `FLOAT` — e raised to x
+* `floor(x)` → `INTEGER` — round down
+* `fmod(a, b)` → `FLOAT` — floating-point remainder; both args must be `FLOAT`
+* `log(x)` → `FLOAT` — natural logarithm; x must be positive
+* `log2(x)` → `FLOAT` — base-2 logarithm; x must be positive
+* `log10(x)` → `FLOAT` — base-10 logarithm; x must be positive
+* `max(a, b)` — maximum of two numbers; returns original type
+* `min(a, b)` — minimum of two numbers; returns original type
+* `mod(a, b)` → `INTEGER` — integer remainder (a % b); both args must be `INTEGER`
+* `pi()` → `FLOAT` — π (3.14159…)
+* `pow(base, exp)` → `FLOAT` — base raised to exp
+* `rand()` → `FLOAT` — random float in [0, 1)
+* `randInt(min, max)` → `INTEGER` — random integer in [min, max] inclusive
+* `round(x)` → `INTEGER` — round to nearest integer
+* `shuffle(arr)` → `ARRAY` — new array with elements in random order
+* `sin(x)` → `FLOAT` — sine (radians)
+* `sqrt(x)` → `FLOAT` — square root; x must be non-negative
+* `tan(x)` → `FLOAT` — tangent (radians)
 
 ### Error Handling
 
@@ -679,6 +695,7 @@ These are not grammar rules but are listed here because they shape what programs
 * `channel([n])` — new `CHANNEL`; unbuffered if n omitted
 * `send(ch, val)` — null on success; false if cancelled; `RuntimeError` if closed
 * `recv(ch)` — `TUPLE` `(val, BOOLEAN ok)`
+* `recvNonBlock(ch)` — returns value or `null` immediately if channel is empty (non-blocking)
 * `close(ch)` — signal no more sends
 * `cancel(ch)` — signal producer to stop
 * `async(fn, args...)` — returns `TASK`
@@ -765,6 +782,12 @@ with normal `[]` indexing syntax — reads and writes are atomic.
 * `_fsTmpDir()` → `(STRING, error)` — system temp directory
 * `_fsTmpFile([prefix])` → `(STRING, error)` — create temp file
 
+**Simple file helpers (no error tuple — RuntimeError on failure):**
+
+* `readFile(path: STRING)` → `STRING` — read entire file contents
+* `writeFile(path: STRING, content: STRING)` → `null` — write/overwrite file
+* `appendFile(path: STRING, content: STRING)` → `null` — append to file
+
 ### Operating System (Low-level)
 
 * `_osGetenv(key)` → `STRING` or null
@@ -780,6 +803,11 @@ with normal `[]` indexing syntax — reads and writes are atomic.
 * `_processExec(cmd, args)` → `(stdout, stderr, exitCode, error)`
 * `_processRun(cmd, args)` → `(stdout, stderr, exitCode, error)`
 * `_processShell(cmd)` → `(stdout, stderr, exitCode, error)`
+
+**Simple process helpers (RuntimeError on failure):**
+
+* `exec(cmd: STRING, args: ARRAY)` → `STRING` — run command, return stdout
+* `env(name: STRING)` → `STRING | null` — get environment variable
 
 ### Networking (Low-level)
 
@@ -814,6 +842,228 @@ with normal `[]` indexing syntax — reads and writes are atomic.
 ### UUID
 
 * `_uuid()` → `STRING` — generate random UUID v4
+
+### Encryption (AES-256-GCM)
+
+* `_aesEncrypt(plaintext: STRING, key: STRING)` → `(STRING, STRING|NULL)` — encrypts with AES-256-GCM; returns `(ciphertext_hex, null)` on success or `(null, error)` on failure; key shorter than 32 bytes is PBKDF2-SHA256 derived; every call produces a unique ciphertext (random 12-byte nonce prepended)
+* `_aesDecrypt(ciphertext_hex: STRING, key: STRING)` → `(STRING, STRING|NULL)` — decrypts output from `_aesEncrypt`; returns `(plaintext, null)` on success or `(null, error)` if key is wrong or data has been tampered with (GCM authentication tag enforced)
+
+---
+
+## GRAPHICS BUILTINS (macOS / Linux — OpenGL 4.1)
+
+Graphics builtins are only available when an OpenGL window is open. All colour values are `FLOAT` in [0.0, 1.0]. Coordinates are pixel-space with origin at top-left.
+
+### Window
+
+* `window(width: INTEGER, height: INTEGER, title: STRING, drawFn: FUNCTION)` — open resizable window; calls `drawFn(frameCount)` every frame; blocks until closed
+* `frameRate(fps: FLOAT)` — cap render loop to fps frames per second; `0` reverts to vsync; safe to call before `window()`
+
+### State
+
+* `background(r, g, b)` | `background(gray)` | `background(r, g, b, a)` — clear screen
+* `fill(r, g, b)` | `fill(gray)` | `fill(r, g, b, a)` — set fill colour
+* `noFill()` — disable fill
+* `stroke(r, g, b)` | `stroke(gray)` | `stroke(r, g, b, a)` — set stroke colour
+* `noStroke()` — disable stroke
+* `strokeWeight(w: FLOAT)` — stroke line width in pixels
+
+### Shapes
+
+* `rect(x, y, w, h: FLOAT)` — rectangle, top-left origin
+* `circle(x, y, radius: FLOAT)` — circle (64-segment approximation)
+* `ellipse(x, y, rx, ry: FLOAT)` — ellipse with separate x/y radii
+* `line(x1, y1, x2, y2: FLOAT)` — line using current stroke colour
+* `triangle(x1, y1, x2, y2, x3, y3: FLOAT)` — triangle
+* `polygon(points: ARRAY)` — arbitrary polygon; flat array `[x1,y1, x2,y2, ...]`; at least 3 points
+* `point(x, y: FLOAT)` — single pixel at (x, y); colour = current stroke; size = `strokeWeight`
+* `roundedRect(x, y, w, h, r: FLOAT)` — SDF rounded rectangle with corner radius `r`; mathematically perfect AA edges
+
+### Gradients
+
+* `gradient(x, y, w, h: FLOAT, color1, color2: ARRAY, dir: STRING)` → `null` — GPU linear gradient fill; `color1`/`color2` are `[r,g,b,a]` float arrays; `dir`: `"h"` = horizontal (left→right), `"v"` = vertical (top→bottom); can be called inside or outside `uiBegin()/uiEnd()`
+
+### Images
+
+* `loadImage(path: STRING)` → `IMAGE` — load PNG or JPEG; safe to call before `window()`
+* `drawImage(img: IMAGE, x, y: FLOAT)` — draw at natural size
+* `drawImage(img: IMAGE, x, y, w, h: FLOAT)` — draw scaled to w×h
+
+### Text
+
+* `text(str: STRING, x, y: FLOAT [, scale: FLOAT])` — embedded 8×8 monospace bitmap font; scale multiplies character size (default 1 = 8px); tinted with current fill colour
+
+### Custom Fonts
+
+* `loadFont(path: STRING [, ptSize: INTEGER])` → `FONT` — load `.ttf`/`.otf`; default 16pt SDF atlas; GPU upload deferred to first draw
+* `textFont(font: FONT, str: STRING, x, y: FLOAT [, scale: FLOAT])` → `null` — draw string with proportional SDF font; respects current fill colour
+* `textWidth(font: FONT, str: STRING [, scale: FLOAT])` → `FLOAT` — pixel width of string at given scale; use for right-align or centering
+
+### Transforms
+
+* `translate(x, y: FLOAT)` — move origin
+* `rotate(angle: FLOAT)` — rotate axes by angle radians
+* `scale(sx, sy: FLOAT)` — scale axes
+* `pushMatrix()` — push current transform onto stack
+* `popMatrix()` — pop and restore saved transform
+
+### Input
+
+* `keyDown(key: STRING)` → `BOOL` — true while key is held
+* `keyPressed(key: STRING)` → `BOOL` — true on the single frame key was first pressed
+* `mouseX()` → `FLOAT` — cursor x in window pixels
+* `mouseY()` → `FLOAT` — cursor y in window pixels
+* `mouseDown()` → `BOOL` — true if left mouse button is held
+* `mouseClicked()` → `BOOL` — true only on the frame left button was first pressed (one-shot)
+* `mouseRightDown()` → `BOOL` — true while right mouse button is held
+* `mouseRightClicked()` → `BOOL` — true once on the frame right button was first pressed (one-shot)
+* `mouseScrollY()` → `FLOAT` — vertical wheel delta this frame; positive = up, negative = down; resets each frame
+* `mouseScrollX()` → `FLOAT` — horizontal wheel/trackpad delta this frame; resets each frame
+
+### Query
+
+* `frameCount()` → `INTEGER` — frames rendered since window opened
+* `elapsedTime()` → `FLOAT` — seconds since window opened
+* `winWidth()` → `INTEGER` — window width in pixels
+* `winHeight()` → `INTEGER` — window height in pixels
+* `fontCharWidth()` → `INTEGER` — pixel width of one font character at scale 1
+* `fontCharHeight()` → `INTEGER` — pixel height of one font character at scale 1
+
+### SDF Shapes
+
+* `roundedRect(x, y, w, h, r: FLOAT)` — SDF-rendered rounded rectangle with corner radius r; mathematically perfect AA edges; respects fill and stroke state
+
+### Particle Batch
+
+* `drawParticles(xs, ys, rs, gs, bs, alphas: ARRAY, count: INTEGER, pointSize: FLOAT)` — render up to count particles in a single GPU draw call; SoA colour arrays; alpha < 0.01 skipped
+
+### Key Name Strings
+
+`"A"`–`"Z"`, `"0"`–`"9"`, `"SPACE"`, `"ENTER"`, `"ESC"`, `"LEFT"`, `"RIGHT"`, `"UP"`, `"DOWN"`, `"BACKSPACE"`, `"SHIFT"`, `"CTRL"`, `"TAB"`
+
+---
+
+## UI WIDGETS (immediate-mode, OpenGL — macOS / Linux)
+
+Lightweight immediate-mode UI built on top of the graphics layer. Every draw frame must call `uiBegin()` first and `uiEnd()` last. Hover detection is one frame deferred; at 60fps this is imperceptible.
+
+### Frame Lifecycle
+
+* `uiBegin()` — reset UI element registry; call once at start of draw callback
+* `uiEnd()` — update hover state for the next frame; call once at end
+
+### Focus Management
+
+* `uiNextFieldID()` → `STRING` — returns the ID the next `textInput` will claim; call immediately before `textInput()` to capture it for Tab navigation
+* `uiGetFocus()` → `STRING` — returns the currently focused widget ID; `""` if nothing focused
+* `uiSetFocus(id: STRING)` — programmatically set focus to widget with given ID; use with `uiNextFieldID()` and `keyPressed("TAB")` to implement Tab key cycling between fields
+* `uiSetFont(font: FONT)` — set the active font for all widget text (button labels, tabs, etc.); call after `loadFont()`; reverts on `uiResetFont()`
+* `uiResetFont()` — revert widget text back to the embedded monospace font
+
+Tab navigation pattern:
+```
+fid1 = uiNextFieldID()
+f1 = textInput("", f1, x, y, w, h)
+fid2 = uiNextFieldID()
+f2 = textInput("", f2, x, y, w, h)
+if keyPressed("TAB") {
+  cur = uiGetFocus()
+  if cur == fid1 { uiSetFocus(fid2) } else { uiSetFocus(fid1) }
+}
+```
+
+### Display Widgets
+
+* `label(text: STRING, x, y: INTEGER [, size: FLOAT])` — static text label; size = text scale (default 0.5)
+* `progressBar(x, y, w, h: INTEGER, value, max: FLOAT)` — display-only filled bar; fill fraction = value / max; no interaction
+
+### Interactive Widgets
+
+* `button(label: STRING, x, y, w, h: INTEGER [, size: FLOAT])` → `BOOL` — returns true on the click frame
+* `checkbox(label: STRING, x, y: INTEGER, checked: BOOL [, size: FLOAT])` → `BOOL` — returns new checked state
+* `toggle(label: STRING, x, y: INTEGER, on: BOOL [, size: FLOAT])` → `BOOL` — pill-shaped on/off switch; returns new state
+* `radio(label: STRING, x, y: INTEGER, value: STRING, groupValue: STRING [, size: FLOAT])` → `STRING` — one option in a radio group; returns value if clicked else groupValue unchanged; chain calls to build a group
+* `textInput(label: STRING, text: STRING, x, y, w, h: INTEGER [, size: FLOAT])` → `STRING` — full cursor and selection support; click to position cursor; shift+click extends selection; Left/Right move by char; Ctrl+Left/Right jump by word; Home/End; Shift+arrow extends selection; Ctrl+A select all; Backspace/Delete delete before/after cursor or selection; text scrolls horizontally to track cursor; Ctrl/Cmd+Z undo (word-boundary, 50 steps), Ctrl/Cmd+Shift+Z or Y redo, Ctrl/Cmd+V/C/X paste/copy/cut; label drawn 80px left of field (use `""` to suppress)
+* `slider(label: STRING, x, y, w: INTEGER, value, min, max: FLOAT [, size: FLOAT])` → `FLOAT` — drag handle on capsule track; label + current value displayed above; returns clamped value
+* `numericStepper(label: STRING, x, y, w: INTEGER, value, min, max: INTEGER [, size: FLOAT])` → `INTEGER` — [−] N [+] stepper; better than slider for discrete integers; clamped to [min, max]
+* `getTypedChars()` → `STRING` — printable characters typed this frame; use inside custom focus blocks; returns `""` when nothing typed
+
+### Selection Widgets
+
+* `list(label: STRING, items: ARRAY, x, y, w, h: INTEGER [, size: FLOAT])` → `STRING` — scrollable list; mouse wheel to scroll; click to select; returns selected item
+* `dropdown(label: STRING, items: ARRAY, x, y, w: INTEGER [, size: FLOAT])` → `STRING` — header bar + pop-down menu; call after other widgets so open menu renders on top
+* `tabs(x, y, w: INTEGER, items: ARRAY, activeIdx: INTEGER [, size: FLOAT])` → `INTEGER` — horizontal tab bar; returns new active index; active tab shown with accent underline
+
+### Multi-line Input
+
+* `textArea(label: STRING, text: STRING, x, y, w, h: INTEGER [, size: FLOAT])` → `STRING` — multiline editable text box; click to focus; Enter for newline; mouse wheel scrolls; label drawn above box
+
+### Data Grid
+
+* `table(headers: ARRAY, rows: ARRAY, x, y, w, h: INTEGER [, size: FLOAT])` → `INTEGER` — scrollable data grid; headers: string array; rows: array of string arrays; click to select row; returns selected row index (-1 = none); set `fill()` to a bright colour before calling for readable text
+
+### Collapsible Sections
+
+* `accordion(x, y, w: INTEGER, sections: ARRAY, openIdx: INTEGER [, size: FLOAT])` → `INTEGER` — stacked clickable headers; returns open section index (-1 = all closed)
+
+### Context Menu
+
+* `contextMenu(x, y: INTEGER, items: ARRAY, visible: BOOL [, size: FLOAT])` → `INTEGER` — floating popup menu; call after all other widgets; returns index of clicked item, -1 if none, -2 if clicked outside (dismiss)
+
+### Advanced Widgets
+
+* `colorPicker(x, y, w: INTEGER, r, g, b, a: FLOAT)` → `ARRAY` — four RGBA sliders with live preview swatch; returns [r, g, b, a]; values in [0.0, 1.0]
+* `treeView(x, y, w, h: INTEGER, labels: ARRAY, levels: ARRAY, expanded: ARRAY [, size: FLOAT])` → `ARRAY` — hierarchical tree; `labels[i]` = display text, `levels[i]` = indent depth (0=root), `expanded[i]` = bool; returns [selectedIdx, newExpanded]
+* `scrollArea(x, y, w, h: INTEGER, contentH: FLOAT)` → `FLOAT` — draws panel+scrollbar; returns scroll offset in pixels; use with `pushClip`/`popClip` to clip content
+* `splitter(pos, x, y, length: INTEGER, orient: STRING, min, max: INTEGER [, thickness: INTEGER])` → `INTEGER` — interactive resize handle between two panels; `orient`: `"v"` = vertical bar (drags left/right), `"h"` = horizontal bar (drags up/down); `pos` is the current bar position — pass it in and reassign the return value each frame; `thickness` defaults to 6; cursor changes to a resize arrow on hover automatically
+* `modal(title: STRING, message: STRING, buttons: ARRAY)` → `STRING` — full-screen dimmed overlay with a centred dialog; returns the clicked button label or `""` each frame until clicked; call after all other widgets and before `uiEnd()`
+
+### Layout Cursors
+
+Layout cursors eliminate manual x/y arithmetic. Two are provided — a horizontal row cursor and a vertical column cursor — both backed by the Go graphics state so values are reliable across frames.
+
+**Row cursor (horizontal layout)**
+
+* `uiBeginRow(x, y, h, gap: FLOAT)` → `null` — initialise row cursor at (x, y); `h` = item height, `gap` = spacing between items
+* `uiRowX()` → `INTEGER` — current X position; place next widget here
+* `uiRowY()` → `INTEGER` — row Y (constant)
+* `uiRowH()` → `INTEGER` — row height (constant); pass as `h` to each widget
+* `uiRowAdvance(w: FLOAT)` → `null` — advance cursor right by `w + gap`
+
+**Column cursor (vertical layout)**
+
+* `uiBeginCol(x, y, w, gap: FLOAT)` → `null` — initialise col cursor at (x, y); `w` = column width, `gap` = spacing between items
+* `uiColX()` → `INTEGER` — col X (constant)
+* `uiColY()` → `INTEGER` — current Y position; place next widget here
+* `uiColW()` → `INTEGER` — col width (constant); pass as `w` to full-width widgets
+* `uiColAdvance(h: FLOAT)` → `null` — advance cursor down by `h + gap`
+
+Both cursors can be composed — start a row inside a col by calling `uiBeginRow(uiColX(), uiColY(), rowH, gap)` then `uiColAdvance(rowH)` afterward.
+
+All layout cursor builtins must be called between `uiBegin()` and `uiEnd()`.
+
+### Theming
+
+* `makeTheme()` → `ARRAY` — return the 13-slot default palette; each slot is a `[r, g, b, a]` float array; modify slots then call `uiTheme()`
+* `uiTheme(palette: ARRAY)` → `null` — install a 13-slot palette as the global widget color theme; all widgets read from this palette each frame
+
+Slot index reference:
+
+| Index | Name | Controls |
+|-------|------|----------|
+| 0 | widgetBg | button / widget normal background |
+| 1 | widgetBgHover | hovered state |
+| 2 | widgetBgActive | pressed / checked state |
+| 3 | widgetText | text on interactive widgets |
+| 4 | labelText | label text above/beside widgets |
+| 5 | dimText | secondary / unselected text |
+| 6 | accent | accent line / stripe |
+| 7 | accentBg | selected item / active tab background |
+| 8 | track | slider / progress track |
+| 9 | trackFill | slider / progress fill |
+| 10 | handle | slider handle, scrollbar thumb, checkmark |
+| 11 | inputBg | text input / list container background |
+| 12 | inputFocusBg | focused text input background |
 
 ---
 

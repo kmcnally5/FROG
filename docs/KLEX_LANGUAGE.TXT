@@ -1152,6 +1152,67 @@
     delete(hash, key)        removes key in place, returns null
 
 
+  MATH
+
+    All math functions accept integer or float unless noted otherwise.
+    Functions that always return Float are marked → Float.
+
+    ROUNDING
+      floor(x)               greatest integer ≤ x → Integer
+      ceil(x)                smallest integer ≥ x → Integer
+      round(x)               nearest integer (half away from zero) → Integer
+      abs(x)                 absolute value; returns same type as input
+
+    ROOTS / POWERS / EXPONENTIALS
+      sqrt(x)                square root; x must be non-negative → Float
+      pow(base, exp)         base raised to exp → Float
+      exp(x)                 e raised to x → Float
+
+    LOGARITHMS
+      log(x)                 natural logarithm; x must be positive → Float
+      log2(x)                base-2 logarithm; x must be positive → Float
+      log10(x)               base-10 logarithm; x must be positive → Float
+
+    TRIGONOMETRY  (angles in radians)
+      sin(x)                 → Float
+      cos(x)                 → Float
+      tan(x)                 → Float
+      asin(x)                arc sine; x must be in [-1, 1] → Float
+      acos(x)                arc cosine; x must be in [-1, 1] → Float
+      atan(x)                arc tangent → Float
+      atan2(y, x)            arc tangent of y/x using quadrant signs → Float
+
+    MIN / MAX
+      min(a, b)              smaller of two values; returns original type
+      max(a, b)              larger of two values; returns original type
+
+    MODULO
+      mod(a, b)              integer remainder (a % b); both args must be Integer → Integer
+      fmod(a, b)             floating-point remainder; both args must be Float → Float
+                             RuntimeError if b is zero
+
+    CONSTANTS
+      pi()                   → 3.141592653589793
+      e()                    → 2.718281828459045
+
+
+  SORT
+
+    sort(arr)                sorted copy, ascending (integers, floats, or strings)
+    sortBy(arr, fn)          sorted copy using compareFn(a, b) → bool; true = a before b
+    shuffle(arr)             new array with elements in a random order
+
+      sortBy(nums,  fn(a, b) { return a > b })           // descending
+      sortBy(users, fn(a, b) { return a.age < b.age })   // struct field
+
+
+  RANDOM
+
+    rand()                   random Float in [0.0, 1.0)
+    randInt(min, max)        random Integer in [min, max] inclusive
+    shuffle(arr)             see SORT above
+
+
   HIGHER-ORDER FUNCTIONS
 
     map(array, fn)           apply fn to every element, return new array
@@ -1171,6 +1232,7 @@
     channel(n)               buffered channel with capacity n
     send(ch, value)          send; returns null on success, false if cancelled, RuntimeError if closed
     recv(ch)                 returns (val, true) or (null, false) when closed
+    recvNonBlock(ch)         non-blocking recv; returns the value or null immediately if empty
     close(ch)                signal no more sends
     cancel(ch)               signal producer to stop; future send() returns false
     async(fn, args...)       launch fn in background goroutine, return Task
@@ -1194,6 +1256,48 @@
       postconditions, and inline tests.
         assert(len(results) > 0, "assert: query returned no rows")
         assert(err == null, "unexpected error: " + err.message)
+
+
+  NETWORK
+
+    TCP
+
+      conn, err = tcpDial(host, port)
+                               open TCP connection; returns (conn, null) or (null, error)
+      ch = tcpListen(host, port)
+                               start TCP server; returns channel of accepted connections
+                               break from for-in loop to stop listening
+
+    READING / WRITING
+
+      data, err = netRead(conn, maxBytes)
+                               read up to maxBytes; returns (string, null) or (null, error)
+      null, err = netWrite(conn, data)
+                               write string to connection
+      netClose(conn)           close connection
+
+    DNS
+
+      addrs, err = dnsLookup(hostname)
+                               resolve hostname → array of IP strings
+
+    EXAMPLE — TCP echo client
+
+      conn, err = tcpDial("example.com", 80)
+      if isError(err) { println("connect failed: " + err.message) }
+      netWrite(conn, "GET / HTTP/1.0\r\n\r\n")
+      data, _ = netRead(conn, 4096)
+      println(data)
+      netClose(conn)
+
+    EXAMPLE — TCP server
+
+      ch = tcpListen("127.0.0.1", 8080)
+      for conn in ch {
+          data, _ = netRead(conn, 1024)
+          netWrite(conn, "echo: " + data)
+          netClose(conn)
+      }
 
 
 --------------------------------------------------------------------------------
@@ -1702,6 +1806,28 @@
     areEqual(a, b)          constant-time string comparison (timing-attack resistant)
     isValidHash(h, type)    check if string looks like hash (type: sha256, sha512, md5, bcrypt)
     hashSize(type)          returns expected hash size in hex chars
+
+    ENCRYPTION (AES-256-GCM) — raw builtins:
+    _aesEncrypt(plaintext, key)         → (ciphertext_hex, error)
+                                        — encrypts with AES-256-GCM (authenticated encryption)
+                                          key is any string; shorter keys are PBKDF2-derived
+                                          output is hex-encoded: nonce + ciphertext + GCM tag
+                                          every call produces a unique ciphertext (random nonce)
+
+    _aesDecrypt(ciphertext_hex, key)    → (plaintext, error)
+                                        — decrypts output from _aesEncrypt
+                                          returns (null, error) if key is wrong or data tampered
+                                          GCM tag authentication prevents silent corruption
+
+    Key derivation: if key is shorter than 32 bytes it is stretched via
+    PBKDF2-SHA256 (100,000 iterations). Keys ≥ 32 bytes are used directly
+    (truncated to 32 bytes). Use the same key for both encrypt and decrypt.
+
+    Example:
+      encrypted, err = _aesEncrypt("secret data", master_key)
+      if err == null {
+        plaintext, err = _aesDecrypt(encrypted, master_key)
+      }
 
 
   cache.lex — in-memory key/value cache (instantiable)
@@ -2517,6 +2643,549 @@
     // item4       16
     // item5       25
 
+
+================================================================================
+  GRAPHICS  (OpenGL 4.1, macOS / Linux)
+================================================================================
+
+  kLex has built-in 2D graphics via OpenGL. Open a window with `window()` and
+  draw inside the callback. Coordinate origin is top-left; x increases right,
+  y increases down. Colour values are floats in [0.0, 1.0].
+
+  WINDOW
+
+    window(width, height, title, drawFn)
+
+      Opens an OpenGL window and calls drawFn(frameCount) every frame at vsync.
+      Blocks until the window is closed.
+
+      window(800, 600, "My Sketch", fn(frame) {
+          background(0.1, 0.1, 0.15)
+          fill(1.0, 0.5, 0.0)
+          circle(400.0, 300.0, 50.0)
+      })
+
+  STATE BUILTINS
+
+    background(r, g, b)          — clear screen; also accepts (gray) or (r,g,b,a)
+    fill(r, g, b)                 — set fill colour;   also (gray) or (r,g,b,a)
+    noFill()                      — disable fill (outline only)
+    stroke(r, g, b)               — set stroke colour; also (gray) or (r,g,b,a)
+    noStroke()                    — disable stroke (fill only)
+    strokeWeight(w)               — set stroke width in pixels
+
+  WINDOW CONTROL
+
+    frameRate(fps)                — cap render loop to fps frames per second
+                                    pass 0 to revert to vsync (default)
+                                    safe to call before window()
+
+  SHAPE BUILTINS
+
+    rect(x, y, w, h)              — rectangle, origin top-left
+    circle(x, y, radius)          — circle, 64-segment approximation
+    ellipse(x, y, rx, ry)         — ellipse with separate x and y radii
+    line(x1, y1, x2, y2)          — line using current stroke colour
+    triangle(x1,y1, x2,y2, x3,y3)— triangle
+    polygon(points)               — arbitrary shape; flat array [x1,y1, x2,y2, ...]
+    point(x, y)                   — single pixel; uses stroke colour and strokeWeight
+    roundedRect(x, y, w, h, r)    — SDF rounded rectangle with corner radius r
+
+  GRADIENT BUILTIN
+
+    gradient(x, y, w, h, color1, color2, dir)
+                                  — fill rectangle with a two-color GPU linear gradient
+                                    color1, color2: [r, g, b, a] float arrays (0.0–1.0)
+                                    dir: "h" = horizontal (color1 left, color2 right)
+                                         "v" = vertical   (color1 top,  color2 bottom)
+                                    can be called inside or outside uiBegin()/uiEnd()
+
+                                    gradient(0, 0, winWidth(), 48,
+                                        [0.15, 0.15, 0.22, 1.0],
+                                        [0.10, 0.10, 0.16, 1.0], "v")
+
+  IMAGE BUILTINS
+
+    loadImage(path)  → image      — load PNG or JPEG; safe to call before window()
+    drawImage(img, x, y)          — draw at natural size
+    drawImage(img, x, y, w, h)    — draw scaled to w×h
+
+  TEXT BUILTIN
+
+    text(str, x, y)               — draw string with embedded 8×8 monospace font
+    text(str, x, y, scale)        — scale multiplies character size (default 1 = 8px)
+                                    uses current fill colour as tint
+
+  TRANSFORM BUILTINS
+
+    translate(x, y)               — move origin by (x, y)
+    rotate(angle)                 — rotate axes by angle radians (clockwise, y-down)
+    scale(sx, sy)                 — scale axes by (sx, sy)
+    pushMatrix()                  — save current transform onto the stack
+    popMatrix()                   — restore transform saved by last pushMatrix()
+
+    Transforms accumulate: translate then rotate pivots around the new origin.
+    Always pair pushMatrix/popMatrix to isolate a transform from surrounding code.
+
+      pushMatrix()
+          translate(400.0, 300.0)
+          rotate(0.5)
+          fill(1.0, 0.5, 0.0)
+          rect(-40.0, -40.0, 80.0, 80.0)
+      popMatrix()
+      // origin is back to normal here
+
+  KEYBOARD BUILTINS
+
+    keyDown(key)   → bool         — true while key is held
+    keyPressed(key)→ bool         — true only on the frame key was first pressed
+
+    Key name strings: "A"–"Z", "0"–"9", "SPACE", "ENTER", "ESC",
+                      "LEFT", "RIGHT", "UP", "DOWN",
+                      "BACKSPACE", "SHIFT", "CTRL", "TAB",
+                      "CMD" / "SUPER" (macOS Command / Windows key),
+                      "F1"–"F12", "DELETE", "INSERT", "HOME", "END",
+                      "PGUP", "PGDOWN"
+
+    keyDown fires every frame the key is held.
+    keyPressed fires once per press regardless of how long it is held.
+
+  QUERY BUILTINS
+
+    elapsedTime()  → float        — seconds since window opened (float)
+    frameCount()   → int          — frames rendered since window opened
+    mouseX()          → float     — cursor X in window pixels
+    mouseY()          → float     — cursor Y in window pixels
+    mouseDown()       → bool      — true if left mouse button is held
+    mouseClicked()    → bool      — true only on the frame left button was first pressed
+    mouseRightDown()  → bool      — true while right mouse button is held
+    mouseRightClicked()→ bool     — true once on the frame right button was first pressed
+    mouseScrollY()    → float     — vertical wheel delta this frame (+up / −down); 0 if no scroll
+    mouseScrollX()    → float     — horizontal wheel/trackpad delta this frame; 0 if no scroll
+    winWidth()        → int       — window width in pixels
+    winHeight()    → int          — window height in pixels
+    fontCharWidth() → int         — pixel width of one font character at scale 1
+    fontCharHeight()→ int         — pixel height of one font character at scale 1
+
+    Prefer elapsedTime() over frameCount() for animation and physics —
+    speed stays consistent regardless of frame rate.
+
+  CUSTOM FONTS
+
+    loadFont(path)               → Font  — load .ttf/.otf; default 16pt SDF atlas
+    loadFont(path, ptSize)       → Font  — load at explicit point size
+                                           GPU upload deferred to first textFont() call;
+                                           safe to call before window() opens
+
+    textFont(font, str, x, y)    → null  — draw str with loaded font at scale 1
+    textFont(font, str, x, y, scale)      — draw at custom scale; respects fill colour
+
+    textWidth(font, str)         → float — pixel width of str at scale 1
+    textWidth(font, str, scale)  → float — pixel width at custom scale
+                                           use to centre/right-align before drawing
+
+    EXAMPLE
+
+        myFont = loadFont("/Library/Fonts/Arial.ttf", 24)
+        window(800, 600, "Fonts", fn(frame) {
+            background(0.1, 0.1, 0.12, 1)
+            fill(1, 1, 1, 1)
+            w = textWidth(myFont, "Hello World!", 1.5)
+            textFont(myFont, "Hello World!", 400 - w/2, 280, 1.5)
+        })
+
+  SDF SHAPES
+
+    roundedRect(x, y, w, h, r)    — rounded rectangle with corner radius r
+                                    SDF-rendered: mathematically perfect AA edges
+                                    respects fill and stroke state
+
+  PARTICLE BATCH
+
+    drawParticles(xs, ys, rs, gs, bs, alphas, count, pointSize)
+                                  — render up to count particles in one draw call
+                                    xs/ys = position arrays, rs/gs/bs/alphas = colour
+                                    arrays (SoA layout); particles with alpha < 0.01
+                                    are skipped automatically
+
+  EXAMPLE — bouncing ball
+
+    window(800, 600, "Bounce", fn(frame) {
+        background(0.05, 0.05, 0.12)
+
+        x = 400.0 + sin(elapsedTime() * 1.5) * 200.0
+        y = 300.0 + cos(elapsedTime() * 1.0) * 100.0
+
+        fill(1.0, 0.4, 0.1)
+        noStroke()
+        circle(x, y, 30.0)
+
+        stroke(1.0, 1.0, 1.0)
+        noFill()
+        rect(50.0, 50.0, 700.0, 500.0)
+    })
+
+  EXAMPLE — keyboard movement with transforms
+
+    x = 400.0
+    y = 300.0
+    angle = 0.0
+
+    window(800, 600, "Move", fn(frame) {
+        background(0.05, 0.05, 0.12)
+
+        if keyDown("LEFT")  { x = x - 3.0 }
+        if keyDown("RIGHT") { x = x + 3.0 }
+        if keyDown("UP")    { y = y - 3.0 }
+        if keyDown("DOWN")  { y = y + 3.0 }
+        if keyDown("R")     { angle = angle + 0.03 }
+        if keyPressed("SPACE") { x = 400.0  y = 300.0  angle = 0.0 }
+
+        pushMatrix()
+            translate(x, y)
+            rotate(angle)
+            fill(0.9, 0.4, 0.1)
+            noStroke()
+            rect(-40.0, -40.0, 80.0, 80.0)
+        popMatrix()
+    })
+
+  EXAMPLE — mouse interaction
+
+    window(800, 600, "Mouse", fn(frame) {
+        background(0.08, 0.08, 0.1)
+
+        if mouseDown() {
+            fill(1.0, 0.3, 0.3)
+        } else {
+            fill(0.3, 0.7, 1.0)
+        }
+        noStroke()
+        circle(mouseX(), mouseY(), 20.0)
+    })
+
+
+================================================================================
+  UI WIDGETS  (immediate-mode, OpenGL — macOS / Linux)
+================================================================================
+
+  A lightweight immediate-mode UI system built on top of the graphics builtins.
+  Every frame: call uiBegin() first, then any widget calls, then uiEnd() last.
+  Hover detection is one frame behind (deferred), so widgets feel instantaneous.
+
+  FRAME LIFECYCLE
+
+    uiBegin()                     — reset UI state; call at start of draw loop
+    uiEnd()                       — finalise hover state; call at end of draw loop
+
+  FOCUS MANAGEMENT
+
+    uiNextFieldID()               → string — returns the ID the next textInput will claim
+                                  — call immediately before textInput() to capture its ID
+                                    use with uiSetFocus() to implement Tab key navigation
+
+    uiGetFocus()                  → string — returns the currently focused widget ID
+                                  — returns "" if nothing is focused
+
+    uiSetFocus(id)                — set focus to widget with given ID
+                                  — use with uiNextFieldID() and keyPressed("TAB") to
+                                    cycle focus between text fields
+
+    uiSetFont(font)               — set the active font for all widget text (labels, tabs, etc.)
+                                  — call once per frame after loadFont(); reverts on uiResetFont()
+    uiResetFont()                 — revert widget text back to embedded monospace font
+
+  Tab Navigation Pattern:
+    fid1 = uiNextFieldID()
+    f1 = textInput("", f1, x, y, w, h)
+    fid2 = uiNextFieldID()
+    f2 = textInput("", f2, x, y, w, h)
+    if keyPressed("TAB") {
+      focus = uiGetFocus()
+      if focus == fid1 { uiSetFocus(fid2) }
+      else             { uiSetFocus(fid1) }
+    }
+
+  DISPLAY
+
+    label(text, x, y)             — text label at (x, y)
+    label(text, x, y, size)       — with explicit text scale (default 0.5)
+
+    progressBar(x, y, w, h, value, max)
+                                  — display-only filled bar; fill = value/max
+
+  INPUT
+
+    button(label, x, y, w, h)     → bool   — true on the click frame
+    button(label, x, y, w, h, size)
+
+    checkbox(label, x, y, checked)→ bool   — returns new checked state
+    checkbox(label, x, y, checked, size)
+
+    toggle(label, x, y, on)       → bool   — pill-shaped on/off switch; returns new state
+    toggle(label, x, y, on, size)
+                                  — use for settings (dark mode, notifications, etc.)
+                                    handle slides left=off, right=on
+
+    radio(label, x, y, value, groupValue) → string — one option in a radio group
+    radio(label, x, y, value, groupValue, size)
+                                  — returns value if clicked, else groupValue unchanged
+                                    chain calls: g = radio("A",…,"A",g)
+                                                 g = radio("B",…,"B",g)
+
+    textInput(label, text, x, y, w, h)     → string  — returns updated text
+    textInput(label, text, x, y, w, h, size)
+                                  — click to position cursor; shift+click extends
+                                    selection; text longer than field scrolls
+                                    horizontally tracking the cursor
+                                    Left/Right arrow — move by character
+                                    Ctrl+Left/Right  — jump by word
+                                    Home/End         — jump to start/end
+                                    Shift+arrow/Home/End — extend selection
+                                    Ctrl+A           — select all
+                                    Backspace        — delete before cursor or selection
+                                    Delete           — delete after cursor or selection
+                                    Cmd/Ctrl+V       — paste at cursor
+                                    Cmd/Ctrl+C       — copy selection (or all)
+                                    Cmd/Ctrl+X       — cut selection (or all)
+                                    Cmd/Ctrl+Z       — undo (word-boundary, 50 steps)
+                                    Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y — redo
+
+    getTypedChars()               → string  — printable chars typed this frame
+                                  — use inside stdlib textField() focus blocks
+                                    returns "" when nothing was typed
+
+    slider(label, x, y, w, value, min, max)→ float   — drag handle on track
+    slider(label, x, y, w, value, min, max, size)
+                                  — label + current value shown above track
+
+    numericStepper(label, x, y, w, value, min, max) → int  — [−] N [+] stepper
+    numericStepper(label, x, y, w, value, min, max, size)
+                                  — better than slider for discrete integer values
+                                    clamped to [min, max]; label drawn above
+
+  SELECTION
+
+    list(label, items, x, y, w, h)→ string — scrollable list; returns selected item
+    list(label, items, x, y, w, h, size)
+                                  — mouse wheel to scroll; click to select
+
+    dropdown(label, items, x, y, w)→ string — compact header + pop-down menu
+    dropdown(label, items, x, y, w, size)
+                                  — call after other widgets; menu renders on top
+
+    tabs(x, y, w, items, activeIdx)→ int   — horizontal tab bar; returns new active index
+    tabs(x, y, w, items, activeIdx, size)
+                                  — items: array of label strings; activeIdx: 0-based
+                                    active tab shown with accent underline + highlight
+
+  MULTI-LINE INPUT
+
+    textArea(label, text, x, y, w, h)      → string — multiline editable text box
+    textArea(label, text, x, y, w, h, size)
+                                  — click to focus; backspace to delete; Enter for newline
+                                    Cmd/Ctrl+V paste (preserves newlines); Cmd/Ctrl+C copy;
+                                    Cmd/Ctrl+X cut; mouse wheel scrolls;
+                                    cursor auto-follows typing; scrollbar shown when needed
+
+  DATA GRID
+
+    table(headers, rows, x, y, w, h)       → int — scrollable data grid; returns selected row
+    table(headers, rows, x, y, w, h, size)
+                                  — headers: string array; rows: array of string arrays
+                                    click a row to select; mouse wheel scrolls
+                                    returns selected row index (-1 = none selected)
+                                    columns auto-sized equally across width
+
+  COLLAPSIBLE SECTIONS
+
+    accordion(x, y, w, sections, openIdx)  → int — stacked clickable section headers
+    accordion(x, y, w, sections, openIdx, size)
+                                  — sections: string array of section titles
+                                    openIdx: currently open section (-1 = all closed)
+                                    returns new openIdx; caller renders content:
+                                      if openIdx == 0 { ... }
+
+  CONTEXT MENU (right-click popup)
+
+    contextMenu(x, y, items, visible)      → int — floating popup menu
+    contextMenu(x, y, items, visible, size)
+                                  — visible: bool (use mouseRightClicked() to set true)
+                                    returns: item index if clicked, -1 if idle,
+                                             -2 if clicked outside (caller sets visible=false)
+                                    call AFTER other widgets so it renders on top
+  COLOR PICKER
+
+    colorPicker(x, y, w, r, g, b, a)      → [r, g, b, a] — four RGBA sliders + preview
+                                  — r/g/b/a: 0.0–1.0; returns array [r, g, b, a]
+                                    drag each slider to adjust channel
+                                    preview swatch shows current color below sliders
+
+  TREE VIEW
+
+    treeView(x, y, w, h, labels, levels, expanded)       → [selectedIdx, expanded[]]
+    treeView(x, y, w, h, labels, levels, expanded, size)
+                                  — labels: string array; levels: int array (0=root,1=child)
+                                    expanded: bool array per node
+                                    click [+]/[-] to expand/collapse; click label to select
+                                    mouse wheel scrolls; returns [selectedIdx, newExpanded]
+                                    usage: result = treeView(...)
+                                           sel = result[0]; exp = result[1]
+
+  SCROLL AREA
+
+    scrollArea(x, y, w, h, contentH)      → float — draws panel+scrollbar; returns offset
+                                  — contentH: total height of scrollable content in pixels
+                                    returns scroll offset; use with pushClip/popClip:
+                                      off = scrollArea(10, 50, 400, 300, 800)
+                                      pushClip(10, 50, 400, 300)
+                                      // draw items at (y - off)
+                                      popClip()
+    pushClip(x, y, w, h)         — enable scissor rect; clips all drawing to this region
+    popClip()                     — disable scissor rect (restore full drawing area)
+
+  SPLITTER
+
+    splitter(pos, x, y, length, orient, min, max)          → int
+    splitter(pos, x, y, length, orient, min, max, thickness)
+                                  — interactive resize handle between two panels
+                                    pos: current bar position along the drag axis
+                                    x, y: region origin; length: bar extent (perpendicular)
+                                    orient: "v" = vertical bar (drags left/right)
+                                            "h" = horizontal bar (drags up/down)
+                                    min/max: clamping bounds for pos
+                                    thickness: hit-area size in pixels (default 6)
+                                    returns updated pos — reassign each frame:
+                                      splitX = splitter(splitX, 0, 0, winHeight(), "v", 100, 600)
+                                      pushClip(0, 0, splitX, winHeight())
+                                      // sidebar content
+                                      popClip()
+                                      pushClip(splitX + 1, 0, winWidth() - splitX - 1, winHeight())
+                                      // main content
+                                      popClip()
+                                    cursor changes to resize arrow on hover automatically
+
+  MODAL DIALOG
+
+    modal(title, message, buttons) → string
+                                  — full-screen dimmed overlay with a centred dialog
+                                    buttons: array of label strings
+                                    returns the clicked button label each frame; "" until clicked
+                                    call AFTER all other widgets, before uiEnd()
+                                    blocks background widget interaction while visible
+
+    Example:
+      if showConfirm {
+          result = modal("Delete?", "This cannot be undone.", ["Cancel", "Delete"])
+          if result != "" {
+              showConfirm = false
+              if result == "Delete" { doDelete() }
+          }
+      }
+
+  EXAMPLE
+
+    categories = ["Electronics", "Software", "Hardware"]
+    selected = "Electronics"
+    volume = 0.5
+    muted = false
+
+    window(600, 400, "Settings", fn(frame) {
+        background(0.15, 0.15, 0.15)
+        uiBegin()
+
+        label("Audio", 50, 30, 0.8)
+        volume = slider("Volume", 50, 70, 300, volume, 0.0, 1.0, 0.6)
+        muted  = checkbox("Mute", 50, 110, muted, 0.6)
+
+        label("Category", 50, 160, 0.8)
+        selected = dropdown("", categories, 50, 185, 200, 0.6)
+
+        uiEnd()
+    })
+
+
+  LAYOUT CURSORS
+
+    Layout cursors eliminate manual x/y arithmetic. Two cursors are provided:
+    a horizontal row cursor and a vertical column cursor. Both live on the
+    graphics state (Go side) so their values persist reliably across frames.
+
+    ROW CURSOR (horizontal layout)
+
+    uiBeginRow(x, y, h, gap)      — initialise the row cursor at (x, y)
+                                  — h: fixed height for all widgets in the row
+                                    gap: pixels added between each widget
+    uiRowX()                      → int — current X position (place next widget here)
+    uiRowY()                      → int — row Y (constant; set by uiBeginRow)
+    uiRowH()                      → int — row height (constant; set by uiBeginRow)
+    uiRowAdvance(w)               — advance cursor right by w + gap
+
+    Example — three buttons in a row:
+      uiBeginRow(10, 200, 28, 8)
+      if button("OK",     uiRowX(), uiRowY(), 80, uiRowH()) { uiRowAdvance(80) }
+      if button("Cancel", uiRowX(), uiRowY(), 80, uiRowH()) { uiRowAdvance(80) }
+      if button("Apply",  uiRowX(), uiRowY(), 80, uiRowH()) { uiRowAdvance(80) }
+
+    COL CURSOR (vertical layout)
+
+    uiBeginCol(x, y, w, gap)      — initialise the col cursor at (x, y)
+                                  — w: fixed width for all widgets in the column
+                                    gap: pixels added between each widget
+    uiColX()                      → int — col X (constant; set by uiBeginCol)
+    uiColY()                      → int — current Y position (place next widget here)
+    uiColW()                      → int — col width (constant; set by uiBeginCol)
+    uiColAdvance(h)               — advance cursor down by h + gap
+
+    Example — a form column:
+      uiBeginCol(20, 60, 220, 6)
+      label("Name", uiColX(), uiColY(), 0.6)       uiColAdvance(18)
+      name = textInput("", name, uiColX(), uiColY(), uiColW(), 28)  uiColAdvance(28)
+      label("City", uiColX(), uiColY(), 0.6)       uiColAdvance(18)
+      city = textInput("", city, uiColX(), uiColY(), uiColW(), 28)  uiColAdvance(28)
+
+    Both cursors can be used together — start a row inside a col by calling
+    uiBeginRow at (uiColX(), uiColY()) and then uiColAdvance(rowH) afterward.
+
+    All layout cursor builtins must be called between uiBegin() and uiEnd().
+
+
+  THEMING
+
+    makeTheme()                    → array — return the 13-slot default palette
+                                  — each slot is a [r, g, b, a] float array (values 0.0–1.0)
+                                    modify slots by index, then pass to uiTheme()
+    uiTheme(palette)              — install palette as the global widget color theme
+                                  — all widgets read from this theme each frame
+                                  — call once at startup or when switching themes
+                                  — must be called after window() opens
+
+    Slot index reference:
+      0  widgetBg       button / widget normal background
+      1  widgetBgHover  hovered state
+      2  widgetBgActive pressed / checked state
+      3  widgetText     text on interactive widgets
+      4  labelText      label text above/beside widgets
+      5  dimText        secondary / unselected text
+      6  accent         accent line / stripe
+      7  accentBg       selected item / active tab background
+      8  track          slider / progress track
+      9  trackFill      slider / progress fill
+      10 handle         slider handle, scrollbar thumb, checkmark
+      11 inputBg        text input / list container background
+      12 inputFocusBg   focused text input background
+
+    Example — ocean blue theme:
+      t = makeTheme()
+      t[0]  = [0.10, 0.18, 0.32, 1.0]   // widgetBg
+      t[1]  = [0.18, 0.30, 0.50, 1.0]   // widgetBgHover
+      t[2]  = [0.06, 0.12, 0.22, 1.0]   // widgetBgActive
+      t[3]  = [0.90, 0.95, 1.00, 1.0]   // widgetText
+      t[6]  = [0.40, 0.70, 1.00, 1.0]   // accent (bright blue)
+      t[7]  = [0.20, 0.40, 0.70, 1.0]   // accentBg
+      t[11] = [0.04, 0.08, 0.16, 1.0]   // inputBg
+      t[12] = [0.08, 0.25, 0.50, 1.0]   // inputFocusBg
+      uiTheme(t)
 
 ================================================================================
   End of guide

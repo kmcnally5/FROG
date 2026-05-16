@@ -56,6 +56,8 @@ const (
 	ATOMIC_INT_ARRAY_OBJ   ObjectType = "ATOMIC_INT_ARRAY"
 	ATOMIC_FLOAT_ARRAY_OBJ ObjectType = "ATOMIC_FLOAT_ARRAY"
 	CONCURRENT_HASH_OBJ    ObjectType = "CONCURRENT_HASH"
+	IMAGE_OBJ              ObjectType = "IMAGE"
+	FONT_OBJ               ObjectType = "FONT"
 )
 
 // Object is the interface every runtime value implements.
@@ -592,6 +594,46 @@ func (s *StructInstance) Inspect() string {
 	buf.WriteString("}")
 	return buf.String()
 }
+
+// -------------------- IMAGE --------------------
+
+// Image holds image data for use with drawImage().
+// Texture upload is deferred to the first drawImage() call so that
+// loadImage() can safely be called before window() opens an OpenGL context.
+type Image struct {
+	TextureID uint32
+	W, H      int
+	pixels    []byte // non-nil until first drawImage() uploads to GPU
+}
+
+func (img *Image) Type() ObjectType { return IMAGE_OBJ }
+func (img *Image) Inspect() string  { return fmt.Sprintf("image(%dx%d)", img.W, img.H) }
+
+// -------------------- FONT --------------------
+
+// glyphMetric stores the UV coordinates and advance width for one glyph
+// in a Font's SDF atlas texture.
+type glyphMetric struct {
+	u0, u1  float32 // horizontal UV extent in the atlas (0..1)
+	advance float32 // display-scale horizontal pen advance after this glyph
+}
+
+// Font holds a loaded TrueType/OpenType font as an SDF texture atlas.
+// GPU upload is deferred to the first textFont() call, matching Image.
+// All metric values are at scale 1 (display pixels); multiply by scale when drawing.
+// glyphs is keyed by Unicode codepoint; fallback is rendered for missing codepoints.
+type Font struct {
+	TextureID uint32
+	LineH     float32             // line height at scale 1
+	glyphs    map[rune]glyphMetric
+	fallback  glyphMetric         // rendered for codepoints not in glyphs (· middle dot)
+	atlasW    int32               // atlas pixel width for GPU upload
+	atlasHpx  int32               // atlas pixel height for GPU upload
+	pixels    []byte              // non-nil until first textFont() uploads to GPU
+}
+
+func (f *Font) Type() ObjectType { return FONT_OBJ }
+func (f *Font) Inspect() string  { return fmt.Sprintf("font(lineH=%.1f)", f.LineH) }
 
 // -------------------- BUILTIN --------------------
 

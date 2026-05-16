@@ -32,7 +32,12 @@ import (
 	"runtime/pprof"
 )
 
-const Version = "v0.3.32"
+func init() {
+	// OpenGL requires all GL calls on the main OS thread (mandatory on macOS).
+	runtime.LockOSThread()
+}
+
+const Version = "v0.3.34"
 
 func main() {
 	eval.KLexVersion = Version

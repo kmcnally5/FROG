@@ -5,8 +5,8 @@
 Leapfrog scans a filesystem and categorizes every file by type. It streams the directory walk (constant memory), classifies each file through three stages, and produces a summary of type distribution.
 
 **Classification pipeline:**
-1. **Extension lookup** — Check the file extension against a hash table of ~45 known types
-2. **Magic byte scan** — Read the first 512 bytes and match against ~35 binary file signatures (ELF, ZIP, PDF, PNG, JPEG, etc.)
+1. **Extension lookup** — Check the file extension against a hash table of 62 known types
+2. **Magic byte scan** — Read the first 512 bytes and match against 26 binary file signatures (ELF, ZIP, PDF, PNG, JPEG, Mach-O, PE, etc.)
 3. **Content analysis** — For files >1MB, scan chunks in parallel looking for language markers (import statements, XML declarations, etc.)
 
 **Parallelization:**

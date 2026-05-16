@@ -1,53 +1,60 @@
 // stdlib/math.lex — kLex standard math library
 //
-// Provides mathematical operations for both integers and floats.
+// All core math functions (floor, ceil, round, sqrt, abs, pow, exp,
+// log, log2, log10, sin, cos, tan, asin, acos, atan, atan2,
+// pi, e, mod, fmod, min, max) are built-in and always available
+// without importing this module.
 //
-// Core float operations (floor, ceil, round, sqrt) are built into the
-// interpreter and do not require an import — they are always available.
-// This module provides additional utilities built on top of those primitives.
+// This module provides higher-level utilities built on those primitives.
 //
 // Usage:
 //   import "stdlib/math.lex" as math
-//   println(math.abs(-5.5))    // 5.5
-//   println(math.max(3, 7))    // 7
-//   println(math.pi)           // 3.141592653589793
-
-// pi — the ratio of a circle's circumference to its diameter.
-const pi = 3.141592653589793
-
-// e — Euler's number, the base of the natural logarithm.
-const e = 2.718281828459045
+//   println(math.lerp(0.0, 10.0, 0.5))   // 5.0
+//   println(math.degrees(pi()))           // 180.0
 
 
 // ----------------------------------------------------------------------------
-// Works for both integers and floats
+// Angle conversion
 // ----------------------------------------------------------------------------
 
-// abs returns the absolute value of n.
-// abs(-5) → 5    abs(-3.7) → 3.7    abs(4) → 4
-fn abs(n) {
-    if n < 0 { return -n }
-    return n
+fn degrees(rad) {
+    return rad * 180.0 / pi()
 }
 
-// max returns the larger of a and b.
-// Works for integers and floats. Mixed types are compared as floats.
-// max(3, 7) → 7    max(1.5, 1.2) → 1.5
-fn max(a, b) {
-    if a > b { return a }
-    return b
+fn radians(deg) {
+    return deg * pi() / 180.0
 }
 
-// min returns the smaller of a and b.
-// Works for integers and floats. Mixed types are compared as floats.
-// min(3, 7) → 3    min(1.5, 1.2) → 1.2
-fn min(a, b) {
-    if a < b { return a }
-    return b
+
+// ----------------------------------------------------------------------------
+// Geometry
+// ----------------------------------------------------------------------------
+
+// hypot returns the length of the hypotenuse of a right triangle with
+// legs a and b. Avoids overflow compared to manual sqrt(a*a + b*b).
+// hypot(3, 4) → 5.0
+fn hypot(a, b) {
+    return sqrt(float(a)*float(a) + float(b)*float(b))
 }
 
-// clamp returns n constrained to the range [lo, hi].
-// Works for integers and floats.
+
+// ----------------------------------------------------------------------------
+// Interpolation
+// ----------------------------------------------------------------------------
+
+// lerp returns the linear interpolation between a and b at position t.
+// t = 0.0 returns a, t = 1.0 returns b. t is not clamped.
+// lerp(0.0, 10.0, 0.25) → 2.5
+fn lerp(a, b, t) {
+    return float(a) + float(t) * (float(b) - float(a))
+}
+
+
+// ----------------------------------------------------------------------------
+// Clamping and sign
+// ----------------------------------------------------------------------------
+
+// clamp returns n constrained to [lo, hi].
 // clamp(10, 0, 5) → 5    clamp(-1.0, 0.0, 1.0) → 0.0
 fn clamp(n, lo, hi) {
     if n < lo { return lo }
@@ -55,8 +62,7 @@ fn clamp(n, lo, hi) {
     return n
 }
 
-// sign returns 1 if n is positive, -1 if negative, 0 if zero.
-// Works for integers and floats.
+// sign returns 1 if n > 0, -1 if n < 0, 0 if n == 0.
 fn sign(n) {
     if n > 0 { return 1 }
     if n < 0 { return -1 }
@@ -65,49 +71,44 @@ fn sign(n) {
 
 
 // ----------------------------------------------------------------------------
-// Integer-only operations
+// Logarithm
 // ----------------------------------------------------------------------------
 
-// pow returns base raised to the power of exp (non-negative integer exponent).
-// pow(2, 0) → 1    pow(2, 10) → 1024
-// For float exponentiation use sqrt repeatedly or Newton's method.
-fn pow(base, exp) {
-    if exp == 0 { return 1 }
-    result = 1
-    i = 0
-    while i < exp {
-        result = result * base
+// logBase returns the logarithm of x in the given base.
+// logBase(8, 2) → 3.0    logBase(1000, 10) → 3.0
+// RuntimeError if x <= 0 or base <= 0. Error if base == 1.
+fn logBase(x, base) {
+    let d = log(base)
+    if d == 0.0 { return error("logBase: base cannot be 1", "INVALID_ARG") }
+    return log(x) / d
+}
+
+
+// ----------------------------------------------------------------------------
+// Integer utilities
+// ----------------------------------------------------------------------------
+
+fn even(n) { return mod(n, 2) == 0 }
+fn odd(n)  { return mod(n, 2) != 0 }
+
+// factorial returns n! for non-negative integers.
+// factorial(0) → 1    factorial(5) → 120
+fn factorial(n) {
+    if n < 0 { return error("factorial: n must be non-negative", "INVALID_ARG") }
+    let result = 1
+    let i = 2
+    while i <= n {
+        result = result * i
         i = i + 1
     }
     return result
 }
 
-// sum returns the total of all elements in an array of numbers.
-fn sum(arr) {
-    return reduce(arr, fn(acc, x) { acc + x }, 0)
-}
-
-// product returns the product of all elements in an array of numbers.
-fn product(arr) {
-    return reduce(arr, fn(acc, x) { acc * x }, 1)
-}
-
-// even returns true if n is divisible by 2 (integers only).
-fn even(n) {
-    return n % 2 == 0
-}
-
-// odd returns true if n is not divisible by 2 (integers only).
-fn odd(n) {
-    return n % 2 != 0
-}
-
 // gcd returns the greatest common divisor of two positive integers.
-// Uses Euclid's algorithm.
 fn gcd(a, b) {
     while b != 0 {
-        t = b
-        b = a % b
+        let t = b
+        b = mod(a, b)
         a = t
     }
     return a
@@ -118,38 +119,56 @@ fn lcm(a, b) {
     return (a * b) / gcd(a, b)
 }
 
-
-// A simple Discrete Cosine Transform implementation
-PI = 3.14159265358979
-
-// math.lex
-
-fn dct_basis(u, v, x, y) {
-    let cu = 1.0
-    if u == 0 { 
-        cu = 0.7071 
+// isPrime returns true if n is a prime number.
+// isPrime(2) → true    isPrime(9) → false    isPrime(97) → true
+fn isPrime(n) {
+    if n < 2 { return false }
+    if n == 2 { return true }
+    if mod(n, 2) == 0 { return false }
+    let i = 3
+    while i * i <= n {
+        if mod(n, i) == 0 { return false }
+        i = i + 2
     }
-
-    let cv = 1.0
-    if v == 0 { 
-        cv = 0.7071 
-    }
-    
-    return cu * cv * cos((2 * x + 1) * u * PI / 16) * cos((2 * y + 1) * v * PI / 16)
+    return true
 }
 
-fn apply_dct(block8x8) {
-    let output = range(64) // 8x8 flattened
-    for u in range(8) {
-        for v in range(8) {
-            let sum = 0.0
-            for x in range(8) {
-                for y in range(8) {
-                    sum = sum + block8x8[x*8 + y] * dct_basis(u, v, x, y)
-                }
-            }
-            output[u*8 + v] = sum / 4
-        }
+
+// ----------------------------------------------------------------------------
+// Array / statistics
+// ----------------------------------------------------------------------------
+
+// sum returns the total of all elements in an array of numbers.
+fn sum(arr) {
+    return reduce(arr, fn(acc, x) { return acc + x }, 0)
+}
+
+// product returns the product of all elements in an array of numbers.
+fn product(arr) {
+    return reduce(arr, fn(acc, x) { return acc * x }, 1)
+}
+
+// mean returns the arithmetic mean of an array of numbers. Always Float.
+// mean([1, 2, 3, 4]) → 2.5
+fn mean(arr) {
+    return float(sum(arr)) / float(len(arr))
+}
+
+// variance returns the population variance of an array of numbers.
+fn variance(arr) {
+    let m = mean(arr)
+    let n = len(arr)
+    let total = 0.0
+    let i = 0
+    while i < n {
+        let d = float(arr[i]) - m
+        total = total + d * d
+        i = i + 1
     }
-    return output
+    return total / float(n)
+}
+
+// stddev returns the population standard deviation of an array of numbers.
+fn stddev(arr) {
+    return sqrt(variance(arr))
 }
