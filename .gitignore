@@ -25,3 +25,8 @@ snowball/froglsp/froglsp
 
 # macOS
 .DS_Store
+
+# python bytecode cache (stdlib/python helpers and bridge scripts)
+__pycache__/
+*.pyc
+*.pyo

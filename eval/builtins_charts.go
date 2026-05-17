@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !js
 
 package eval
 

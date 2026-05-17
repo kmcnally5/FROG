@@ -46,6 +46,35 @@ type Environment struct {
 	store  map[string]Object // variables defined in this scope
 	consts map[string]bool   // names that cannot be reassigned (nil = none)
 	outer  *Environment      // the enclosing scope, or nil for the global env
+
+	// scriptDir is the directory of the source file whose top-level code is
+	// being evaluated in this env. Set on the entry global env by main.go,
+	// and on each module env when import resolves a file. Inner scopes
+	// (function frames, blocks) leave it empty and inherit from outer via
+	// ScriptDir(). Empty string means "no script context" (e.g. REPL).
+	scriptDir string
+}
+
+// ScriptDir returns the directory of the script that introduced this scope
+// chain — the global script for top-level code, or the imported module's
+// file for code inside that module. Walks the outer chain so function calls
+// invoked from another file still report the directory of the file that
+// defined them. Returns "" when no script context is set (REPL, eval of a
+// string, etc.).
+func (e *Environment) ScriptDir() string {
+	for env := e; env != nil; env = env.outer {
+		if env.scriptDir != "" {
+			return env.scriptDir
+		}
+	}
+	return ""
+}
+
+// SetScriptDir records the directory of the source file evaluated in this
+// env. Called by main.go for the entry script and by the import handler for
+// each imported module.
+func (e *Environment) SetScriptDir(dir string) {
+	e.scriptDir = dir
 }
 
 // NewEnv creates the top-level (global) environment. It is the only env
@@ -196,10 +225,25 @@ func (e *Environment) Assign(name string, value Object) Object {
 	return value
 }
 
-// tryAssign attempts to update a variable only if it already exists in the chain.
-// Returns (value, true) if updated, (nil, false) if not found.
-// Written as a last ditch effort to avoid locking in the pond development stuff... Must
-// decide if this is going to stay or not... To be continued...
+// tryAssign attempts to update a variable only if it already exists somewhere
+// in the chain starting from this env. Returns (value, true) if updated,
+// (nil, false) if the name doesn't exist in this env or any outer scope.
+//
+// Why this exists separately from Assign(): Assign needs to walk the scope
+// chain looking for an existing binding, but holding a single lock across
+// the whole walk would serialise every concurrent assignment against the
+// global env, even when the assigning goroutines are touching completely
+// disjoint local scopes that just happen to share the same global outer.
+// tryAssign locks-then-unlocks each level independently, so the read on the
+// (typically only) shared env is brief.
+//
+// Correctness under concurrent writers: if two goroutines both call
+// Assign("x", ...) and "x" doesn't initially exist, both will fall through
+// to "create in current scope" and both writes happen in their own
+// goroutine-local envs — there is no race. If "x" already exists in the
+// shared global env, the race is "last writer wins" which is the standard
+// concurrent-map semantics kLex programs are expected to handle via
+// concurrentHash() or async barriers, not via the global env.
 func (e *Environment) tryAssign(name string, value Object) (Object, bool) {
 	if e.shared {
 		e.mu.Lock()
@@ -227,62 +271,62 @@ func (e *Environment) tryAssign(name string, value Object) (Object, bool) {
 	return nil, false
 }
 
-// Snapshot creates a task-local copy of the global environment for async tasks.
+// Snapshot creates a task-local copy of the scope chain for async tasks.
 // The returned environment has the same data as the parent but is not shared:
-// it has no outer scope and is never locked. Mutations inside an async task
-// are isolated and invisible to other tasks and the caller.
-// This eliminates mutex contention while preventing shared mutable state bugs.
+// it has no outer scope and is never locked.
+//
+// SHARING SEMANTICS — read carefully before touching code that relies on this:
+//
+//   - PRIMITIVES (Integer, Float, String, Boolean, Null) are value-like in
+//     kLex's surface language. Reassigning a name in an async task affects
+//     ONLY the task's snapshot; the caller never sees it.
+//
+//         x = 0
+//         async(fn() { x = 99 })   // task sees its own x; caller still has 0
+//
+//   - REFERENCE TYPES (*Array, *Hash, *StructInstance, etc.) are shared by
+//     pointer. The snapshot's binding points to the same underlying object.
+//     Mutating contents IS visible across goroutines and is a data race.
+//
+//         arr = [1, 2, 3]
+//         async(fn() { arr[0] = 99 })   // ALSO MODIFIES the caller's arr!
+//
+//     If goroutines need shared mutable state, use concurrentHash(),
+//     atomicIntArray(), or atomicFloatArray() — those have explicit
+//     synchronisation. Never share a plain Array/Hash across an async()
+//     boundary as a mutation target.
+//
+// Implementation: one pass through the scope chain, one read-lock window
+// per env. Maps grow dynamically — pre-sizing was previously done but
+// required two passes (and twice the lock acquisitions on the shared
+// global env), which cost more than the saved rehash work.
 func (e *Environment) Snapshot() *Environment {
-	// First pass: count total variables and constants to pre-allocate maps.
-	var totalVars, totalConsts int
-	env := e
-	for env != nil {
-		if env.shared {
-			env.mu.RLock()
-		}
-		totalVars += len(env.store)
-		totalConsts += len(env.consts)
-		if env.shared {
-			env.mu.RUnlock()
-		}
-		env = env.outer
-	}
-
 	snap := &Environment{
-		store:  make(map[string]Object, totalVars),
-		consts: make(map[string]bool, totalConsts),
+		store:  make(map[string]Object),
+		consts: make(map[string]bool),
 		outer:  nil,
 		shared: false,
 	}
 
-	// Copy all variables and constants from the current scope chain into the snapshot.
-	// This includes all accessible variables (globals and parent scopes).
-	env = e
-	for env != nil {
+	// Walk the chain inner → outer. Inner scopes win because they're
+	// visited first; an existing entry in snap.store is never overwritten.
+	for env := e; env != nil; env = env.outer {
 		if env.shared {
 			env.mu.RLock()
 		}
-
-		// Copy all variables in this scope level.
 		for k, v := range env.store {
-			// Only add if not already in snapshot (inner scopes override outer).
 			if _, exists := snap.store[k]; !exists {
 				snap.store[k] = v
 			}
 		}
-
-		// Copy all const marks.
 		for k, v := range env.consts {
 			if _, exists := snap.consts[k]; !exists {
 				snap.consts[k] = v
 			}
 		}
-
 		if env.shared {
 			env.mu.RUnlock()
 		}
-
-		env = env.outer
 	}
 
 	return snap

@@ -19,20 +19,18 @@ fn next_power_of_2(n) {
 }
 
 fn build_leaves(content, chunk_size) {
-    count = chunk_count(content, chunk_size)
+    count  = chunk_count(content, chunk_size)
     padded = next_power_of_2(count)
-    leaves = []
+    leaves = makeArray(padded, 0)
     i = 0
     while i < padded {
         if i < count {
             start = i * chunk_size
-            end = start + chunk_size
+            end   = start + chunk_size
             if end > len(content) { end = len(content) }
-            chunk = substr(content, start, end)
-            leaves = push(leaves, h.hash(chunk))
-        } else {
-            leaves = push(leaves, 0)
+            leaves[i] = h.hash(substr(content, start, end))
         }
+        // i >= count slots already initialised to 0 by makeArray
         i = i + 1
     }
     return leaves
@@ -41,11 +39,13 @@ fn build_leaves(content, chunk_size) {
 fn tree_root(content, chunk_size) {
     nodes = build_leaves(content, chunk_size)
     while len(nodes) > 1 {
-        next = []
+        nextLen = len(nodes) / 2
+        next    = makeArray(nextLen, null)
         i = 0
+        j = 0
         while i < len(nodes) {
-            combined = h.combineHash(nodes[i], nodes[i + 1])
-            next = push(next, combined)
+            next[j] = h.combineHash(nodes[i], nodes[i + 1])
+            j = j + 1
             i = i + 2
         }
         nodes = next
@@ -57,30 +57,41 @@ fn get_proof(content, chunk_idx, chunk_size) {
     nodes = build_leaves(content, chunk_size)
 
     start = chunk_idx * chunk_size
-    end = start + chunk_size
+    end   = start + chunk_size
     if end > len(content) { end = len(content) }
-    chunk = substr(content, start, end)
-    chunk_hash = h.hash(chunk)
+    chunk_hash = h.hash(substr(content, start, end))
 
-    path = []
+    // Number of proof entries = number of tree levels above the leaves =
+    // log₂(len(nodes)). Pre-compute so path is a single allocation.
+    levels = 0
+    m = len(nodes)
+    while m > 1 {
+        levels = levels + 1
+        m = m / 2
+    }
+    path = makeArray(levels, null)
+    pathIdx = 0
+
     idx = chunk_idx
     while len(nodes) > 1 {
         if idx % 2 == 0 {
-            sibling = nodes[idx + 1]
+            path[pathIdx] = nodes[idx + 1]
         } else {
-            sibling = nodes[idx - 1]
+            path[pathIdx] = nodes[idx - 1]
         }
-        path = push(path, sibling)
+        pathIdx = pathIdx + 1
 
-        next = []
+        nextLen = len(nodes) / 2
+        next    = makeArray(nextLen, null)
         i = 0
+        j = 0
         while i < len(nodes) {
-            combined = h.combineHash(nodes[i], nodes[i + 1])
-            next = push(next, combined)
+            next[j] = h.combineHash(nodes[i], nodes[i + 1])
+            j = j + 1
             i = i + 2
         }
         nodes = next
-        idx = idx / 2
+        idx   = idx / 2
     }
 
     return [chunk_hash, path]

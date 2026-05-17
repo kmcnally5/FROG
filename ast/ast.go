@@ -168,7 +168,18 @@ type PrefixExpr struct {
 	Right    Node
 }
 
+// UnwrapExpr is the postfix error-propagation operator: expr?
+// The operand must evaluate to a 2-element tuple (value, err).
+// If err != null, the error is returned from the enclosing function immediately.
+// If err == null, the expression evaluates to value (the tuple is unwrapped).
+type UnwrapExpr struct {
+	Pos
+	Value Node // the expression whose result is unwrapped
+}
+
 func (p *PrefixExpr) TokenLiteral() string { return p.Operator }
+
+func (u *UnwrapExpr) TokenLiteral() string { return "?" }
 
 // NullLiteral is the keyword `null` written in source code.
 type NullLiteral struct {
@@ -431,9 +442,10 @@ type EnumDecl struct {
 
 func (e *EnumDecl) TokenLiteral() string { return "enum" }
 
-// EnumPattern is a destructuring case arm: case Shape.Circle(r) { }
-// Pattern is the variant selector; Bindings are new local names bound
-// positionally to the variant's fields when the match succeeds.
+// EnumPattern is a destructuring case arm.
+// Short form: case Circle(r)       — Pattern is an Ident; match by variant name only.
+// Full form:  case Shape.Circle(r) — Pattern is a DotExpr; match by type + variant name.
+// Bindings are new local names bound positionally to the variant's fields.
 type EnumPattern struct {
 	Pos
 	Pattern  Node

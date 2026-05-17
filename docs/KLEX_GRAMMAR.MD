@@ -601,8 +601,15 @@ These are not grammar rules but are listed here because they shape what programs
 
 * `type(val)` — returns type name as `STRING`
 * `str(val)` — any value → `STRING`
-* `int(val)` — `STRING` | `FLOAT` → `INTEGER`
-* `float(val)` — `STRING` | `INTEGER` → `FLOAT`
+* `int(val)` — `STRING` | `FLOAT` → `INTEGER`; crashes on bad input — use `parseInt()` for untrusted strings
+* `float(val)` — `STRING` | `INTEGER` → `FLOAT`; crashes on bad input — use `parseFloat()` for untrusted strings
+
+### Safe Number Parsing
+
+Use when input is untrusted (CSV, HTTP, databases). Returns `(value, null)` on success or `(null, error)` on failure. Whitespace is trimmed automatically.
+
+* `parseInt(str: STRING)` → `(INTEGER, error)` — parse string as integer; gives a helpful error if the string looks like a float
+* `parseFloat(str: STRING)` → `(FLOAT, error)` — parse string as float; also accepts integer-formatted strings
 
 ### String Operations
 
@@ -819,6 +826,78 @@ with normal `[]` indexing syntax — reads and writes are atomic.
 * `_httpDo(method, url, headers, body)` → `(response, error)` — HTTP request
 * `_httpServe(addr, handler)` → `(null, error)` — HTTP server
 * `dnsLookup(hostname)` → `(ARRAY, error)` — DNS resolution
+
+### Native Bridge (cross-language FFI)
+
+kLex communicates with subprocesses via line-delimited JSON over stdin/stdout. Any language that can read/write JSON lines can be a bridge — Python, Rust, C, Node, anything.
+
+**Protocol** (subprocess implements this):
+- Receive on stdin: `{"id": N, "fn": "name", "args": [...]}`
+- Send on stdout:   `{"id": N, "result": value}` or `{"id": N, "error": "message"}`
+
+* `nativeBridge(cmd: STRING, args: ARRAY)` → `(BRIDGE, error)` — start subprocess; `args` is an array of string arguments
+* `bridgeCall(bridge: BRIDGE, fn: STRING, args: ARRAY)` → `(result, error)` — call a function; all kLex types marshal to JSON automatically; calls are serialised (safe from async tasks)
+* `bridgeClose(bridge: BRIDGE)` → `null` — send EOF to subprocess and wait for it to exit
+
+**Type mapping** (kLex ↔ JSON): `INTEGER`/`FLOAT` ↔ number · `STRING` ↔ string · `BOOLEAN` ↔ boolean · `NULL` ↔ null · `ARRAY` ↔ array · `HASH` ↔ object
+
+### Database (SQL Server and PostgreSQL)
+
+All database operations return `(value, null)` on success or `(null, ERROR)` on failure — the standard kLex two-path error pattern. All db builtins accept either a `DB_CONN` or `DB_TX` as their first argument unless otherwise noted.
+
+**Connection**
+
+* `dbOpen(driver: STRING, dsn: STRING)` → `(DB_CONN, error)` — open connection pool; driver is `"mssql"` or `"postgres"`; verifies connectivity with a ping
+* `dbOpenWithPool(driver: STRING, dsn: STRING, options: HASH)` → `(DB_CONN, error)` — like `dbOpen` with explicit pool settings; options keys: `"maxIdle"` (INTEGER), `"maxOpen"` (INTEGER), `"idleTimeout"` (INTEGER seconds), `"lifetime"` (INTEGER seconds); all optional
+* `dbClose(conn: DB_CONN)` → `null` — close the connection pool
+* `dbPing(conn: DB_CONN)` → `(null, error)` — verify connection is still alive
+
+**Querying**
+
+* `dbQuery(conn, sql: STRING [, args: ARRAY])` → `(ARRAY, error)` — SELECT; returns array of hashes; column names are hash keys; SQL NULLs → kLex `null`; loads all rows into memory
+* `dbQueryOne(conn, sql: STRING [, args: ARRAY])` → `(HASH|null, error)` — SELECT; returns first row as hash or `null` if no rows; use for primary-key lookups
+* `dbQueryStream(conn, sql: STRING [, args: ARRAY])` → `(CHANNEL, error)` — SELECT; returns a channel yielding one hash per row; rows never all in memory at once; `break` from `for-in` cancels the stream early
+
+**Executing**
+
+* `dbExec(conn, sql: STRING [, args: ARRAY])` → `(INTEGER, error)` — INSERT / UPDATE / DELETE / DDL; returns rows affected (`-1` if unavailable)
+* `dbBulkInsert(conn, table: STRING, columns: ARRAY, rows: ARRAY)` → `(INTEGER, error)` — multi-row INSERT in a single round trip; auto-batches within driver parameter limits (MSSQL 2000 / Postgres 60000 params per batch); returns total rows affected; **WARNING**: `table` and `columns` are interpolated into SQL — never pass user-controlled values
+
+**Timeouts**
+
+* `dbSetTimeout(conn: DB_CONN | DB_TX, ms: INTEGER)` → `null` — set a per-operation timeout; all subsequent query/exec calls fail with `DB_TIMEOUT_ERROR` if they exceed `ms` milliseconds; pass `0` to remove; `dbBegin` propagates the conn's timeout to the new `DB_TX`
+
+**Returning rows from DML**
+
+* `dbExecReturning(conn, sql: STRING [, args: ARRAY])` → `(ARRAY, error)` — executes INSERT/UPDATE/DELETE with `RETURNING` (Postgres) or `OUTPUT` (MSSQL) and returns result rows as an array of hashes; use when you need the auto-generated key or affected data back from the driver
+
+**Transactions**
+
+* `dbBegin(conn: DB_CONN)` → `(DB_TX, error)` — start a transaction
+* `dbCommit(tx: DB_TX)` → `(null, error)` — commit
+* `dbRollback(tx: DB_TX)` → `null` — roll back; safe to call even after commit or prior rollback
+
+All query and exec builtins accept either `DB_CONN` or `DB_TX` as the connection argument so the same code works inside or outside a transaction.
+
+**Transaction helper (`stdlib/db.lex`)**
+
+```
+import "stdlib/db.lex" as db
+
+result, err = db.withTx(conn, fn(tx) {
+    ...
+    return value, null    // success → auto-commit
+    return null,  err     // failure → auto-rollback
+})
+```
+
+`withTx(conn: DB_CONN, body: FUNCTION)` → `(value, error)` — runs `body(tx)` inside a transaction; commits on `(value, null)` return; rolls back on `(value, error)` return or if `dbCommit` fails; `body` must return a two-element tuple.
+
+**Parameter placeholders**
+
+Always pass values as an `ARRAY` argument — never interpolate into the SQL string. Placeholder style is driver-dependent:
+* MSSQL / SQL Server — `?`
+* PostgreSQL — `$1`, `$2`, `$3`, ...
 
 ### Regular Expressions (Low-level)
 

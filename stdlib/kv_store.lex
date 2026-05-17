@@ -47,15 +47,9 @@ struct KVStore {
     }
 
     // allValues() — return all values in the store as an array.
+    // Delegates to the builtin values() — O(n) in one pass.
     fn allValues() {
-        ks = keys(self.store)
-        out = []
-        i = 0
-        while i < len(ks) {
-            out = push(out, self.store[ks[i]])
-            i = i + 1
-        }
-        return out
+        return values(self.store)
     }
 
     // save(path) — persist the store to a file (pipe-delimited, one entry per line).

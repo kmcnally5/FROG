@@ -5,6 +5,11 @@
 // Parses and formats RFC 4180-compliant CSV using Go's encoding/csv.
 // Handles quoted fields with embedded commas, newlines, and quotes correctly.
 //
+// USE THIS FOR PRODUCTION CSV WORK. There is a sibling stdlib/csvfrog.lex
+// that implements the same parsing entirely in FROG as a teaching demo —
+// noticeably slower, exists only to showcase the language. Prefer this
+// file unless you specifically want the pure-FROG implementation.
+//
 // CRITICAL: All functions validate input types and return (data, error) tuples.
 // Check error before using the result — error is null on success.
 //

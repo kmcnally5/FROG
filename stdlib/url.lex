@@ -23,14 +23,15 @@ fn decode(s) {
 // Returns the base URL unchanged if params is empty.
 fn build(base, params) {
     ks = keys(params)
-    if len(ks) == 0 { return base }
+    n  = len(ks)
+    if n == 0 { return base }
 
-    parts = []
+    parts = makeArray(n, "")
     i = 0
-    while i < len(ks) {
+    while i < n {
         k = ks[i]
         v = str(params[k])
-        parts = push(parts, _urlEncode(k) + "=" + _urlEncode(v))
+        parts[i] = _urlEncode(k) + "=" + _urlEncode(v)
         i = i + 1
     }
     return base + "?" + join(parts, "&")
@@ -41,14 +42,7 @@ fn build(base, params) {
 //   joinPath("https://api.example.com/", "/users/42") → "https://api.example.com/users/42"
 fn joinPath(base, path) {
     if endsWith(base, "/") {
-        bl = len(base) - 1
-        trimmed = ""
-        i = 0
-        while i < bl {
-            trimmed = trimmed + base[i]
-            i = i + 1
-        }
-        base = trimmed
+        base = substr(base, 0, len(base) - 1)
     }
     if !startsWith(path, "/") {
         path = "/" + path

@@ -32,13 +32,23 @@ var builtinSignatures = map[string]BuiltinInfo{
 	},
 	"int": {
 		Signature:     "int(val: string | float | int) -> int",
-		Documentation: "Parse a string or convert a number to integer.",
+		Documentation: "Convert a number or string to integer. Crashes on bad input — use parseInt() for untrusted strings.",
 		Params:        []string{"val"},
 	},
 	"float": {
 		Signature:     "float(val: string | int | float) -> float",
-		Documentation: "Parse a string or convert a number to float.",
+		Documentation: "Convert a number or string to float. Crashes on bad input — use parseFloat() for untrusted strings.",
 		Params:        []string{"val"},
+	},
+	"parseInt": {
+		Signature:     "parseInt(str: string) -> (int, error)",
+		Documentation: "Safely parse a string as an integer. Trims whitespace. Returns (value, null) on success or (null, error) on failure — use this instead of int() for untrusted input (CSV, HTTP, databases).\n\nExample:\n  n, err = parseInt(row[\"count\"])\n  if err != null { println(\"bad value: {err.message}\")  return }",
+		Params:        []string{"str"},
+	},
+	"parseFloat": {
+		Signature:     "parseFloat(str: string) -> (float, error)",
+		Documentation: "Safely parse a string as a float. Trims whitespace. Returns (value, null) on success or (null, error) on failure — use this instead of float() for untrusted input (CSV, HTTP, databases).\n\nExample:\n  f, err = parseFloat(row[\"price\"])\n  if err != null { println(\"bad value: {err.message}\")  return }",
+		Params:        []string{"str"},
 	},
 
 	// Arrays
@@ -313,7 +323,7 @@ var builtinSignatures = map[string]BuiltinInfo{
 	// Concurrent hash map (lock-free shared key/value store)
 	"concurrentHash": {
 		Signature:     "concurrentHash() -> ConcurrentHash",
-		Documentation: "Creates a thread-safe hash map for shared mutable state across goroutines. Read with ch[key], write with ch[key] = val (atomic). Use atomicHashIncr/Add for lock-free arithmetic, atomicHashCAS for compare-and-swap.",
+		Documentation: "Creates a thread-safe hash map for shared mutable state across goroutines. Read with ch[key], write with ch[key] = val (atomic). Use atomicHashIncr/Add for lock-free arithmetic, atomicHashCAS for compare-and-swap.\n\nlen(ch) is O(1) but APPROXIMATE under concurrent mutation — it can briefly diverge from the actual entry count by the number of in-flight writes. The map data itself is always consistent; only the reported count is best-effort during contention. For an exact size, query len() after a known quiescent point (all writer tasks awaited).",
 		Params:        []string{},
 	},
 	"atomicHashIncr": {
@@ -342,6 +352,110 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Signature:     "await(task: task) -> any",
 		Documentation: "Wait for a task to complete and return its result.",
 		Params:        []string{"task"},
+	},
+
+	// Native Bridge (cross-language FFI via subprocess JSON-RPC)
+	"nativeBridge": {
+		Signature:     "nativeBridge(cmd: string, args: array, opts?: hash) -> (bridge, error)",
+		Documentation: "Start a subprocess and return a bridge for calling into it. The subprocess must speak the kLex bridge protocol: read line-delimited JSON from stdin, write results to stdout.\n\nProtocol:\n  receive: {\"id\":N,\"fn\":\"name\",\"args\":[...]}\n  reply:   {\"id\":N,\"result\":value}\n           {\"id\":N,\"error\":\"message\"}\n\nOptional opts hash:\n  timeout_seconds  — default per-call timeout in seconds (0 = no timeout)\n  max_response_mb  — max response size in MB, range [1, 256], default 1\n  stderr_log       — path to file capturing subprocess stderr\n\nWhen no stderr_log is set, the bridge keeps the last 4KB of stderr in memory and exposes it through bridgeStderr() and in error message tails.\n\nThe bridge is registered globally and force-killed if kLex exits or is signalled, preventing orphaned subprocesses.\n\nError codes returned in the second tuple element:\n  BRIDGE_OPTS_INVALID — bad value in the opts hash\n  BRIDGE_ERROR        — failed to start subprocess\n\nExample:\n  bridge, err = nativeBridge(\"python3\", [\"bridge.py\"], {\n      \"timeout_seconds\": 30,\n      \"max_response_mb\": 16,\n  })\n  if err != null { println(err.message)  return }",
+		Params:        []string{"cmd", "args", "opts"},
+	},
+	"bridgeCall": {
+		Signature:     "bridgeCall(bridge, fn: string, args: array, timeoutSec?: number) -> (result, error)",
+		Documentation: "Call a function in the bridge subprocess. Blocks until the subprocess responds or the timeout fires. Calls are serialised per bridge — safe from async tasks.\n\nAll kLex types marshal automatically: integers, floats, strings, booleans, arrays, hashes.\n\nOptional 4th argument overrides the bridge's default timeout for this call only. Pass 0 for no timeout.\n\nError codes returned in the second tuple element:\n  BRIDGE_ERROR    — protocol/logic error returned by the bridge\n  BRIDGE_CLOSED   — subprocess closed unexpectedly\n  BRIDGE_TIMEOUT  — call exceeded the timeout (bridge becomes tainted)\n  BRIDGE_TAINTED  — bridge is unusable after a prior fatal error; call bridgeClose() and start a new bridge\n\nOn BRIDGE_CLOSED, BRIDGE_ERROR and BRIDGE_TIMEOUT, the error message includes the last lines of stderr captured from the subprocess.\n\nExample:\n  result, err = bridgeCall(bridge, \"slow_fn\", [arg], 120)\n  if err != null { println(err.code + \": \" + err.message)  return }",
+		Params:        []string{"bridge", "fn", "args", "timeoutSec"},
+	},
+	"bridgeClose": {
+		Signature:     "bridgeClose(bridge) -> null",
+		Documentation: "Close the bridge subprocess cleanly. Sends EOF on stdin so a well-written bridge loop exits naturally; if it does not exit within 2 seconds, the bridge process group is force-killed. Safe to call multiple times.",
+		Params:        []string{"bridge"},
+	},
+	"bridgeStderr": {
+		Signature:     "bridgeStderr(bridge) -> array",
+		Documentation: "Return the captured tail of the bridge subprocess's stderr output as an array of strings, one element per line. Useful for surfacing Python tracebacks and other diagnostic output that would otherwise be invisible.\n\nReturns an empty array if no stderr has been captured. When the bridge was created with a stderr_log option, output may also be in the log file.\n\nExample:\n  result, err = bridgeCall(bridge, \"crash\", [])\n  if err != null {\n      lines = bridgeStderr(bridge)\n      for line in lines { println(\"  \" + line) }\n  }",
+		Params:        []string{"bridge"},
+	},
+	"bridgeNotifications": {
+		Signature:     "bridgeNotifications(bridge) -> channel",
+		Documentation: "Return the notification channel for this bridge. The channel receives every {\"notif\": ...} message the subprocess emits as a kLex value. The channel is closed when the bridge closes, making for-in loops exit cleanly.\n\nThe notification channel is buffered (256 items, drop-newest). Call this before starting a long-running bridgeCall so early notifications are not lost.\n\nThe subprocess emits notifications with no id field:\n  {\"notif\": {\"phase\": \"progress\", \"done\": 42}}\n\nPython helper:\n  def notify(data):\n      print(json.dumps({\"notif\": data}), flush=True)\n\nExample:\n  notifCh = bridgeNotifications(bridge)\n  async(fn() {\n      msg, ok = recv(notifCh)\n      while ok {\n          println(msg[\"done\"])\n          msg, ok = recv(notifCh)\n      }\n  })\n  result, err = bridgeCall(bridge, \"long_job\", [arg])",
+		Params:        []string{"bridge"},
+	},
+	"bridgeSchema": {
+		Signature:     "bridgeSchema(bridge, fn?: string) -> hash | null",
+		Documentation: "Return the handler schemas declared by the bridge.\n\nSchemas are fetched automatically during nativeBridge() via a __schema__ handshake. Bridges that don't implement __schema__ return null from this builtin — those bridges still work, just without argument validation.\n\nWith one argument, returns a hash of every handler keyed by name:\n  {\n    \"add\":   { \"args\": [[\"a\",\"int\"], [\"b\",\"int\"]], \"returns\": \"int\" },\n    \"greet\": { \"args\": [[\"name\",\"string\"]],         \"returns\": \"string\" }\n  }\n\nWith two arguments, returns the single handler's schema (or null if it isn't declared):\n  bridgeSchema(bridge, \"add\")\n  // { \"args\": [[\"a\",\"int\"], [\"b\",\"int\"]], \"returns\": \"int\" }\n\nWhen schemas are present, bridgeCall validates positional arguments against them before marshalling and returns a BRIDGE_SCHEMA_ARG error on mismatch.\n\nSchema mini-language:\n  int, float, string, bool, array, hash, null, any\n  Trailing \"?\" makes the type nullable: \"string?\" accepts string or null.\n\nPython side: declare schemas via the klex_bridge helper module — either with the @handler decorator or the imperative register() function.",
+		Params:        []string{"bridge", "fn"},
+	},
+
+	// Database
+	"dbOpen": {
+		Signature:     "dbOpen(driver: string, dsn: string) -> (conn, err)",
+		Documentation: "Open a database connection pool and verify connectivity with a ping.\n\nSupported drivers:\n  \"mssql\"      — Microsoft SQL Server (also accepts \"sqlserver\")\n  \"postgres\"   — PostgreSQL via pgx\n\nMS SQL connection string:\n  \"server=host;database=mydb;user id=sa;password=Pass1!\"\n  \"sqlserver://sa:Pass1!@host:1433?database=mydb\"\n\nPostgres connection string:\n  \"host=host user=user password=pass dbname=mydb sslmode=disable\"\n  \"postgres://user:pass@host:5432/mydb\"\n\nExample:\n  conn, err = dbOpen(\"mssql\", \"server=myserver;database=Sales;user id=sa;password=Pass1!\")\n  if err != null { println(err.message)  return }",
+		Params:        []string{"driver", "dsn"},
+	},
+	"dbOpenWithPool": {
+		Signature:     "dbOpenWithPool(driver: string, dsn: string, options: hash) -> (conn, err)",
+		Documentation: "Like dbOpen but with explicit connection pool settings.\n\noptions keys (all optional):\n  \"maxIdle\"     — max idle connections (default 2)\n  \"maxOpen\"     — max open connections; 0 = unlimited (default 0)\n  \"idleTimeout\" — seconds before an idle conn is closed\n  \"lifetime\"    — max seconds a conn may be reused\n\nExample:\n  conn, err = dbOpenWithPool(\"mssql\", \"server=...\", {\n      \"maxIdle\": 5, \"maxOpen\": 20, \"idleTimeout\": 300, \"lifetime\": 3600\n  })\n  if err != null { println(err.message)  return }",
+		Params:        []string{"driver", "dsn", "options"},
+	},
+	"dbClose": {
+		Signature:     "dbClose(conn: DB_CONN) -> null",
+		Documentation: "Close the connection pool. Call when done with the connection.",
+		Params:        []string{"conn"},
+	},
+	"dbPing": {
+		Signature:     "dbPing(conn: DB_CONN) -> (null, err)",
+		Documentation: "Verify the connection is still alive. Useful for health checks.",
+		Params:        []string{"conn"},
+	},
+	"dbQuery": {
+		Signature:     "dbQuery(conn: DB_CONN | DB_TX, sql: string, args?: array) -> (rows, err)",
+		Documentation: "Execute a SELECT and return all rows as an array of hashes. Column names are hash keys. SQL NULLs become kLex null. Works on connections and transactions.\n\nAlways pass parameters as an array — never interpolate values into the SQL string.\n\nExample:\n  rows, err = dbQuery(conn, \"SELECT id, name FROM users WHERE active = ?\", [true])\n  if err != null { println(err.message)  return }\n  for row in rows {\n      println(\"{row[\\\"id\\\"]}  {row[\\\"name\\\"]}\")\n  }",
+		Params:        []string{"conn", "sql", "args"},
+	},
+	"dbQueryStream": {
+		Signature:     "dbQueryStream(conn: DB_CONN | DB_TX, sql: string, args?: array) -> (channel, err)",
+		Documentation: "Execute a SELECT and return a channel that yields rows one at a time. Each value is a hash (same format as dbQuery). Suitable for large result sets. Works on connections and transactions. Break out of the for-in loop to cancel early.\n\nExample:\n  stream, err = dbQueryStream(conn, \"SELECT id, name FROM big_table\", [])\n  if err != null { println(err.message)  return }\n  for row in stream {\n      println(\"{row[\\\"id\\\"]}  {row[\\\"name\\\"]}\")\n  }",
+		Params:        []string{"conn", "sql", "args"},
+	},
+	"dbQueryOne": {
+		Signature:     "dbQueryOne(conn: DB_CONN | DB_TX, sql: string, args?: array) -> (row, err)",
+		Documentation: "Execute a SELECT and return the first row as a hash, or null if no rows match. Use for primary-key lookups. Works on connections and transactions.\n\nExample:\n  row, err = dbQueryOne(conn, \"SELECT * FROM users WHERE id = ?\", [42])\n  if err != null { return }\n  if row == null { println(\"not found\")  return }\n  println(row[\"name\"])",
+		Params:        []string{"conn", "sql", "args"},
+	},
+	"dbBulkInsert": {
+		Signature:     "dbBulkInsert(conn: DB_CONN | DB_TX, table: string, columns: array, rows: array) -> (n: int, err)",
+		Documentation: "Insert multiple rows in a single SQL statement — one round trip per batch, far faster than dbExec in a loop.\n\ncolumns is an array of column name strings.\nrows is an array of arrays, each sub-array is one row's values.\nAuto-batches to stay within driver parameter limits (MSSQL: 2000, Postgres: 60000).\nReturns total rows affected across all batches.\n\nWARNING: table and column names are interpolated directly into SQL. Never pass user-controlled input as table or column names.\n\nExample:\n  n, err = dbBulkInsert(conn, \"users\", [\"id\", \"name\", \"age\"], [\n      [1, \"Alice\", 28],\n      [2, \"Bob\",   35],\n  ])\n  if err != null { println(err.message)  return }\n  println(\"{n} rows inserted\")",
+		Params:        []string{"conn", "table", "columns", "rows"},
+	},
+	"dbExec": {
+		Signature:     "dbExec(conn: DB_CONN | DB_TX, sql: string, args?: array) -> (rowsAffected, err)",
+		Documentation: "Execute an INSERT, UPDATE, DELETE, or DDL statement. Returns the number of rows affected (-1 if unavailable). Works on connections and transactions.\n\nExample:\n  n, err = dbExec(conn, \"UPDATE accounts SET balance = ? WHERE id = ?\", [1500, 42])\n  if err != null { println(err.message)  return }\n  println(\"{n} row(s) updated\")",
+		Params:        []string{"conn", "sql", "args"},
+	},
+	"dbSetTimeout": {
+		Signature:     "dbSetTimeout(conn: DB_CONN | DB_TX, ms: int) -> null",
+		Documentation: "Set a per-operation timeout on a connection or transaction. All subsequent dbQuery, dbQueryOne, dbExec, dbBulkInsert calls will fail with DB_TIMEOUT_ERROR if they exceed ms milliseconds. Pass 0 to remove the timeout.\n\ndbBegin propagates the conn's timeout to the new transaction automatically.\n\nExample:\n  dbSetTimeout(conn, 5000)  // 5 second limit\n  rows, err = dbQuery(conn, \"SELECT * FROM large_table\", [])\n  // → DB_TIMEOUT_ERROR if query takes more than 5s\n  dbSetTimeout(conn, 0)     // remove timeout",
+		Params:        []string{"conn", "ms"},
+	},
+	"dbExecReturning": {
+		Signature:     "dbExecReturning(conn: DB_CONN | DB_TX, sql: string, args?: array) -> (rows: array, err)",
+		Documentation: "Execute a DML statement that returns rows — for INSERT/UPDATE/DELETE with RETURNING (PostgreSQL) or OUTPUT (SQL Server) clauses. Returns an array of hashes, same format as dbQuery. Works on connections and transactions.\n\nPostgres example:\n  rows, err = dbExecReturning(conn, \"INSERT INTO users (name) VALUES (?) RETURNING id, name\", [\"Alice\"])\n  id = rows[0][\"id\"]\n\nSQL Server example:\n  rows, err = dbExecReturning(conn, \"INSERT INTO users (name) OUTPUT INSERTED.id, INSERTED.name VALUES (?)\", [\"Alice\"])\n  id = rows[0][\"id\"]",
+		Params:        []string{"conn", "sql", "args"},
+	},
+	"dbBegin": {
+		Signature:     "dbBegin(conn: DB_CONN) -> (tx, err)",
+		Documentation: "Start a database transaction. Pass the returned tx to dbQuery, dbExec, dbCommit, and dbRollback.\n\nExample:\n  tx, err = dbBegin(conn)\n  if err != null { return }\n  _, err = dbExec(tx, \"INSERT INTO log VALUES (?, ?)\", [42, \"updated\"])\n  if err != null { dbRollback(tx)  return }\n  dbCommit(tx)",
+		Params:        []string{"conn"},
+	},
+	"dbCommit": {
+		Signature:     "dbCommit(tx: DB_TX) -> (null, err)",
+		Documentation: "Commit a transaction started with dbBegin.",
+		Params:        []string{"tx"},
+	},
+	"dbRollback": {
+		Signature:     "dbRollback(tx: DB_TX) -> null",
+		Documentation: "Roll back a transaction started with dbBegin. Safe to call even if the transaction is already finished.",
+		Params:        []string{"tx"},
 	},
 
 	// Math
@@ -460,6 +574,38 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Documentation: "Floating-point remainder of a divided by b. Both arguments must be floats.",
 		Params:        []string{"a", "b"},
 	},
+	// Bitwise
+	"bitAnd": {
+		Signature:     "bitAnd(a: int, b: int) -> int",
+		Documentation: "Bitwise AND of two integers. Both operands must be integer.\n\nExample:\n  bitAnd(0b1100, 0b1010) → 8   // 0b1000\n  bitAnd(0xFF, 0x0F)     → 15  // 0x0F",
+		Params:        []string{"a", "b"},
+	},
+	"bitOr": {
+		Signature:     "bitOr(a: int, b: int) -> int",
+		Documentation: "Bitwise OR of two integers. Both operands must be integer.\n\nExample:\n  bitOr(0b1100, 0b0011) → 15  // 0b1111",
+		Params:        []string{"a", "b"},
+	},
+	"bitXor": {
+		Signature:     "bitXor(a: int, b: int) -> int",
+		Documentation: "Bitwise XOR of two integers. Both operands must be integer.\n\nExample:\n  bitXor(0b1100, 0b1010) → 6  // 0b0110",
+		Params:        []string{"a", "b"},
+	},
+	"bitNot": {
+		Signature:     "bitNot(x: int) -> int",
+		Documentation: "Bitwise NOT (ones' complement) of an integer.\n\nExample:\n  bitNot(0)  → -1\n  bitNot(-1) → 0",
+		Params:        []string{"x"},
+	},
+	"bitShiftLeft": {
+		Signature:     "bitShiftLeft(x: int, n: int) -> int",
+		Documentation: "Shift x left by n bits. n must be non-negative. Equivalent to x * 2^n for non-negative x.\n\nExample:\n  bitShiftLeft(1, 4)  → 16\n  bitShiftLeft(3, 8)  → 768",
+		Params:        []string{"x", "n"},
+	},
+	"bitShiftRight": {
+		Signature:     "bitShiftRight(x: int, n: int) -> int",
+		Documentation: "Arithmetic right shift of x by n bits. n must be non-negative. Sign bit is preserved.\n\nExample:\n  bitShiftRight(16, 4)  → 1\n  bitShiftRight(256, 3) → 32",
+		Params:        []string{"x", "n"},
+	},
+
 	"remap": {
 		Signature:     "remap(val, inLow, inHigh, outLow, outHigh: float) -> float",
 		Documentation: "Re-map val from input range [inLow, inHigh] to output range [outLow, outHigh]. Not clamped — use constrain() afterward if needed. Named remap to avoid collision with the higher-order map(arr, fn).\n\nExample:\n  // Mouse X → red intensity\n  r = remap(mouseX(), 0, winWidth(), 0.0, 1.0)\n  fill(r, 0.3, 0.6, 1.0)\n\n  // Data value → bar height\n  h = remap(value, 0, maxVal, 0, barMaxH)",
@@ -899,6 +1045,56 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Signature:     "roundedRect(x, y, w, h, r: float) -> null",
 		Documentation: "Draw a rounded rectangle with corner radius r. Rendered using a signed distance field (SDF) shader — mathematically perfect anti-aliased edges at any size. Respects fill and stroke state.",
 		Params:        []string{"x", "y", "w", "h", "r"},
+	},
+	"shadow": {
+		Signature:     "shadow(offsetX, offsetY, blur: float) -> null\nshadow(offsetX, offsetY, blur, r, g, b, a: float) -> null",
+		Documentation: "Enable analytical Gaussian drop shadows on rect(), circle(), and roundedRect().\n\noffsetX/offsetY: shadow displacement in pixels (positive = right/down).\nblur: Gaussian sigma — larger values produce a softer, wider shadow.\nColour defaults to black at 50% alpha; pass r,g,b,a for an explicit colour.\n\nCall noShadow() to disable.\n\nExample:\n  shadow(4, 6, 12)\n  fill(0.95, 0.95, 0.98, 1.0)\n  roundedRect(50, 50, 300, 180, 12)\n  noShadow()",
+		Params:        []string{"offsetX", "offsetY", "blur"},
+	},
+	"noShadow": {
+		Signature:     "noShadow() -> null",
+		Documentation: "Disable drop shadows set by shadow(). Subsequent rect(), circle(), and roundedRect() calls will not draw a shadow.",
+		Params:        []string{},
+	},
+	"beginPath": {
+		Signature:     "beginPath() -> null",
+		Documentation: "Clear the current vector path and reset the pen. Must be called before building a new path with moveTo / lineTo / bezierTo / quadTo.",
+		Params:        []string{},
+	},
+	"moveTo": {
+		Signature:     "moveTo(x, y: float) -> null",
+		Documentation: "Move the pen to (x, y) without drawing. Starts a new contour. Must be called before lineTo / bezierTo / quadTo.",
+		Params:        []string{"x", "y"},
+	},
+	"lineTo": {
+		Signature:     "lineTo(x, y: float) -> null",
+		Documentation: "Add a straight line from the current pen position to (x, y). Requires a prior moveTo.",
+		Params:        []string{"x", "y"},
+	},
+	"bezierTo": {
+		Signature:     "bezierTo(cp1x, cp1y, cp2x, cp2y, x, y: float) -> null",
+		Documentation: "Add a cubic Bézier curve from the current pen to (x, y). cp1 and cp2 are the two control points. The curve is tessellated to line segments at 0.25px tolerance using De Casteljau subdivision.\n\nExample:\n  beginPath()\n  moveTo(100, 200)\n  bezierTo(100, 100,  300, 100,  300, 200)\n  strokePath()",
+		Params:        []string{"cp1x", "cp1y", "cp2x", "cp2y", "x", "y"},
+	},
+	"quadTo": {
+		Signature:     "quadTo(cpx, cpy, x, y: float) -> null",
+		Documentation: "Add a quadratic Bézier curve from the current pen to (x, y) via control point (cpx, cpy). Internally elevated to a cubic for uniform tessellation.",
+		Params:        []string{"cpx", "cpy", "x", "y"},
+	},
+	"closePath": {
+		Signature:     "closePath() -> null",
+		Documentation: "Close the current contour by adding a line from the current pen back to the last moveTo point.",
+		Params:        []string{},
+	},
+	"fillPath": {
+		Signature:     "fillPath() -> null",
+		Documentation: "Fill the current path with the current fill colour. Uses GPU stencil even-odd rule — handles concave and complex shapes correctly. Does not clear the path; call beginPath() to start fresh.",
+		Params:        []string{},
+	},
+	"strokePath": {
+		Signature:     "strokePath() -> null",
+		Documentation: "Stroke the current path outline using the current stroke colour and strokeWeight. Renders each segment as an expanded quad. Does not clear the path.",
+		Params:        []string{},
 	},
 	"gradient": {
 		Signature:     "gradient(x, y, w, h: float, color1, color2: array, dir: string) -> null",

@@ -10,9 +10,9 @@ println("== len (builtin) ==")
 println(len(m))        // 2
 println(len({}))       // 0
 
-println("== values ==")
+println("== values (builtin, not h.values) ==")
 single = {"x": 99}
-vs = h.values(single)
+vs = values(single)
 println(len(vs))          // 1
 println(vs[0])            // 99
 

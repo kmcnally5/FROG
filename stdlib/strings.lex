@@ -10,14 +10,13 @@
 
 // repeat returns str concatenated n times.
 // repeat("ab", 3) → "ababab". Returns "" if n <= 0.
+//
+// Builds an array of n references to str and joins them in one pass —
+// O(total-length) instead of O(n × total-length) from repeated concat.
 fn repeat(str, n) {
-    result = ""
-    i = 0
-    while i < n {
-        result = result + str
-        i = i + 1
-    }
-    return result
+    if n <= 0 { return "" }
+    parts = makeArray(n, str)
+    return join(parts, "")
 }
 
 // count returns the number of non-overlapping occurrences of sub in str.
@@ -57,27 +56,13 @@ fn trimRight(str) {
 // padLeft pads str on the left with char until it reaches width. O(n).
 fn padLeft(str, width, char) {
     if len(str) >= width { return str }
-    needed = width - len(str)
-    padding = ""
-    i = 0
-    while i < needed {
-        padding = padding + char
-        i = i + 1
-    }
-    return padding + str
+    return repeat(char, width - len(str)) + str
 }
 
 // padRight pads str on the right with char until it reaches width. O(n).
 fn padRight(str, width, char) {
     if len(str) >= width { return str }
-    needed = width - len(str)
-    padding = ""
-    i = 0
-    while i < needed {
-        padding = padding + char
-        i = i + 1
-    }
-    return str + padding
+    return str + repeat(char, width - len(str))
 }
 
 // lines splits str into an array of lines on "\n".

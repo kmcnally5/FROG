@@ -1,6 +1,6 @@
 # Maintainer: Karl McNally <kmcnally@gmail.com>
 pkgname=klex
-pkgver=0.3.32
+pkgver=0.3.35
 pkgrel=1
 pkgdesc="FROG: Parallel-first scripting language for batch data processing at scale"
 arch=('x86_64' 'aarch64')
@@ -32,9 +32,12 @@ export KLEX_PATH="/usr/share/klex/stdlib"
 exec /usr/lib/klex/klex "$@"
 EOF
 
-    # Install stdlib
+    # Install stdlib — both .lex modules and the stdlib/python/ helper
+    # used by Python native bridges (klex_bridge.py). nativeBridge auto-
+    # injects $pkgdir/usr/share/klex/stdlib/python into PYTHONPATH at
+    # runtime, so this directory needs to ship intact.
     mkdir -p "$pkgdir/usr/share/klex/stdlib"
-    cp stdlib/*.lex "$pkgdir/usr/share/klex/stdlib/"
+    cp -r stdlib/* "$pkgdir/usr/share/klex/stdlib/"
 
     # Install license
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

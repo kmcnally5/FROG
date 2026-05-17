@@ -32,12 +32,20 @@ It is not a general-purpose language. It is a runtime for people who want to bui
 A full parallel security scanner built entirely in FROG. Scans codebases and git history for leaked API keys, passwords, and tokens. Ships a live OpenGL interface with real-time progress, severity distribution, and filtering.
 
 ```bash
-KLEX_PATH=. ./klex tests/examples/SecretHunter/secretHunterUI.lex
+./klex tests/examples/SecretHunter/secretHunterUI.lex
 ```
 
 40 parallel workers. Native OpenGL GUI at 60fps during scan. Built in ~900 lines of FROG.
 
 > A scripted scanner with a native GUI and parallel async channels — in an interpreted language.
+
+---
+
+## Try it Online
+
+**[Launch the kLex REPL](https://kmcnally5.github.io/FROG/playground/)** — run kLex code directly in your browser, no installation required.
+
+The REPL supports multi-line input (automatically detects when blocks are complete) and maintains session state — define variables and functions, then use them in subsequent lines.
 
 ---
 
@@ -77,7 +85,7 @@ window(800, 600, "App", fn(frame) {
 
 SDF-rendered shapes and text. 8× MSAA. Immediate-mode widget system. Runs at native speed via go-gl.
 
-> **Platform note:** Graphics and UI are supported on macOS and Linux. Windows builds compile and run but all graphics and UI calls return a runtime error. There are no plans to support Windows GUI tooling.
+> **Platform note:** Graphics and UI run on macOS, Linux, and Windows. Cross-compiling Windows binaries from macOS requires `mingw-w64`; native builds use whatever C toolchain the host platform provides (Xcode on macOS, gcc on Linux, MSYS2 or TDM-GCC on Windows).
 
 ### 3 — No implicit behaviour, ever
 
@@ -96,11 +104,13 @@ No hidden type coercion. No implicit threading. No magic. Every behaviour in a F
 Requires Go 1.22+.
 
 ```bash
-git clone https://github.com/karlmcnally/klex
-cd klex
+git clone https://github.com/kmcnally5/FROG
+cd FROG
 go build -o klex .
 ./klex your_program.lex
 ```
+
+The built `klex` binary auto-discovers `stdlib/` next to itself, so scripts that `import "stdlib/..."` work from any directory — no `KLEX_PATH` configuration needed when the binary and stdlib stay together.
 
 ---
 
@@ -143,17 +153,6 @@ if err != null { println(err) }
 
 ---
 
-## Applications built with kLex
-
-| App | Description |
-|---|---|
-| **Secret Hunter** | Parallel credential scanner + OpenGL GUI |
-| **FROG Broker** | Encrypted credential manager with GUI |
-| **FrogPond** | Distributed storage with Merkle proof-of-custody |
-| **HantaFrog** | Agent-based epidemic simulator with live particle visualisation |
-
----
-
 ## Why kLex exists
 
 Most interpreted languages treat concurrency as an afterthought — async/await sugar over an event loop, or a GIL that makes threading a lie. FROG treats concurrency as the execution model.
@@ -183,6 +182,18 @@ The restraint is intentional. No decorators, no metaclasses, no reactive state s
 - **Strict types** — no coercion, ever
 - **Array-first** — flat data structures, parallel processing
 - **Low magic** — the runtime does what you can read
+
+---
+
+## Testing status
+
+kLex is extensively tested on **macOS** — its primary development platform, where every release passes the full master test suite before tagging.
+
+**Windows** has received initial verification: the v0.3.35 release passes 45 of 47 stdlib tests on a fresh Windows install (the two failures are test-content portability issues, not interpreter bugs), but the platform has not yet been exercised in real production workloads.
+
+**Linux** native testing is planned but has not yet started. The runtime is expected to behave the same as macOS given the overlap in concurrency, OpenGL, and filesystem subsystems, but no firsthand verification has been done.
+
+If you hit anything platform-specific, a GitHub issue with reproduction steps is the fastest way to get it looked at.
 
 ---
 

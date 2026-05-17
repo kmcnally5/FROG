@@ -162,6 +162,157 @@ PATTERNS = [
 ]
 
 // ─────────────────────────────────────────────────────────────────
+// SECRETIGNORE — baseline / allowlist management
+//
+// Reads .secretignore from the scan root. Each non-comment line is
+// a suppression rule in one of three forms:
+//
+//   path/glob/**           suppress ALL findings in matching files
+//   PatternName            suppress this pattern everywhere
+//   path/glob:PatternName  suppress this pattern only in matching files
+//
+// Glob support: **/suffix, prefix/**, *.ext, exact path, or substring.
+// Pattern names are matched case-insensitively by prefix.
+//
+// Usage from the UI (after scan):
+//   rules = sh.loadIgnoreFile(scanPath)
+//   filtered, suppressed = sh.filterFindings(allFindings, rules)
+// ─────────────────────────────────────────────────────────────────
+
+fn loadIgnoreFile(root) {
+    igPath = root + "/.secretignore"
+    if _fsExists(igPath) == false { return makeArray(0) }
+    content, err = _fsRead(igPath)
+    if err != null { return makeArray(0) }
+    lines = split(content, "\n")
+    n = len(lines)
+    count = 0
+    i = 0
+    while i < n {
+        line = trim(lines[i])
+        if len(line) > 0 && line[0] != "#" { count = count + 1 }
+        i = i + 1
+    }
+    rules = makeArray(count, "")
+    idx = 0
+    i = 0
+    while i < n {
+        line = trim(lines[i])
+        if len(line) > 0 && line[0] != "#" {
+            rules[idx] = line
+            idx = idx + 1
+        }
+        i = i + 1
+    }
+    return rules
+}
+
+fn appendIgnoreRule(root, rule) {
+    igPath = root + "/.secretignore"
+    if _fsExists(igPath) == false {
+        header = "# .secretignore — SecretHunter allowlist\n"
+        header = header + "# Lines: path, PatternName, or path:PatternName\n\n"
+        _, err = _fsWrite(igPath, header + rule + "\n")
+        return err
+    }
+    _, err = _fsAppend(igPath, rule + "\n")
+    return err
+}
+
+fn _pathMatches(pattern, filePath) {
+    if pattern == filePath { return true }
+    if startsWith(pattern, "**/") {
+        suffix = substr(pattern, 3)
+        if endsWith(filePath, "/" + suffix) { return true }
+        if indexOf(filePath, "/" + suffix + "/") >= 0 { return true }
+        return filePath == suffix
+    }
+    if endsWith(pattern, "/**") {
+        prefix = substr(pattern, 0, len(pattern) - 3)
+        return startsWith(filePath, prefix + "/") || filePath == prefix
+    }
+    if startsWith(pattern, "*.") {
+        return endsWith(filePath, substr(pattern, 1))
+    }
+    return indexOf(filePath, pattern) >= 0
+}
+
+fn _patternMatches(rule, patternName) {
+    return startsWith(lower(patternName), lower(rule))
+}
+
+fn ruleMatchesFinding(rule, filePath, patternName) {
+    colonIdx = indexOf(rule, ":")
+    if colonIdx >= 0 {
+        filePart = trim(substr(rule, 0, colonIdx))
+        patPart  = trim(substr(rule, colonIdx + 1))
+        return _pathMatches(filePart, filePath) && _patternMatches(patPart, patternName)
+    }
+    if indexOf(rule, "/") < 0 && indexOf(rule, "*") < 0 {
+        return _patternMatches(rule, patternName)
+    }
+    return _pathMatches(rule, filePath)
+}
+
+fn filterFindings(findings, rules) {
+    n      = len(findings)
+    nRules = len(rules)
+    if nRules == 0 { return findings, 0 }
+
+    kept = 0
+    i = 0
+    while i < n {
+        f = findings[i]
+        suppressed = false
+        r = 0
+        while r < nRules && suppressed == false {
+            if ruleMatchesFinding(rules[r], f["file"], f["patternName"]) {
+                suppressed = true
+            }
+            r = r + 1
+        }
+        if suppressed == false { kept = kept + 1 }
+        i = i + 1
+    }
+
+    suppressedCount = n - kept
+    if suppressedCount == 0 { return findings, 0 }
+
+    out = makeArray(kept)
+    idx = 0
+    i = 0
+    while i < n {
+        f = findings[i]
+        suppressed = false
+        r = 0
+        while r < nRules && suppressed == false {
+            if ruleMatchesFinding(rules[r], f["file"], f["patternName"]) {
+                suppressed = true
+            }
+            r = r + 1
+        }
+        if suppressed == false {
+            out[idx] = f
+            idx = idx + 1
+        }
+        i = i + 1
+    }
+    return out, suppressedCount
+}
+
+// makeIgnoreRule builds the correct rule string for a finding.
+// ruleType: "pattern" | "file" | "file_pattern"
+fn makeIgnoreRule(finding, ruleType) {
+    pat = finding["patternName"]
+    parenIdx = indexOf(pat, " (")
+    if parenIdx >= 0 { pat = substr(pat, 0, parenIdx) }
+    pat = trim(pat)
+    if ruleType == "pattern"      { return pat }
+    if ruleType == "file"         { return finding["file"] }
+    return finding["file"] + ":" + pat
+}
+
+// ─────────────────────────────────────────────────────────────────
 // SKIP LISTS
 // ─────────────────────────────────────────────────────────────────
 
@@ -1065,7 +1216,7 @@ fn parScanAllCommitsWithProgress(pairs, progressCh) {
     return perWorker
 }
 
-fn runScanWithProgress(root, doGit, maxSizeMB, progressCh) {
+fn runScanWithProgress(root, doGit, maxSizeMB, progressCh, yaraRulesFile = null, doEntropy = false) {
     maxBytes   = maxSizeMB * 1024 * 1024
     totalStart = _timeNanos()
 
@@ -1101,11 +1252,30 @@ fn runScanWithProgress(root, doGit, maxSizeMB, progressCh) {
         gitEnd = _timeNanos()
     }
 
+    yaraFindings = makeArray(0)
+    yaraStart = _timeNanos()
+    if yaraRulesFile != null {
+        send(progressCh, {"phase": "yara", "total": fileCount, "done": 0})
+        yaraFindings = scanYaraFilesParallel(yaraRulesFile, files)
+        send(progressCh, {"phase": "yara_done", "total": fileCount, "done": fileCount})
+    }
+    yaraEnd = _timeNanos()
+
+    entropyFindings = makeArray(0)
+    entropyStart = _timeNanos()
+    if doEntropy == true {
+        send(progressCh, {"phase": "entropy", "total": fileCount, "done": 0})
+        entropyFindings = scanEntropyFilesParallel(files)
+        send(progressCh, {"phase": "entropy_done", "total": fileCount, "done": fileCount})
+    }
+    entropyEnd = _timeNanos()
+
     totalEnd = _timeNanos()
 
     totalSec = float(totalEnd - totalStart) / 1000000000.0
     filesSec = float(filesEnd - filesStart) / 1000000000.0
     gitSec   = float(gitEnd   - gitStart)   / 1000000000.0
+    yaraSec  = float(yaraEnd  - yaraStart)  / 1000000000.0
 
     filesPerSec   = 0.0
     commitsPerSec = 0.0
@@ -1114,11 +1284,17 @@ fn runScanWithProgress(root, doGit, maxSizeMB, progressCh) {
 
     nf  = len(fileFindings)
     ng  = len(gitFindings)
-    all = makeArray(nf + ng)
+    ny  = len(yaraFindings)
+    ne  = len(entropyFindings)
+    all = makeArray(nf + ng + ny + ne)
     i = 0
-    while i < nf { all[i] = fileFindings[i]        i = i + 1 }
+    while i < nf { all[i] = fileFindings[i]                    i = i + 1 }
     i = 0
-    while i < ng { all[nf + i] = gitFindings[i]    i = i + 1 }
+    while i < ng { all[nf + i] = gitFindings[i]                i = i + 1 }
+    i = 0
+    while i < ny { all[nf + ng + i] = yaraFindings[i]          i = i + 1 }
+    i = 0
+    while i < ne { all[nf + ng + ny + i] = entropyFindings[i]  i = i + 1 }
 
     return {
         "findings":      sortFindings(all),
@@ -1128,16 +1304,276 @@ fn runScanWithProgress(root, doGit, maxSizeMB, progressCh) {
         "totalSec":      totalSec,
         "filesSec":      filesSec,
         "gitSec":        gitSec,
+        "yaraSec":       yaraSec,
         "filesPerSec":   filesPerSec,
         "commitsPerSec": commitsPerSec,
     }
 }
 
 // ─────────────────────────────────────────────────────────────────
+// YARA INTEGRATION
+// Optional third scan phase using YARA rules via nativeBridge.
+// Complements the regex patterns — YARA catches what regex misses:
+// binary secrets, multi-string correlations, entropy heuristics.
+//
+// Uses N parallel bridge processes (one per async worker) so YARA
+// scales across all CPU cores instead of running single-threaded.
+// Each worker sends its entire file chunk in ONE scan_batch call,
+// eliminating per-file round-trip overhead.
+//
+// Usage:
+//   // Pass the rules file path to runScan / runScanWithProgress
+//   result = runScan(root, true, 5, "tests/examples/SecretHunter/secrets.yar")
+// ─────────────────────────────────────────────────────────────────
+
+YARA_WORKERS = 16
+
+// startYaraBridge — kept for standalone / CLI use (yaraTest.lex etc.)
+fn startYaraBridge(rulesFile) {
+    bridge, err = nativeBridge("python3", ["tests/examples/SecretHunter/yara_bridge.py"])
+    if err != null { return null, err }
+    _, err = bridgeCall(bridge, "load", [rulesFile])
+    if err != null {
+        bridgeClose(bridge)
+        return null, err
+    }
+    return bridge, null
+}
+
+// _yaraFlushBatch — scan one batch of files and append findings to accum hash.
+// Returns the updated accumCount.
+fn _yaraFlushBatch(bridge, batch, batchCount, accum, accumCount) {
+    batchArr = makeArray(batchCount, "")
+    k = 0
+    while k < batchCount { batchArr[k] = batch[k]  k = k + 1 }
+    matches, err = bridgeCall(bridge, "scan_batch", [batchArr])
+    if err != null { return accumCount }
+    i = 0
+    while i < len(matches) {
+        hit = matches[i]
+        accum[accumCount] = {
+            "source":      "yara",
+            "patternName": hit["rule"],
+            "severity":    hit["severity"],
+            "action":      hit["action"],
+            "file":        hit["file"],
+            "line":        0,
+            "match":       hit["match"],
+            "commit":      "",
+            "author":      "",
+            "date":        "",
+        }
+        accumCount = accumCount + 1
+        i = i + 1
+    }
+    return accumCount
+}
+
+// scanYaraChunkBatch — one worker: starts its own Python YARA bridge, loads
+// rules, sends all its files in ONE scan_batch call, returns findings array.
+fn scanYaraChunkBatch(rulesFile, files, startIdx, endIdx) {
+    bridge, err = nativeBridge("python3", ["tests/examples/SecretHunter/yara_bridge.py"])
+    if err != null { return makeArray(0) }
+
+    _, err = bridgeCall(bridge, "load", [rulesFile])
+    if err != null { bridgeClose(bridge)  return makeArray(0) }
+
+    chunkSize = endIdx - startIdx
+    chunk = makeArray(chunkSize, "")
+    i = startIdx
+    j = 0
+    while i < endIdx { chunk[j] = files[i]  i = i + 1  j = j + 1 }
+
+    matches, err = bridgeCall(bridge, "scan_batch", [chunk])
+    bridgeClose(bridge)
+    if err != null { return makeArray(0) }
+
+    nm  = len(matches)
+    out = makeArray(nm)
+    i = 0
+    while i < nm {
+        hit = matches[i]
+        out[i] = {
+            "source":      "yara",
+            "patternName": hit["rule"],
+            "severity":    hit["severity"],
+            "action":      hit["action"],
+            "file":        hit["file"],
+            "line":        0,
+            "match":       hit["match"],
+            "commit":      "",
+            "author":      "",
+            "date":        "",
+        }
+        i = i + 1
+    }
+    return out
+}
+
+// scanYaraFilesParallel — round-robin distribution, one scan_batch per worker.
+//
+// Files are assigned round-robin: worker 0 gets files [0,16,32,...],
+// worker 1 gets [1,17,33,...], etc. This interleaves files from every
+// directory so large files are spread evenly across all workers rather
+// than clustering in one chunk. Each worker starts its own Python YARA
+// process and calls scan_batch ONCE with its entire file list — no
+// polling loop, no channel overhead, minimal kLex interpreter work.
+fn scanYaraFilesParallel(rulesFile, files) {
+    n = len(files)
+    if n == 0 { return makeArray(0) }
+
+    numWorkers = YARA_WORKERS
+    if numWorkers > n { numWorkers = n }
+
+    tasks = makeArray(numWorkers, null)
+    w = 0
+    while w < numWorkers {
+        // Count and pre-allocate this worker's share.
+        wCount = 0
+        j = w
+        while j < n { wCount = wCount + 1  j = j + numWorkers }
+
+        chunk = makeArray(wCount, "")
+        j = w
+        k = 0
+        while j < n { chunk[k] = files[j]  k = k + 1  j = j + numWorkers }
+
+        let myRules = rulesFile
+        let myChunk = chunk
+        tasks[w] = async(fn() { return scanYaraChunkBatch(myRules, myChunk, 0, len(myChunk)) })
+        w = w + 1
+    }
+
+    perWorker = makeArray(numWorkers, null)
+    w = 0
+    while w < numWorkers {
+        result, err = safe(await, tasks[w])
+        if err != null { perWorker[w] = makeArray(0) }
+        else           { perWorker[w] = result }
+        w = w + 1
+    }
+
+    total = 0
+    w = 0
+    while w < numWorkers { total = total + len(perWorker[w])  w = w + 1 }
+
+    out = makeArray(total)
+    idx = 0
+    w = 0
+    while w < numWorkers {
+        sub = perWorker[w]
+        m = len(sub)
+        j = 0
+        while j < m { out[idx] = sub[j]  idx = idx + 1  j = j + 1 }
+        w = w + 1
+    }
+    return out
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ENTROPY DETECTION
+// Optional scan phase using Shannon entropy analysis to find high-
+// entropy strings that are statistically likely to be credentials,
+// even when they match no known regex or YARA pattern.
+// Strings with entropy ≥ 4.5 bits/char are flagged. Real secrets
+// (API keys, tokens, passwords) are designed to be unpredictable;
+// normal text and code identifiers score much lower.
+// ─────────────────────────────────────────────────────────────────
+
+ENTROPY_WORKERS = 16
+
+fn scanEntropyChunk(files, startIdx, endIdx) {
+    bridge, err = nativeBridge("python3", ["tests/examples/SecretHunter/yara_bridge.py"])
+    if err != null { return makeArray(0) }
+
+    chunkSize = endIdx - startIdx
+    chunk = makeArray(chunkSize, "")
+    i = startIdx
+    j = 0
+    while i < endIdx { chunk[j] = files[i]  i = i + 1  j = j + 1 }
+
+    matches, err = bridgeCall(bridge, "entropy_scan", [chunk])
+    bridgeClose(bridge)
+    if err != null { return makeArray(0) }
+
+    nm  = len(matches)
+    out = makeArray(nm)
+    i = 0
+    while i < nm {
+        hit = matches[i]
+        ent = hit["entropy"]
+        out[i] = {
+            "source":      "entropy",
+            "patternName": "High-Entropy String (" + str(ent) + " bits)",
+            "severity":    hit["severity"],
+            "action":      "Shannon entropy suggests a possible credential or key. Review and rotate if this is sensitive data.",
+            "file":        hit["file"],
+            "line":        0,
+            "match":       hit["match"],
+            "commit":      "",
+            "author":      "",
+            "date":        "",
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn scanEntropyFilesParallel(files) {
+    n = len(files)
+    if n == 0 { return makeArray(0) }
+
+    numWorkers = ENTROPY_WORKERS
+    if numWorkers > n { numWorkers = n }
+
+    tasks = makeArray(numWorkers, null)
+    w = 0
+    while w < numWorkers {
+        wCount = 0
+        j = w
+        while j < n { wCount = wCount + 1  j = j + numWorkers }
+
+        chunk = makeArray(wCount, "")
+        j = w
+        k = 0
+        while j < n { chunk[k] = files[j]  k = k + 1  j = j + numWorkers }
+
+        let myChunk = chunk
+        tasks[w] = async(fn() { return scanEntropyChunk(myChunk, 0, len(myChunk)) })
+        w = w + 1
+    }
+
+    perWorker = makeArray(numWorkers, null)
+    w = 0
+    while w < numWorkers {
+        result, err = safe(await, tasks[w])
+        if err != null { perWorker[w] = makeArray(0) }
+        else           { perWorker[w] = result }
+        w = w + 1
+    }
+
+    total = 0
+    w = 0
+    while w < numWorkers { total = total + len(perWorker[w])  w = w + 1 }
+
+    out = makeArray(total)
+    idx = 0
+    w = 0
+    while w < numWorkers {
+        sub = perWorker[w]
+        m = len(sub)
+        j = 0
+        while j < m { out[idx] = sub[j]  idx = idx + 1  j = j + 1 }
+        w = w + 1
+    }
+    return out
+}
+
+// ─────────────────────────────────────────────────────────────────
 // MAIN SCAN ENTRY POINT (CLI — no progress reporting)
 // ─────────────────────────────────────────────────────────────────
 
-fn runScan(root, doGit, maxSizeMB) {
+fn runScan(root, doGit, maxSizeMB, yaraRulesFile = null, doEntropy = false) {
     maxBytes = maxSizeMB * 1024 * 1024
 
     files     = enumerateFiles(root, maxBytes)
@@ -1162,18 +1598,313 @@ fn runScan(root, doGit, maxSizeMB) {
         }
     }
 
+    yaraFindings = makeArray(0)
+    if yaraRulesFile != null {
+        yaraFindings = scanYaraFilesParallel(yaraRulesFile, files)
+    }
+
+    entropyFindings = makeArray(0)
+    if doEntropy == true {
+        entropyFindings = scanEntropyFilesParallel(files)
+    }
+
     nf  = len(fileFindings)
     ng  = len(gitFindings)
-    all = makeArray(nf + ng)
+    ny  = len(yaraFindings)
+    ne  = len(entropyFindings)
+    all = makeArray(nf + ng + ny + ne)
     i = 0
-    while i < nf { all[i] = fileFindings[i]        i = i + 1 }
+    while i < nf { all[i] = fileFindings[i]                    i = i + 1 }
     i = 0
-    while i < ng { all[nf + i] = gitFindings[i]    i = i + 1 }
+    while i < ng { all[nf + i] = gitFindings[i]                i = i + 1 }
+    i = 0
+    while i < ny { all[nf + ng + i] = yaraFindings[i]          i = i + 1 }
+    i = 0
+    while i < ne { all[nf + ng + ny + i] = entropyFindings[i]  i = i + 1 }
 
     return {
         "findings":    sortFindings(all),
         "fileCount":   fileCount,
         "commitCount": commitCount,
         "repoCount":   repoCount,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CONFIGURATION
+// Reads / writes ~/.secrethunter/config (key=value format).
+// Priority: env var > config file > built-in default.
+// ─────────────────────────────────────────────────────────────────
+
+fn _shHomeDir() {
+    stdout, err = _processShell("echo $HOME 2>/dev/null")
+    if err != null { return "/tmp" }
+    h = trim(stdout)
+    if len(h) == 0 { return "/tmp" }
+    return h
+}
+
+fn _shEnvGet(varName) {
+    stdout, err = _processShell("echo $" + varName)
+    if err != null { return "" }
+    return trim(stdout)
+}
+
+fn secretHunterConfigPath() {
+    return _shHomeDir() + "/.secrethunter/config"
+}
+
+fn _parseKVConfig(content) {
+    cfg = {}
+    lines = split(content, "\n")
+    i = 0
+    n = len(lines)
+    while i < n {
+        line = trim(lines[i])
+        if len(line) > 0 && line[0] != "#" {
+            eqIdx = indexOf(line, "=")
+            if eqIdx > 0 {
+                cfg[trim(substr(line, 0, eqIdx))] = trim(substr(line, eqIdx + 1))
+            }
+        }
+        i = i + 1
+    }
+    return cfg
+}
+
+fn loadSecretHunterConfig() {
+    defaults = {
+        "github_bridge_path": "tests/examples/SecretHunter/github_bridge.py",
+        "python_executable":  "python3",
+        "github_token":       "",
+        "default_scan_mode":  "online",
+        "temp_dir":           "/tmp",
+    }
+    cfgPath = secretHunterConfigPath()
+    parsed  = {}
+    if _fsExists(cfgPath) == true {
+        content, err = _fsRead(cfgPath)
+        if err == null { parsed = _parseKVConfig(content) }
+    }
+    // Env vars override config file
+    envBridge = _shEnvGet("SECRETHUNTER_BRIDGE")
+    envPython = _shEnvGet("SECRETHUNTER_PYTHON")
+    envTmpDir = _shEnvGet("SECRETHUNTER_TMPDIR")
+    envToken  = _shEnvGet("GITHUB_TOKEN")
+    if len(envBridge) > 0 { parsed["github_bridge_path"] = envBridge }
+    if len(envPython) > 0 { parsed["python_executable"]  = envPython }
+    if len(envTmpDir) > 0 { parsed["temp_dir"]           = envTmpDir }
+    if len(envToken)  > 0 { parsed["github_token"]        = envToken  }
+    // Fill any still-missing keys from defaults
+    dkeys = ["github_bridge_path", "python_executable", "github_token", "default_scan_mode", "temp_dir"]
+    ki = 0
+    while ki < len(dkeys) {
+        k = dkeys[ki]
+        if parsed[k] == null { parsed[k] = defaults[k] }
+        ki = ki + 1
+    }
+    return parsed
+}
+
+fn saveSecretHunterConfig(cfg) {
+    cfgPath = secretHunterConfigPath()
+    cfgDir  = p.dirname(cfgPath)
+    _, merr = _fsMkdirAll(cfgDir)
+    if merr != null { return merr }
+    content = "# SecretHunter configuration\n"
+    content = content + "# Edit here or use the settings panel in the app.\n\n"
+    content = content + "github_bridge_path=" + cfg["github_bridge_path"] + "\n"
+    content = content + "python_executable="  + cfg["python_executable"]  + "\n"
+    content = content + "github_token="       + cfg["github_token"]       + "\n"
+    content = content + "default_scan_mode="  + cfg["default_scan_mode"]  + "\n"
+    content = content + "temp_dir="           + cfg["temp_dir"]           + "\n"
+    _, err = _fsWrite(cfgPath, content)
+    return err
+}
+
+// ─────────────────────────────────────────────────────────────────
+// GITHUB URL HELPERS
+// ─────────────────────────────────────────────────────────────────
+
+fn isGitHubUrl(path) {
+    return startsWith(lower(trim(path)), "https://github.com/")
+}
+
+fn extractOrgFromUrl(url) {
+    // "https://github.com/myorg"       → "myorg"
+    // "https://github.com/myorg/"      → "myorg"
+    // "https://github.com/myorg/repo"  → "myorg"  (org only)
+    prefix = "https://github.com/"
+    rest   = substr(url, len(prefix))
+    slashIdx = indexOf(rest, "/")
+    if slashIdx >= 0 { rest = substr(rest, 0, slashIdx) }
+    return trim(rest)
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ARRAY MERGE HELPER
+// ─────────────────────────────────────────────────────────────────
+
+fn _mergeArrays(a, b) {
+    na = len(a)
+    nb = len(b)
+    if nb == 0 { return a }
+    if na == 0 { return b }
+    out = makeArray(na + nb)
+    i = 0
+    while i < na { out[i]      = a[i]   i = i + 1 }
+    i = 0
+    while i < nb { out[na + i] = b[i]   i = i + 1 }
+    return out
+}
+
+// ─────────────────────────────────────────────────────────────────
+// GITHUB ORG SCAN
+// Enumerates every repo in an org/user via github_bridge.py,
+// fetches each one (tarball = online, blobless clone = deep),
+// runs the existing scanner on the local copy, tags findings with
+// the repo name, then cleans up.  Sends progress on progressCh in
+// the same message format as runScanWithProgress so the UI needs
+// only minimal additions.
+// ─────────────────────────────────────────────────────────────────
+
+fn runOrgScan(orgUrl, cfg, maxSizeMB, progressCh) {
+    org        = extractOrgFromUrl(orgUrl)
+    python     = cfg["python_executable"]
+    if len(python) == 0 { python = "python3" }
+    bridgePath = cfg["github_bridge_path"]
+    if len(bridgePath) == 0 { bridgePath = "tests/examples/SecretHunter/github_bridge.py" }
+    token      = cfg["github_token"]
+    deepMode   = cfg["default_scan_mode"] == "deep"
+    tmpBase    = cfg["temp_dir"]
+    if len(tmpBase) == 0 { tmpBase = "/tmp" }
+
+    totalStart = _timeNanos()
+
+    // Start the bridge process
+    bridge, berr = nativeBridge(python, [bridgePath])
+    if berr != null {
+        return {
+            "error": "Could not start github_bridge.py: " + berr.message,
+            "findings": makeArray(0), "fileCount": 0, "commitCount": 0,
+            "repoCount": 0, "totalSec": 0.0, "filesSec": 0.0,
+            "gitSec": 0.0, "yaraSec": 0.0, "filesPerSec": 0.0, "commitsPerSec": 0.0,
+        }
+    }
+
+    // Remove any leftover temp dirs from a previous crashed run
+    bridgeCall(bridge, "cleanup_stale", ["secrethunter_"])
+
+    // List all repos in the org
+    send(progressCh, {"phase": "org_list", "org": org})
+    listResp, lerr = bridgeCall(bridge, "list_repos", [org, token, true])
+    if lerr != null {
+        bridgeClose(bridge)
+        return {
+            "error": "Failed to list repos: " + lerr.message,
+            "findings": makeArray(0), "fileCount": 0, "commitCount": 0,
+            "repoCount": 0, "totalSec": 0.0, "filesSec": 0.0,
+            "gitSec": 0.0, "yaraSec": 0.0, "filesPerSec": 0.0, "commitsPerSec": 0.0,
+        }
+    }
+    if listResp["error"] != null {
+        bridgeClose(bridge)
+        return {
+            "error": listResp["error"],
+            "findings": makeArray(0), "fileCount": 0, "commitCount": 0,
+            "repoCount": 0, "totalSec": 0.0, "filesSec": 0.0,
+            "gitSec": 0.0, "yaraSec": 0.0, "filesPerSec": 0.0, "commitsPerSec": 0.0,
+        }
+    }
+
+    repos   = listResp["repos"]
+    nRepos  = len(repos)
+    send(progressCh, {"phase": "org_repos", "total": nRepos, "done": 0, "repo": ""})
+
+    allFindings  = makeArray(0)
+    totalFiles   = 0
+    totalCommits = 0
+    scanned      = 0
+
+    i = 0
+    while i < nRepos {
+        repo      = repos[i]
+        repoName  = repo["full_name"]
+        repoSlug  = replace(repoName, "/", "_")
+        repoTmp   = tmpBase + "/secrethunter_" + repoSlug
+
+        send(progressCh, {"phase": "org_repo", "repo": repoName, "repoIdx": i, "total": nRepos})
+
+        localPath = ""
+        doGit     = false
+
+        fetchErr = ""
+        if deepMode == true {
+            cloneResp, cerr = bridgeCall(bridge, "clone_blobless", [repo["clone_url"], token, repoTmp])
+            if cerr != null {
+                fetchErr = "clone_blobless bridge error for " + repoName + ": " + cerr.message
+            } else if cloneResp["error"] != null {
+                fetchErr = "clone failed for " + repoName + ": " + str(cloneResp["error"])
+            } else {
+                localPath = cloneResp["path"]
+                doGit     = true
+            }
+        } else {
+            tarResp, terr = bridgeCall(bridge, "fetch_tarball", [repoName, token, repoTmp])
+            if terr != null {
+                fetchErr = "fetch_tarball bridge error for " + repoName + ": " + terr.message
+            } else if tarResp["error"] != null {
+                fetchErr = "tarball failed for " + repoName + ": " + str(tarResp["error"])
+            } else {
+                localPath = tarResp["path"]
+            }
+        }
+
+        if len(fetchErr) > 0 {
+            send(progressCh, {"phase": "org_repo_error", "repo": repoName, "error": fetchErr})
+        }
+
+        if len(localPath) > 0 {
+            repoResult = runScanWithProgress(localPath, doGit, maxSizeMB, progressCh, null, false)
+
+            // Tag every finding with its source repo and prefix the file path
+            rFindings = repoResult["findings"]
+            nrf = len(rFindings)
+            fi  = 0
+            while fi < nrf {
+                rFindings[fi]["repo"] = repoName
+                rFindings[fi]["file"] = repoName + "/" + rFindings[fi]["file"]
+                fi = fi + 1
+            }
+
+            allFindings  = _mergeArrays(allFindings, rFindings)
+            totalFiles   = totalFiles   + repoResult["fileCount"]
+            totalCommits = totalCommits + repoResult["commitCount"]
+            scanned      = scanned + 1
+        }
+
+        // Remove temp dir immediately after each repo is done
+        bridgeCall(bridge, "cleanup", [repoTmp])
+        send(progressCh, {"phase": "org_repos", "total": nRepos, "done": scanned, "repo": repoName})
+
+        i = i + 1
+    }
+
+    bridgeClose(bridge)
+
+    totalSec = float(_timeNanos() - totalStart) / 1000000000.0
+
+    return {
+        "findings":      sortFindings(allFindings),
+        "fileCount":     totalFiles,
+        "commitCount":   totalCommits,
+        "repoCount":     nRepos,
+        "totalSec":      totalSec,
+        "filesSec":      0.0,
+        "gitSec":        0.0,
+        "yaraSec":       0.0,
+        "filesPerSec":   0.0,
+        "commitsPerSec": 0.0,
+        "error":         null,
     }
 }

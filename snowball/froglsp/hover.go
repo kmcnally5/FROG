@@ -88,15 +88,28 @@ Enums are values that are exactly one of a fixed set of named variants, each of 
 
 Syntax: enum Shape { Circle(radius) Rect(w, h) Point }
 
-Variants with no fields need no parentheses. Use switch for pattern matching.`,
+Variants with no fields need no parentheses. Use switch with destructuring patterns to match and bind fields.`,
 
 	"switch": `**switch** — Conditional dispatch with pattern matching.
 
 Value form: compares one expression against multiple values with ==.
 Expression form: each case is a boolean expression.
-Enum pattern matching: matches enum variants with field bindings.
+Enum pattern matching: matches enum variants and binds their fields.
 
-Cases run in order; first match wins. No fallthrough. Optional default runs if no case matches.`,
+Short form (recommended):
+  switch s {
+    case Circle(r)    { println(r) }
+    case Rect(w, h)   { println(w * h) }
+    case Point()      { println("point") }
+  }
+
+Full form (qualified type name):
+  switch s {
+    case Shape.Circle(r)  { println(r) }
+    case Shape.Point      { println("point") }
+  }
+
+Bindings are scoped to the case body only. Cases run in order; first match wins. No fallthrough.`,
 
 	"case": `**case** — A branch in a switch statement.
 
@@ -111,6 +124,21 @@ Runs if no other case matches in a switch, or if no channel operation is ready i
 Simultaneously waits for channel operations (send/recv) across multiple cases. Picks one ready case at random if several are ready. Optional default makes it non-blocking.
 
 Syntax: select { case val, ok = recv(ch) { } ... default { } }`,
+
+	"?": `**?** — Postfix error-propagation operator.
+
+Unwraps a (value, err) tuple. If err is not null, returns the error immediately from the enclosing function. If err is null, evaluates to value.
+
+Operand must be a 2-element tuple — applying ? to any other type is a TypeError.
+
+Example:
+  content = readFile(path)?       // propagates error or unwraps content
+  data    = parseJSON(content)?   // propagates error or unwraps data
+  return transform(data)?
+
+Equivalent to:
+  content, err = readFile(path)
+  if err != null { return err }`,
 }
 
 

@@ -107,9 +107,10 @@ const (
 	TokenEllipsis TokenType = "..."
 
 	// Single-character operators
-	TokenAssign TokenType = "="
-	TokenGT     TokenType = ">"
-	TokenLT     TokenType = "<"
+	TokenAssign   TokenType = "="
+	TokenGT       TokenType = ">"
+	TokenLT       TokenType = "<"
+	TokenQuestion TokenType = "?" // postfix error-propagation: expr?
 
 	// Logical operators
 	TokenAnd TokenType = "&&"
@@ -370,6 +371,10 @@ func (l *Lexer) NextToken() Token {
 			tok = Token{TokenNot, byteStrings[l.ch], line, col}
 		}
 
+	// '?' is the postfix error-propagation operator: expr?
+	case '?':
+		tok = Token{Type: TokenQuestion, Literal: "?", Line: line, Col: col}
+
 	default:
 		if isLetter(l.ch) {
 			// Read the full identifier first, then check if it's a keyword.
@@ -412,9 +417,37 @@ func (l *Lexer) readIdentifier() string {
 }
 
 // readNumber consumes an integer or float literal and returns (literal, isFloat).
-// A float is detected when a '.' followed by a digit is found after the integer part.
+// Handles decimal, hex (0x), binary (0b), and octal (0o) integer prefixes.
+// A float is detected when a '.' followed by a digit is found after a decimal integer.
 func (l *Lexer) readNumber() (string, bool) {
 	start := l.position
+	// Detect base prefixes when the first digit is '0'
+	if l.ch == '0' {
+		switch l.peekChar() {
+		case 'x', 'X':
+			l.readChar() // consume '0'
+			l.readChar() // consume 'x'/'X'
+			for isHexDigit(l.ch) {
+				l.readChar()
+			}
+			return l.input[start:l.position], false
+		case 'b', 'B':
+			l.readChar() // consume '0'
+			l.readChar() // consume 'b'/'B'
+			for l.ch == '0' || l.ch == '1' {
+				l.readChar()
+			}
+			return l.input[start:l.position], false
+		case 'o', 'O':
+			l.readChar() // consume '0'
+			l.readChar() // consume 'o'/'O'
+			for l.ch >= '0' && l.ch <= '7' {
+				l.readChar()
+			}
+			return l.input[start:l.position], false
+		}
+	}
+	// Decimal integer or float
 	for isDigit(l.ch) {
 		l.readChar()
 	}
@@ -426,6 +459,10 @@ func (l *Lexer) readNumber() (string, bool) {
 		return l.input[start:l.position], true
 	}
 	return l.input[start:l.position], false
+}
+
+func isHexDigit(ch byte) bool {
+	return isDigit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 }
 
 // readString reads from after the opening quote to the closing quote.
@@ -462,9 +499,13 @@ func (l *Lexer) readString() (string, bool) {
 	start := l.position
 	hasEscapes := false
 	hasInterp := false
+	braceDepth := 0 // tracks nesting inside {…} interpolation blocks
 	var procBuf []byte
 
-	for l.ch != '"' && l.ch != 0 {
+	// Loop terminates on a closing '"' that is NOT inside an interpolation block,
+	// or on EOF. When braceDepth > 0 a '"' is the start of a nested string
+	// literal inside the expression — we scan past it rather than terminating.
+	for (l.ch != '"' || braceDepth > 0) && l.ch != 0 {
 		if l.ch == '\\' {
 			if !hasEscapes {
 				// First escape: bulk-copy everything before it into procBuf.
@@ -511,9 +552,25 @@ func (l *Lexer) readString() (string, bool) {
 			default:
 				procBuf = append(procBuf, '\\', l.ch)
 			}
+		} else if l.ch == '"' && braceDepth > 0 {
+			// Nested string literal inside an interpolation block — scan past it.
+			// braceDepth > 0 implies hasInterp, so we return raw source and
+			// procBuf is irrelevant; we only need to advance l.position correctly.
+			l.readChar() // move past the inner opening quote
+			for l.ch != '"' && l.ch != 0 {
+				if l.ch == '\\' {
+					l.readChar() // skip the escaped char
+				}
+				l.readChar()
+			}
+			// l.ch is now the inner closing '"'; the outer l.readChar() below
+			// will advance past it.
 		} else {
 			if l.ch == '{' {
+				braceDepth++
 				hasInterp = true
+			} else if l.ch == '}' && braceDepth > 0 {
+				braceDepth--
 			}
 			if hasEscapes {
 				procBuf = append(procBuf, l.ch)

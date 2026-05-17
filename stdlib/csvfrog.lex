@@ -2,6 +2,10 @@
 // csvfrog.lex — CSV parser written entirely in FROG (recursive descent)
 // ============================================================================
 //
+// FOR PRODUCTION USE, IMPORT stdlib/csv.lex INSTEAD. That file wraps Go's
+// encoding/csv and is significantly faster. This module exists as a teaching
+// reference showing how RFC 4180 parsing can be expressed in pure FROG.
+//
 // Pure kLex implementation of RFC 4180 CSV parsing using character-by-character
 // state machine (DFA). No Go builtins — demonstrates language capability.
 //

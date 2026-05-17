@@ -67,7 +67,7 @@ struct _Parser {
     // ---------- literals ----------
 
     fn parseTrue() {
-        if _substr(self.s, self.i, self.i + 4) == "true" {
+        if substr(self.s, self.i, self.i + 4) == "true" {
             self.i = self.i + 4
             return true, null
         }
@@ -75,7 +75,7 @@ struct _Parser {
     }
 
     fn parseFalse() {
-        if _substr(self.s, self.i, self.i + 5) == "false" {
+        if substr(self.s, self.i, self.i + 5) == "false" {
             self.i = self.i + 5
             return false, null
         }
@@ -83,7 +83,7 @@ struct _Parser {
     }
 
     fn parseNull() {
-        if _substr(self.s, self.i, self.i + 4) == "null" {
+        if substr(self.s, self.i, self.i + 4) == "null" {
             self.i = self.i + 4
             return null, null
         }
@@ -97,30 +97,35 @@ struct _Parser {
             return null, "expected quote"
         }
 
-        result = ""
+        // Pre-allocate a char buffer to the remaining input length (upper
+        // bound on the parsed string's length, since escapes collapse 2→1).
+        // Each char written by index; final assembly is one join() —
+        // O(n) instead of O(n²) from repeated string concat.
+        cap = len(self.s) - self.i
+        buf = makeArray(cap, "")
+        n   = 0
 
         while true {
             ch = self.next()
             if ch == null { return null, "unterminated string" }
 
-            if ch == "\"" {
-                break
-            }
+            if ch == "\"" { break }
 
             if ch == "\\" {
                 esc = self.next()
-                if esc == "n"  { result = result + "\n" }
-                else if esc == "r"  { result = result + "\r" }
-                else if esc == "t"  { result = result + "\t" }
-                else if esc == "\"" { result = result + "\"" }
-                else if esc == "\\" { result = result + "\\" }
+                if esc == "n"       { buf[n] = "\n" }
+                else if esc == "r"  { buf[n] = "\r" }
+                else if esc == "t"  { buf[n] = "\t" }
+                else if esc == "\"" { buf[n] = "\"" }
+                else if esc == "\\" { buf[n] = "\\" }
                 else { return null, "invalid escape" }
             } else {
-                result = result + ch
+                buf[n] = ch
             }
+            n = n + 1
         }
 
-        return result, null
+        return join(slice(buf, 0, n), ""), null
     }
 
     // ---------- number ----------
@@ -139,7 +144,7 @@ struct _Parser {
             }
         }
 
-        raw = _substr(self.s, start, self.i)
+        raw = substr(self.s, start, self.i)
 
         if indexOf(raw, ".") != -1 {
             return float(raw), null
@@ -151,21 +156,37 @@ struct _Parser {
     // ---------- array ----------
 
     fn parseArray() {
-        arr = []
-
         self.next() // consume [
 
         self.skipWhitespace()
         if self.peek() == "]" {
             self.next()
-            return arr, null
+            return makeArray(0, null), null
         }
+
+        // Doubling buffer + slice at the end — same pattern as
+        // stream.lex collect(). Avoids O(n²) push() growth.
+        cap = 16
+        buf = makeArray(cap, null)
+        n   = 0
 
         while true {
             val, err = self.parseValue()
             if err != null { return null, err }
 
-            arr = push(arr, val)
+            if n >= cap {
+                newCap = cap * 2
+                newBuf = makeArray(newCap, null)
+                i = 0
+                while i < n {
+                    newBuf[i] = buf[i]
+                    i = i + 1
+                }
+                buf = newBuf
+                cap = newCap
+            }
+            buf[n] = val
+            n = n + 1
 
             self.skipWhitespace()
             ch = self.next()
@@ -174,7 +195,7 @@ struct _Parser {
             if ch != "," { return null, "expected , or ]" }
         }
 
-        return arr, null
+        return slice(buf, 0, n), null
     }
 
     // ---------- object ----------
@@ -238,18 +259,25 @@ fn _stringify(v) {
     }
 
     if t == "ARRAY" {
-        parts = []
-        for x in v {
-            parts = push(parts, _stringify(x))
+        n     = len(v)
+        parts = makeArray(n, "")
+        i     = 0
+        while i < n {
+            parts[i] = _stringify(v[i])
+            i = i + 1
         }
         return "[" + join(parts, ",") + "]"
     }
 
     if t == "HASH" {
-        parts = []
-        for k, val in v {
-            part = "\"" + _escape(k) + "\":" + _stringify(val)
-            parts = push(parts, part)
+        ks    = keys(v)
+        n     = len(ks)
+        parts = makeArray(n, "")
+        i     = 0
+        while i < n {
+            k = ks[i]
+            parts[i] = "\"" + _escape(k) + "\":" + _stringify(v[k])
+            i = i + 1
         }
         return "\{" + join(parts, ",") + "}"
     }
@@ -268,12 +296,3 @@ fn _escape(s) {
     return s
 }
 
-fn _substr(s, start, end) {
-    out = ""
-    i = start
-    while i < end {
-        out = out + s[i]
-        i = i + 1
-    }
-    return out
-}

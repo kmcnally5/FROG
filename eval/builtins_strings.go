@@ -3,6 +3,8 @@ package eval
 import (
 	"fmt"
 	"klex/ast"
+	"strconv"
+	"strings"
 )
 
 func init() {
@@ -81,6 +83,73 @@ func init() {
 		result := make([]Object, end-start)
 		copy(result, arr.Elements[start:end])
 		return &Array{Elements: result}
+	}}
+
+	// parseInt(str) → (int, err)
+	//
+	// Safely parses a string as an integer. Trims leading/trailing whitespace.
+	// Returns (value, null) on success, (null, error) on failure.
+	// Use this instead of int() when the input is untrusted (CSV, HTTP, database).
+	//
+	// Example:
+	//   n, err = parseInt("42")
+	//   if err != null { println("bad number: {err.message}")  return }
+	//   println(n + 1)   // 43
+	Builtins["parseInt"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("parseInt expects 1 argument (str)", ast.Pos{})
+		}
+		s, ok := args[0].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("parseInt: argument must be string, got %s", args[0].Type()), ast.Pos{})
+		}
+		trimmed := strings.TrimSpace(s.Value)
+		n, err := strconv.Atoi(trimmed)
+		if err != nil {
+			if _, ferr := strconv.ParseFloat(trimmed, 64); ferr == nil {
+				return &Tuple{Elements: []Object{NULL, &Error{
+					IsUserError: true,
+					Code:        "PARSE_ERROR",
+					Message:     fmt.Sprintf("parseInt: %q looks like a float — use parseFloat() then convert", s.Value),
+				}}}
+			}
+			return &Tuple{Elements: []Object{NULL, &Error{
+				IsUserError: true,
+				Code:        "PARSE_ERROR",
+				Message:     fmt.Sprintf("parseInt: cannot parse %q as integer", s.Value),
+			}}}
+		}
+		return &Tuple{Elements: []Object{&Integer{Value: n}, NULL}}
+	}}
+
+	// parseFloat(str) → (float, err)
+	//
+	// Safely parses a string as a float. Trims leading/trailing whitespace.
+	// Returns (value, null) on success, (null, error) on failure.
+	// Use this instead of float() when the input is untrusted (CSV, HTTP, database).
+	//
+	// Example:
+	//   f, err = parseFloat("3.14")
+	//   if err != null { println("bad number: {err.message}")  return }
+	//   println(f * 2.0)   // 6.28
+	Builtins["parseFloat"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("parseFloat expects 1 argument (str)", ast.Pos{})
+		}
+		s, ok := args[0].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("parseFloat: argument must be string, got %s", args[0].Type()), ast.Pos{})
+		}
+		trimmed := strings.TrimSpace(s.Value)
+		f, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &Error{
+				IsUserError: true,
+				Code:        "PARSE_ERROR",
+				Message:     fmt.Sprintf("parseFloat: cannot parse %q as float", s.Value),
+			}}}
+		}
+		return &Tuple{Elements: []Object{&Float{Value: f}, NULL}}
 	}}
 }
 

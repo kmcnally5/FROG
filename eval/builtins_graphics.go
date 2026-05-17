@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !js
 
 package eval
 
@@ -177,6 +177,34 @@ uniform int  uDir;
 void main() {
     float t = (uDir == 0) ? vUV.x : vUV.y;
     fragColor = mix(uColor1, uColor2, t);
+}
+` + "\x00"
+
+// shadowFragmentShaderSrc — analytical Gaussian drop shadow for rounded rects.
+// The vertex shader is sdfVertexShaderSrc (same position+localPos layout).
+// vLocal is relative to the shadow quad centre; adding uOffset gives position
+// relative to the original shape centre, where the SDF is computed.
+const shadowFragmentShaderSrc = `
+#version 410 core
+in vec2 vLocal;
+uniform vec2  uHalfSize;
+uniform float uRadius;
+uniform float uBlur;
+uniform vec2  uOffset;
+uniform vec4  uColor;
+out vec4 fragColor;
+
+float sdRoundedBox(vec2 p, vec2 b, float r) {
+    vec2 d = abs(p) - b + r;
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
+}
+
+void main() {
+    vec2  p     = vLocal + uOffset;
+    float dist  = sdRoundedBox(p, uHalfSize, uRadius);
+    float sigma = max(uBlur * 0.5, 0.5);
+    float alpha = exp(-dist * dist / (2.0 * sigma * sigma));
+    fragColor   = vec4(uColor.rgb, uColor.a * clamp(alpha, 0.0, 1.0));
 }
 ` + "\x00"
 
@@ -391,6 +419,28 @@ var gfx struct {
 	uiColCurY  float32
 	uiColW     float32
 	uiColGap   float32
+	// Drop shadow state
+	shadowActive  bool
+	shadowOffX    float32
+	shadowOffY    float32
+	shadowBlur    float32
+	shadowColor   [4]float32
+	shadowProg    uint32
+	shadowProjLoc int32
+	shadowHSLoc   int32 // uHalfSize
+	shadowRadLoc  int32 // uRadius
+	shadowBlurLoc int32 // uBlur
+	shadowOffLoc  int32 // uOffset
+	shadowColLoc  int32 // uColor
+	shadowVAO     uint32
+	shadowVBO     uint32
+	// Vector path builder
+	pathPts      []vec2
+	pathPenX     float32
+	pathPenY     float32
+	pathStartX   float32
+	pathStartY   float32
+	pathHasStart bool
 }
 
 // keyNames maps kLex string names to GLFW key constants.
@@ -461,6 +511,7 @@ func init() {
 
 		glfw.WindowHint(glfw.Resizable, glfw.True)
 		glfw.WindowHint(glfw.Samples, 8) // 8× MSAA — smooth edges on all geometry
+		glfw.WindowHint(glfw.StencilBits, 8) // required for fillPath() even-odd stencil technique
 		glfw.WindowHint(glfw.ContextVersionMajor, 4)
 		glfw.WindowHint(glfw.ContextVersionMinor, 1)
 		glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
@@ -620,6 +671,35 @@ func init() {
 		gfx.gradVAO     = gradVAO
 		gfx.gradVBO     = gradVBO
 
+		// ── Shadow shader ─────────────────────────────────────────────────
+		// Reuses sdfVertexShaderSrc (same position + localPos layout).
+		shadowProg, err := compileShaderProgram(sdfVertexShaderSrc, shadowFragmentShaderSrc)
+		if err != nil {
+			return runtimeError(fmt.Sprintf("window: shadow shader compile failed: %v", err), ast.Pos{})
+		}
+		var shadowVAO, shadowVBO uint32
+		gl.GenVertexArrays(1, &shadowVAO)
+		gl.GenBuffers(1, &shadowVBO)
+		gl.BindVertexArray(shadowVAO)
+		gl.BindBuffer(gl.ARRAY_BUFFER, shadowVBO)
+		shPosLoc := uint32(gl.GetAttribLocation(shadowProg, gl.Str("position\x00")))
+		shLocLoc := uint32(gl.GetAttribLocation(shadowProg, gl.Str("localPos\x00")))
+		gl.EnableVertexAttribArray(shPosLoc)
+		gl.VertexAttribPointer(shPosLoc, 2, gl.FLOAT, false, 16, gl.PtrOffset(0))
+		gl.EnableVertexAttribArray(shLocLoc)
+		gl.VertexAttribPointer(shLocLoc, 2, gl.FLOAT, false, 16, gl.PtrOffset(8))
+		gl.BindVertexArray(0)
+		gfx.shadowProg    = shadowProg
+		gfx.shadowProjLoc = gl.GetUniformLocation(shadowProg, gl.Str("projection\x00"))
+		gfx.shadowHSLoc   = gl.GetUniformLocation(shadowProg, gl.Str("uHalfSize\x00"))
+		gfx.shadowRadLoc  = gl.GetUniformLocation(shadowProg, gl.Str("uRadius\x00"))
+		gfx.shadowBlurLoc = gl.GetUniformLocation(shadowProg, gl.Str("uBlur\x00"))
+		gfx.shadowOffLoc  = gl.GetUniformLocation(shadowProg, gl.Str("uOffset\x00"))
+		gfx.shadowColLoc  = gl.GetUniformLocation(shadowProg, gl.Str("uColor\x00"))
+		gfx.shadowVAO     = shadowVAO
+		gfx.shadowVBO     = shadowVBO
+		gfx.shadowColor   = [4]float32{0, 0, 0, 0.5}
+
 		win.SetCursorPosCallback(func(_ *glfw.Window, x, y float64) {
 			gfx.mouseX = x
 			gfx.mouseY = y
@@ -764,6 +844,42 @@ func init() {
 		return NULL
 	}}
 
+	// shadow(offsetX, offsetY, blur) → null              — black @ 50% alpha
+	// shadow(offsetX, offsetY, blur, r, g, b, a) → null — explicit colour
+	// Enable drop shadows on rect(), circle(), and roundedRect() calls.
+	Builtins["shadow"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 3 && len(args) != 7 {
+			return runtimeError("shadow expects 3 or 7 arguments: offsetX, offsetY, blur [, r, g, b, a]", ast.Pos{})
+		}
+		if !allNumeric(args[:3]) {
+			return typeError("shadow: offsetX, offsetY, blur must be numeric", ast.Pos{})
+		}
+		gfx.shadowOffX = float32(toFloat64(args[0]))
+		gfx.shadowOffY = float32(toFloat64(args[1]))
+		gfx.shadowBlur = float32(toFloat64(args[2]))
+		if len(args) == 7 {
+			if !allNumeric(args[3:]) {
+				return typeError("shadow: r, g, b, a must be numeric", ast.Pos{})
+			}
+			gfx.shadowColor = [4]float32{
+				float32(toFloat64(args[3])),
+				float32(toFloat64(args[4])),
+				float32(toFloat64(args[5])),
+				float32(toFloat64(args[6])),
+			}
+		} else {
+			gfx.shadowColor = [4]float32{0, 0, 0, 0.5}
+		}
+		gfx.shadowActive = true
+		return NULL
+	}}
+
+	// noShadow() → null — disable drop shadows.
+	Builtins["noShadow"] = &Builtin{Fn: func(args []Object) Object {
+		gfx.shadowActive = false
+		return NULL
+	}}
+
 	// blendMode(mode) — set the OpenGL blend equation for subsequent draw calls.
 	// "normal"   — src*alpha + dst*(1-alpha)   (default)
 	// "add"      — src*alpha + dst             (fire, glow, light)
@@ -886,6 +1002,7 @@ func init() {
 		w := float32(toFloat64(args[2]))
 		h := float32(toFloat64(args[3]))
 
+		drawShadowShape(x, y, w, h, 0)
 		verts := []float32{
 			x, y,
 			x + w, y,
@@ -912,6 +1029,7 @@ func init() {
 		cy := float32(toFloat64(args[1]))
 		r  := float32(toFloat64(args[2]))
 		// A circle is a rounded rect with radius = half-size — SDF handles it perfectly.
+		drawShadowShape(cx-r, cy-r, r*2, r*2, r)
 		if gfx.doFill {
 			drawRoundedRectSDF(cx-r, cy-r, r*2, r*2, r, gfx.fillColor, false, 0)
 		}
@@ -930,6 +1048,7 @@ func init() {
 		w := float32(toFloat64(args[2]))
 		h := float32(toFloat64(args[3]))
 		r := float32(toFloat64(args[4]))
+		drawShadowShape(x, y, w, h, r)
 		if gfx.doFill {
 			drawRoundedRectSDF(x, y, w, h, r, gfx.fillColor, false, 0)
 		}
@@ -1288,23 +1407,30 @@ func init() {
 		charW := float32(gfx.fontCellW) * scale / float32(gfx.fontRenderScale)
 		charH := float32(gfx.fontCellH) * scale / float32(gfx.fontRenderScale)
 		const atlasChars = float32(96)
-		for i, ch := range strObj.Value {
+		verts := make([]float32, 0, len([]rune(strObj.Value))*24)
+		pos := 0
+		for _, ch := range strObj.Value {
 			idx := int(ch) - 32
 			if idx < 0 || idx >= 96 {
 				idx = 0
 			}
 			u0 := float32(idx) / atlasChars
 			u1 := float32(idx+1) / atlasChars
-			x := cx + float32(i)*charW
-			y := cy
-			verts := []float32{
-				x, y,                u0, 0,
-				x + charW, y,        u1, 0,
-				x, y + charH,        u0, 1,
-				x + charW, y + charH, u1, 1,
-			}
+			qx := cx + float32(pos)*charW
+			qy := cy
+			verts = append(verts,
+				qx, qy,           u0, 0,
+				qx+charW, qy,     u1, 0,
+				qx+charW, qy+charH, u1, 1,
+				qx, qy,           u0, 0,
+				qx+charW, qy+charH, u1, 1,
+				qx, qy+charH,     u0, 1,
+			)
+			pos++
+		}
+		if len(verts) > 0 {
 			gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.STREAM_DRAW)
-			gl.DrawArrays(gl.TRIANGLE_STRIP, 0, 4)
+			gl.DrawArrays(gl.TRIANGLES, 0, int32(len(verts)/4))
 		}
 
 		gl.BindVertexArray(0)
@@ -1554,6 +1680,7 @@ func init() {
 		gl.BindVertexArray(gfx.texVAO)
 		gl.BindBuffer(gl.ARRAY_BUFFER, gfx.texVBO)
 
+		verts := make([]float32, 0, len([]rune(strObj.Value))*24)
 		penX := x
 		for _, ch := range strObj.Value {
 			g, ok := fnt.glyphs[ch]
@@ -1561,15 +1688,19 @@ func init() {
 				g = fnt.fallback
 			}
 			qw := g.advance * scale
-			verts := []float32{
-				penX, y,         g.u0, 0,
-				penX + qw, y,    g.u1, 0,
-				penX, y + lineH, g.u0, 1,
-				penX + qw, y + lineH, g.u1, 1,
-			}
-			gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.STREAM_DRAW)
-			gl.DrawArrays(gl.TRIANGLE_STRIP, 0, 4)
+			verts = append(verts,
+				penX, y,          g.u0, 0,
+				penX+qw, y,       g.u1, 0,
+				penX+qw, y+lineH, g.u1, 1,
+				penX, y,          g.u0, 0,
+				penX+qw, y+lineH, g.u1, 1,
+				penX, y+lineH,    g.u0, 1,
+			)
 			penX += qw
+		}
+		if len(verts) > 0 {
+			gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.STREAM_DRAW)
+			gl.DrawArrays(gl.TRIANGLES, 0, int32(len(verts)/4))
 		}
 
 		gl.BindVertexArray(0)
@@ -1680,6 +1811,52 @@ func drawImageGL(img *Image, x, y, w, h float32) {
 
 // drawRoundedRectSDF renders a rounded rectangle (or circle when r = half-size)
 // using a signed distance field computed in the fragment shader.
+// drawShadowShape draws an analytical Gaussian drop shadow for a rounded rect.
+// Call before drawing the shape itself so the shadow renders underneath.
+// pad = blur*3+2 ensures the Gaussian has fully decayed at the quad edge.
+func drawShadowShape(x, y, w, h, r float32) {
+	if !gfx.shadowActive || gfx.shadowProg == 0 {
+		return
+	}
+	blur := gfx.shadowBlur
+	if blur < 0.5 {
+		blur = 0.5
+	}
+	pad := blur*3 + 2
+
+	origHW := w * 0.5
+	origHH := h * 0.5
+	origCX := x + origHW
+	origCY := y + origHH
+	shHW := origHW + pad
+	shHH := origHH + pad
+	shCX := origCX + gfx.shadowOffX
+	shCY := origCY + gfx.shadowOffY
+
+	mvp := gfx.ortho.Mul4(gfx.modelStack[len(gfx.modelStack)-1])
+	verts := []float32{
+		shCX - shHW, shCY - shHH, -shHW, -shHH,
+		shCX + shHW, shCY - shHH, shHW, -shHH,
+		shCX - shHW, shCY + shHH, -shHW, shHH,
+		shCX + shHW, shCY - shHH, shHW, -shHH,
+		shCX + shHW, shCY + shHH, shHW, shHH,
+		shCX - shHW, shCY + shHH, -shHW, shHH,
+	}
+	col := gfx.shadowColor
+	gl.UseProgram(gfx.shadowProg)
+	gl.UniformMatrix4fv(gfx.shadowProjLoc, 1, false, &mvp[0])
+	gl.Uniform2f(gfx.shadowHSLoc, origHW, origHH)
+	gl.Uniform1f(gfx.shadowRadLoc, r)
+	gl.Uniform1f(gfx.shadowBlurLoc, blur)
+	gl.Uniform2f(gfx.shadowOffLoc, gfx.shadowOffX, gfx.shadowOffY)
+	gl.Uniform4f(gfx.shadowColLoc, col[0], col[1], col[2], col[3])
+	gl.BindVertexArray(gfx.shadowVAO)
+	gl.BindBuffer(gl.ARRAY_BUFFER, gfx.shadowVBO)
+	gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.STREAM_DRAW)
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+	gl.BindVertexArray(0)
+}
+
 // The quad covers the shape plus a 2px fringe for the anti-alias transition.
 // mode: false = fill, true = stroke (strokeHalfW = strokeWeight / 2).
 func drawRoundedRectSDF(x, y, w, h, r float32, color [4]float32, isStroke bool, strokeHalfW float32) {

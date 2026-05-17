@@ -626,18 +626,37 @@
     Match an enum value against its variants. Field bindings (names in
     parentheses) are new local variables scoped to that case arm only.
 
+    SHORT FORM (recommended) — variant name only, no type prefix:
+
       enum Shape { Circle(radius)  Rect(width, height)  Point }
+
+      switch s {
+          case Circle(r)   { println("circle r=" + str(r)) }
+          case Rect(w, h)  { println(str(w) + "x" + str(h)) }
+          case Point()     { println("point") }
+          default          { println("unknown") }
+      }
+
+    Zero-field variants use empty parentheses — case Point() — in the short
+    form. This mirrors how the enum was declared and is unambiguous.
+
+    FULL FORM — qualified with the type name:
 
       switch s {
           case Shape.Circle(r)   { println("circle r=" + str(r)) }
           case Shape.Rect(w, h)  { println(str(w) + "x" + str(h)) }
           case Shape.Point       { println("point") }
-          default                { println("unknown") }
       }
 
+    The full form requires the type prefix (Shape.Circle) and zero-field
+    variants use no parentheses. Use this when you need the type check to
+    be explicit.
+
+    Bindings are positional — they match fields in declaration order. You
+    may use any name; choosing the field's declared name is recommended.
     Binding count must exactly match the variant's field count — a mismatch
-    is a RuntimeError. Zero-field variants use the plain form (no parentheses).
-    Bindings do not affect variables of the same name in the outer scope.
+    is a RuntimeError. Bindings do not affect variables of the same name in
+    the outer scope.
 
 
   SELECT — CHANNEL DISPATCH
@@ -1002,8 +1021,30 @@
 
     type(value)              returns type name as string
     str(value)               any value → string
-    int(value)               string or float → integer (truncates)
-    float(value)             integer or string → float
+    int(value)               string or float → integer (truncates); crashes on bad input
+    float(value)             integer or string → float; crashes on bad input
+
+  SAFE NUMBER PARSING
+
+    Use these when input is untrusted (CSV rows, HTTP responses, database strings).
+    Both return (value, null) on success or (null, error) on failure.
+    Leading and trailing whitespace is trimmed automatically.
+
+    n, err = parseInt(str)
+    — Parses string as an integer.
+    — If the string looks like a float, gives a helpful error suggesting parseFloat.
+
+    f, err = parseFloat(str)
+    — Parses string as a float (also accepts integer-formatted strings).
+
+    Example — processing mixed-quality data:
+      rows = ["10", "bad", " 30 ", "", "50"]
+      total = 0
+      for item in rows {
+          n, err = parseInt(item)
+          if err == null { total = total + n }
+      }
+      println(total)   // 90
 
 
   STRINGS
@@ -2800,6 +2841,82 @@
                                     SDF-rendered: mathematically perfect AA edges
                                     respects fill and stroke state
 
+  DROP SHADOWS
+
+    shadow(offsetX, offsetY, blur)              — enable shadow (black, 50% alpha)
+    shadow(offsetX, offsetY, blur, r, g, b, a)  — enable shadow with explicit colour
+    noShadow()                                  — disable shadow
+
+    When shadow is active, rect(), circle(), and roundedRect() automatically draw
+    an analytical Gaussian shadow underneath the shape before filling/stroking.
+    Shadow is computed in a GPU fragment shader — no extra render passes.
+
+    offsetX, offsetY  — shadow displacement in pixels (positive = right/down)
+    blur              — Gaussian sigma in pixels; larger = softer spread
+
+    EXAMPLE
+
+        shadow(4, 6, 12)                      // soft dark shadow
+        fill(0.95, 0.95, 0.98, 1.0)
+        roundedRect(50, 50, 300, 180, 12)
+        noShadow()
+
+        shadow(2, 3, 6, 0, 0, 0, 0.7)        // tighter shadow, explicit colour
+        fill(0.3, 0.6, 1.0, 1.0)
+        circle(200, 200, 40)
+        noShadow()
+
+  VECTOR PATHS
+
+    Build arbitrary shapes — straight lines, curves, concave polygons — then
+    fill or stroke them in a single draw call. Uses GPU stencil even-odd fill
+    so concave and complex shapes render correctly.
+
+    beginPath()                        — clear the path and reset the pen
+    moveTo(x, y)                       — move pen to (x, y); starts a new contour
+    lineTo(x, y)                       — straight line from pen to (x, y)
+    bezierTo(cp1x,cp1y, cp2x,cp2y, x,y)
+                                       — cubic Bézier from pen to (x, y)
+                                         cp1 and cp2 are the two control points
+    quadTo(cpx, cpy, x, y)            — quadratic Bézier from pen to (x, y)
+                                         elevated to cubic internally
+    closePath()                        — close contour: line back to last moveTo
+    fillPath()                         — fill with current fill colour
+    strokePath()                       — stroke with current stroke colour and strokeWeight
+
+    fillPath() and strokePath() can both be called on the same path.
+    Neither clears the path — call beginPath() to start fresh.
+
+    EXAMPLE — filled concave star
+
+        fill(1.0, 0.85, 0.0, 1.0)
+        stroke(1.0, 0.5, 0.0, 1.0)
+        strokeWeight(2.0)
+        beginPath()
+        moveTo(200, 100)
+        lineTo(220, 160)
+        lineTo(280, 160)
+        lineTo(235, 195)
+        lineTo(255, 255)
+        lineTo(200, 220)
+        lineTo(145, 255)
+        lineTo(165, 195)
+        lineTo(120, 160)
+        lineTo(180, 160)
+        closePath()
+        fillPath()
+        strokePath()
+
+    EXAMPLE — cubic Bézier loop
+
+        fill(0.4, 0.6, 1.0, 0.8)
+        noStroke()
+        beginPath()
+        moveTo(200, 150)
+        bezierTo(200, 80,  320, 80,  320, 150)
+        bezierTo(320, 220, 200, 220, 200, 150)
+        fillPath()
+
   PARTICLE BATCH
 
     drawParticles(xs, ys, rs, gs, bs, alphas, count, pointSize)
@@ -3186,6 +3303,529 @@
       t[11] = [0.04, 0.08, 0.16, 1.0]   // inputBg
       t[12] = [0.08, 0.25, 0.50, 1.0]   // inputFocusBg
       uiTheme(t)
+
+--------------------------------------------------------------------------------
+  NATIVE BRIDGE (cross-language FFI)
+--------------------------------------------------------------------------------
+
+  kLex can call into any language — Python, Rust, C, Node, anything — via a
+  persistent subprocess that speaks a simple line-delimited JSON protocol.
+
+  STARTING A BRIDGE
+
+    bridge, err = nativeBridge(cmd, args)
+    bridge, err = nativeBridge(cmd, args, opts)
+    — Starts the subprocess and returns a bridge handle.
+    — cmd is the executable ("python3", "./my_bridge", etc.)
+    — args is an array of string arguments (["bridge.py"])
+    — opts (optional hash) configures the bridge:
+        timeout_seconds  default per-call timeout (0 = no timeout)
+        max_response_mb  max response size in MB, range [1, 256], default 1
+        stderr_log       file path to capture subprocess stderr
+
+    The bridge is registered globally; if kLex exits or is signalled,
+    every active bridge subprocess is force-killed to prevent orphans.
+
+  CALLING FUNCTIONS
+
+    result, err = bridgeCall(bridge, fn, args)
+    result, err = bridgeCall(bridge, fn, args, timeoutSec)
+    — Calls a named function in the subprocess.
+    — args is a kLex array; all types marshal to JSON automatically.
+    — Blocks until the subprocess responds or the timeout fires.
+    — Optional 4th arg overrides the bridge's default timeout for this
+      call only. Pass 0 for no timeout.
+    — Calls are serialised per bridge — safe from async tasks but not
+      parallel within a single bridge. Start multiple bridges for
+      concurrent work.
+
+  CLOSING
+
+    bridgeClose(bridge)
+    — Sends EOF on stdin; a well-written bridge loop exits naturally.
+    — If the bridge does not exit within 2 seconds, the entire process
+      group is force-killed.
+    — Safe to call multiple times.
+
+  STDERR ACCESS
+
+    lines = bridgeStderr(bridge)
+    — Returns the captured tail of the bridge's stderr as an array of
+      strings, one element per line. Essential for surfacing Python
+      tracebacks or other diagnostics that would otherwise be invisible.
+
+  NOTIFICATIONS (server-push messages)
+
+    A bridge subprocess can emit unsolicited messages at any time by
+    writing a line with no id field:
+
+      {"notif": <any JSON value>}
+
+    kLex routes these to a per-bridge notification channel. Call
+    bridgeNotifications() to get that channel and drain it in an async
+    task while a long call is in flight:
+
+      notifCh = bridgeNotifications(bridge)
+      async(fn() {
+          msg, ok = recv(notifCh)
+          while ok {
+              println(msg["done"])
+              msg, ok = recv(notifCh)
+          }
+      })
+      result, err = bridgeCall(bridge, "long_job", [arg])
+
+    The channel is closed when the bridge closes — for-in loops exit
+    cleanly. Buffer size is 256 (drop-newest on overflow).
+
+    Python notify helper (add to every bridge that uses notifications):
+      def notify(data):
+          print(json.dumps({"notif": data}), flush=True)
+
+  CONCURRENT CALLS
+
+    Multiple async tasks may call the same bridge simultaneously.
+    Writes are serialised so JSON lines do not interleave, but the
+    wait for each response is per-call (id-based routing). A Python
+    bridge using asyncio can process them in parallel; a sequential
+    bridge queues them harmlessly.
+
+  STDLIB WRAPPER
+
+    import "stdlib/bridge.lex" as br
+
+    Provides ResilientBridge — a struct-based wrapper with:
+      b.call(fnName, args)               — call with auto-restart
+      b.callTimed(fnName, args, timeout) — call with timeout override
+      b.notifications()                  — get notification channel
+      b.reset()                          — reset circuit breaker
+      b.close()                          — close bridge
+
+      br.newResilient(cmd, args, opts)   — constructor
+      br.withBridge(cmd, args, opts, fn) — one-shot with auto-close
+      br.isRetriable(err)                — true for BRIDGE_CLOSED/TAINTED
+      br.isCircuitOpen(err)              — true for CIRCUIT_OPEN
+
+    Extra opts for newResilient:
+      max_retries   — failures before circuit opens (default: 3)
+      require_deps  — calls check_deps() on startup (default: false)
+
+  ERROR CODES
+
+    BRIDGE_OPTS_INVALID  bad value in the nativeBridge opts hash
+    BRIDGE_ERROR         protocol / logic error returned by the bridge
+    BRIDGE_CLOSED        subprocess closed unexpectedly
+    BRIDGE_TIMEOUT       call exceeded the timeout (bridge becomes tainted)
+    BRIDGE_TAINTED       bridge is unusable after a prior fatal error;
+                         call bridgeClose() and start a new bridge
+    CIRCUIT_OPEN         ResilientBridge circuit breaker opened (stdlib)
+    MISSING_DEPS         required dependency check failed (stdlib)
+
+    On every recoverable error, the message includes the last lines of
+    captured stderr — so a Python traceback shows up in err.message.
+
+  BRIDGE PROTOCOL
+
+    The subprocess reads line-delimited JSON from stdin and writes to stdout:
+
+      Receive:  {"id": 1, "fn": "add", "args": [10, 20]}
+      Success:  {"id": 1, "result": 30}
+      Failure:  {"id": 1, "error": "unknown function: add"}
+
+    Any language that can read and write JSON lines can be a bridge.
+
+  TYPE MAPPING (kLex ↔ JSON)
+
+    kLex INTEGER / FLOAT  ↔  JSON number
+    kLex STRING           ↔  JSON string
+    kLex BOOLEAN          ↔  JSON boolean
+    kLex NULL             ↔  JSON null
+    kLex ARRAY            ↔  JSON array
+    kLex HASH             ↔  JSON object
+
+  EXAMPLE — Python bridge
+
+    bridge.py:
+      import json, sys
+      HANDLERS = {"add": lambda a, b: a + b, "greet": lambda n: f"Hello, {n}!"}
+      for line in sys.stdin:
+          req = json.loads(line)
+          fn  = req["fn"]
+          if fn not in HANDLERS:
+              resp = {"id": req["id"], "error": f"unknown: {fn}"}
+          else:
+              resp = {"id": req["id"], "result": HANDLERS[fn](*req["args"])}
+          print(json.dumps(resp), flush=True)
+
+    kLex caller:
+      bridge, err = nativeBridge("python3", ["bridge.py"])
+      if err != null { println(err.message)  return }
+
+      result, err = bridgeCall(bridge, "add", [10, 20])
+      if err != null { println(err.message)  return }
+      println(result)   // 30
+
+      result, err = bridgeCall(bridge, "greet", ["Karl"])
+      println(result)   // Hello, Karl!
+
+      bridgeClose(bridge)
+
+--------------------------------------------------------------------------------
+  DATABASE ACCESS
+--------------------------------------------------------------------------------
+
+  kLex has native SQL support for Microsoft SQL Server and PostgreSQL.
+  All database operations follow the standard kLex two-path error pattern:
+  (value, null) on success, (null, error) on failure.
+
+  OPENING A CONNECTION
+
+    conn, err = dbOpen(driver, connectionString)
+
+    driver values:
+      "mssql"    — Microsoft SQL Server / Azure SQL
+      "postgres" — PostgreSQL (also accepts "pgx")
+
+    MS SQL connection strings:
+      dbOpen("mssql", "server=myserver;database=Sales;user id=sa;password=Pass1!")
+      dbOpen("mssql", "sqlserver://sa:Pass1!@myserver:1433?database=Sales")
+
+    Postgres connection strings:
+      dbOpen("postgres", "host=myserver user=app password=pass dbname=mydb sslmode=disable")
+      dbOpen("postgres", "postgres://app:pass@myserver:5432/mydb")
+
+    The connection is a pool — one conn can be shared across goroutines.
+    Always check err before using the connection.
+
+  CONNECTION POOL CONFIGURATION
+
+    conn, err = dbOpenWithPool(driver, connectionString, options)
+
+    Like dbOpen but with explicit pool settings via an options hash.
+    All keys are optional — omit any to use Go's default.
+
+    options keys:
+      "maxIdle"     — max idle connections kept in pool (default 2)
+      "maxOpen"     — max open connections; 0 = unlimited (default 0)
+      "idleTimeout" — seconds before an idle connection is closed
+      "lifetime"    — max seconds a connection may be reused
+
+    Example:
+      conn, err = dbOpenWithPool("mssql", "server=myserver;...", {
+          "maxIdle": 5,
+          "maxOpen": 20,
+          "idleTimeout": 300,
+          "lifetime": 3600
+      })
+      if err != null { println(err.message)  return }
+
+  QUERYING
+
+    rows, err = dbQuery(conn, sql, ?args)
+    — Returns an array of hashes; column names are hash keys.
+    — SQL NULLs become kLex null.
+    — Loads all rows into memory — use dbQueryStream for large result sets.
+
+    row, err  = dbQueryOne(conn, sql, ?args)
+    — Returns the first row as a hash, or null if no rows matched.
+    — Use for primary-key lookups.
+
+    stream, err = dbQueryStream(conn, sql, ?args)
+    — Returns a channel that yields rows one at a time as hashes.
+    — Rows are never all in memory at once — suitable for ETL and large tables.
+    — Break out of the for-in loop to cancel the stream early.
+    — Works on both connections and transactions.
+
+    Pass parameters as an array — never interpolate values into the SQL string.
+
+    Example:
+      rows, err = dbQuery(conn, "SELECT id, name FROM users WHERE active = ?", [true])
+      if err != null { println(err.message)  return }
+      for row in rows {
+          println("{row["id"]}  {row["name"]}")
+      }
+
+      row, err = dbQueryOne(conn, "SELECT * FROM accounts WHERE id = ?", [42])
+      if err != null { return }
+      if row == null { println("not found")  return }
+      println(row["balance"])
+
+      stream, err = dbQueryStream(conn, "SELECT id, payload FROM events ORDER BY id", [])
+      if err != null { println(err.message)  return }
+      for row in stream {
+          process(row["id"], row["payload"])
+      }
+
+  EXECUTING STATEMENTS
+
+    n, err = dbExec(conn, sql, ?args)
+    — For INSERT, UPDATE, DELETE, and DDL.
+    — n is the number of rows affected (-1 if unavailable).
+
+    Example:
+      n, err = dbExec(conn, "UPDATE accounts SET balance = ? WHERE id = ?", [1500, 42])
+      if err != null { println(err.message)  return }
+      println("{n} row(s) updated")
+
+  BULK INSERT
+
+    n, err = dbBulkInsert(conn, table, columns, rows)
+    — Inserts multiple rows in a single SQL statement — one round trip per batch.
+    — Far faster than calling dbExec in a loop.
+    — columns is an array of column name strings.
+    — rows is an array of arrays; each sub-array is one row's values.
+    — Auto-batches to stay within driver parameter limits:
+        MSSQL/SQL Server — 2000 params per batch
+        PostgreSQL        — 60000 params per batch
+    — Returns total rows affected across all batches.
+    — Works on both connections and transactions.
+
+    WARNING: table and column names are interpolated directly into the SQL string.
+    Never pass user-controlled input as table or column names.
+
+    Example:
+      n, err = dbBulkInsert(conn, "users", ["id", "name", "age"], [
+          [1, "Alice", 28],
+          [2, "Bob",   35],
+          [3, "Carol", 32],
+      ])
+      if err != null { println(err.message)  return }
+      println("{n} rows inserted")
+
+  TRANSACTIONS
+
+    tx, err  = dbBegin(conn)     — start a transaction
+    _, err   = dbCommit(tx)      — commit
+    dbRollback(tx)               — roll back (safe to call even if already done)
+
+    dbQuery and dbExec accept either conn or tx as first argument.
+
+  TRANSACTION HELPER (stdlib/db.lex)
+
+    import "stdlib/db.lex" as db
+
+    result, err = db.withTx(conn, fn(tx) {
+        ...
+        return value, null      // success — withTx will commit
+    })
+
+    withTx(conn, body) runs body(tx) inside a transaction.
+    — Commits automatically when body returns (value, null).
+    — Rolls back automatically when body returns (value, err) with err != null.
+    — Rolls back automatically if dbCommit itself fails.
+    — body must return a (value, err) tuple.
+
+    Example:
+      result, err = db.withTx(conn, fn(tx) {
+          _, err = dbExec(tx, "INSERT INTO audit (user_id) VALUES (?)", [42])
+          if err != null { return null, err }
+          _, err = dbExec(tx, "UPDATE accounts SET balance = balance - ? WHERE id = ?", [100, 42])
+          if err != null { return null, err }
+          return "transfer complete", null
+      })
+      if err != null { println("Transaction failed: {err.message}") }
+
+    Example:
+      tx, err = dbBegin(conn)
+      if err != null { return }
+
+      _, err = dbExec(tx, "INSERT INTO audit_log (user_id, action) VALUES (?, ?)", [42, "transfer"])
+      if err != null { dbRollback(tx)  return }
+
+      _, err = dbExec(tx, "UPDATE accounts SET balance = balance - ? WHERE id = ?", [500, 42])
+      if err != null { dbRollback(tx)  return }
+
+      _, err = dbExec(tx, "UPDATE accounts SET balance = balance + ? WHERE id = ?", [500, 99])
+      if err != null { dbRollback(tx)  return }
+
+      _, err = dbCommit(tx)
+      if err != null { println("commit failed:", err.message) }
+
+  QUERY TIMEOUTS
+
+    dbSetTimeout(conn, ms)
+    — Sets a per-operation timeout in milliseconds on a connection or transaction.
+    — All subsequent dbQuery, dbQueryOne, dbExec, dbBulkInsert calls will fail
+      with DB_TIMEOUT_ERROR if they exceed the limit.
+    — Pass 0 to remove the timeout.
+    — dbBegin propagates the conn's timeout to the new transaction automatically.
+
+    Example:
+      dbSetTimeout(conn, 5000)   // 5 second limit per query
+      rows, err = dbQuery(conn, "SELECT * FROM large_table", [])
+      if err != null { println(err.message)  return }   // DB_TIMEOUT_ERROR if slow
+      dbSetTimeout(conn, 0)      // remove timeout
+
+  RETURNING ROWS FROM DML
+
+    rows, err = dbExecReturning(conn, sql, ?args)
+    — For INSERT / UPDATE / DELETE statements that return rows via RETURNING (PostgreSQL)
+      or OUTPUT (SQL Server).
+    — Returns an array of hashes, same format as dbQuery.
+    — Works on both connections and transactions.
+
+    Examples:
+      // PostgreSQL
+      rows, err = dbExecReturning(conn, "INSERT INTO users (name) VALUES (?) RETURNING id, name", ["Alice"])
+      if err != null { println(err.message)  return }
+      println(rows[0]["id"])
+
+      // SQL Server
+      rows, err = dbExecReturning(conn, "INSERT INTO users (name) OUTPUT INSERTED.id, INSERTED.name VALUES (?)", ["Alice"])
+      if err != null { println(err.message)  return }
+      println(rows[0]["id"])
+
+  CONNECTION HEALTH
+
+    _, err = dbPing(conn)    — verify the connection is still alive
+
+  CLOSING
+
+    dbClose(conn)            — return the pool to the OS when done
+
+  PARAMETERIZED QUERIES
+
+    Always use ? placeholders and pass values as an array. Never build SQL
+    strings by concatenating user input — that is an injection vulnerability.
+
+    Safe:    dbQuery(conn, "SELECT * FROM users WHERE name = ?", [name])
+    Unsafe:  dbQuery(conn, "SELECT * FROM users WHERE name = '" + name + "'")
+
+  PARALLEL QUERIES
+
+    Because one conn is a pool, you can run parallel queries safely:
+
+      t1 = async(fn() { return dbQuery(conn, "SELECT * FROM orders") })
+      t2 = async(fn() { return dbQuery(conn, "SELECT * FROM products") })
+      orders, _ = await(t1)
+      products, _ = await(t2)
+
+
+--------------------------------------------------------------------------------
+  ERROR PROPAGATION — THE ? OPERATOR
+--------------------------------------------------------------------------------
+
+  kLex functions that can fail return a 2-element tuple: (value, err).
+  The postfix ? operator unwraps that tuple in one step:
+
+    value = someCall()?
+
+  Semantics:
+    — Evaluates someCall(), which must return a (value, err) tuple.
+    — If err != null: the error is returned immediately from the
+      enclosing function, propagating it up the call stack.
+    — If err == null: the expression evaluates to value.
+    — Applying ? to a non-tuple, or a tuple with more/fewer than 2
+      elements, is a TypeError.
+
+  Propagation:
+    The error value itself travels up the call stack intact — .code,
+    .message, and .is() are all preserved for the eventual caller that
+    handles it. Nothing is silently discarded.
+
+  Using ? outside a function body is a runtime error ("return outside
+  function"), just like a bare return statement at the top level.
+
+  EXAMPLE — before
+
+    fn processFile(path) {
+        content, err = readFile(path)
+        if err != null { return err }
+        data, err = parseJSON(content)
+        if err != null { return err }
+        result, err = transform(data)
+        if err != null { return err }
+        return result
+    }
+
+  EXAMPLE — after
+
+    fn processFile(path) {
+        content = readFile(path)?
+        data    = parseJSON(content)?
+        return transform(data)?
+    }
+
+  Chaining is valid — each ? unwraps one layer:
+
+    fn load(path) {
+        return parseJSON(readFile(path)?)?
+    }
+
+  ? composes with dot access and calls on the unwrapped value:
+
+    name = getConfig(path)?.name    // unwrap tuple, then access .name field
+
+  COMPARISON WITH try/catch
+    ? does not hide control flow. Every call that can fail has a visible ?
+    next to it — you always know where propagation can happen. This is more
+    explicit than try/catch where any line inside a block can throw silently.
+
+
+--------------------------------------------------------------------------------
+  BITWISE OPERATIONS
+--------------------------------------------------------------------------------
+
+  kLex provides bitwise operations as explicit named builtins rather than
+  operator symbols. This avoids ambiguity with the logical operators (&&, ||)
+  and the pipeline operator (|>) and keeps intent unambiguous at the call site.
+
+  All bitwise functions require integer operands. Passing a float or any other
+  type is a TypeError.
+
+  INTEGER LITERALS WITH BASE PREFIXES
+
+    Hex, binary, and octal integer literals are supported:
+
+      let mask  = 0xFF        // 255  — hex
+      let flags = 0b10110001  // 177  — binary
+      let mode  = 0o755       // 493  — octal
+
+    The prefix is case-insensitive: 0xFF and 0XFF are equivalent.
+    These are just integer literals — the value is a plain integer at runtime.
+
+  BITWISE FUNCTIONS
+
+    bitAnd(a, b)        → integer — bitwise AND
+    bitOr(a, b)         → integer — bitwise OR
+    bitXor(a, b)        → integer — bitwise XOR
+    bitNot(x)           → integer — bitwise NOT (ones' complement)
+    bitShiftLeft(x, n)  → integer — left shift x by n bits  (x * 2^n)
+    bitShiftRight(x, n) → integer — arithmetic right shift x by n bits
+
+    n in shift functions must be a non-negative integer.
+
+  EXAMPLES
+
+    // Check if a file is executable (any execute bit set)
+    let mode = 0o755
+    if bitAnd(mode, 0o111) != 0 {
+        println("executable")
+    }
+
+    // Mask off the low byte
+    let value = 0xDEAD
+    let low   = bitAnd(value, 0xFF)    // 0xAD → 173
+
+    // Set a flag bit
+    const READ  = 0b001
+    const WRITE = 0b010
+    const EXEC  = 0b100
+    let perms = bitOr(READ, WRITE)     // 0b011 → 3
+
+    // Toggle a bit with XOR
+    let toggled = bitXor(perms, WRITE) // clears WRITE → 0b001
+
+    // Extract the high nibble of a byte
+    let byte_val = 0xAB
+    let hi = bitShiftRight(byte_val, 4)  // 0xA → 10
+
+    // Pack two 4-bit values into one byte
+    let packed = bitOr(bitShiftLeft(hi, 4), lo)
+
+    // Ones' complement
+    let inv = bitNot(0)   // -1 (all bits set in two's complement)
+
 
 ================================================================================
   End of guide

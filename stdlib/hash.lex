@@ -3,8 +3,11 @@
 // =====================================
 //
 // Combines:
-// - map utilities (merge, pick, omit, invert, values)
+// - map utilities (merge, pick, omit, invert)
 // - hashing functions (FNV-1a: hash, hashBytes, combineHash)
+//
+// For values(h) use the builtin directly — no wrapper here. The builtin
+// is O(n) where this stdlib wrapper used to be O(n²) via push() in a loop.
 //
 // Usage:
 //   import "stdlib/hash.lex" as h
@@ -12,6 +15,7 @@
 //   h.merge(map1, map2)
 //   h.hash("hello")
 //   h.combineHash(h1, h2)
+//   values(myHash)   // builtin — no h. prefix
 //
 // =====================================
 
@@ -21,15 +25,6 @@ import "stdlib/encoding.lex" as enc
 // =====================================
 // MAP UTILITIES
 // =====================================
-
-// values returns all values (order not guaranteed)
-fn values(h) {
-    result = []
-    for k in keys(h) {
-        result = push(result, h[k])
-    }
-    return result
-}
 
 // merge two hashes (b overwrites a)
 fn merge(a, b) {

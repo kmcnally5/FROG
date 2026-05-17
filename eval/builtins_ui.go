@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !js
 
 package eval
 
@@ -452,6 +452,16 @@ func init() {
 		gfx.uiNextID++
 
 		fx, fy, fw, fh := float32(x.Value), float32(y.Value), float32(w.Value), float32(h.Value)
+
+		// Auto-expand button width so the label always fits with minimum padding.
+		// This makes button sizing font-agnostic: callers don't need to know which
+		// font is active or how wide each glyph is — the button just grows to fit.
+		const btnLabelPad = float32(12) // minimum horizontal padding each side
+		minW := uiTextWidth(label.Value, textScale) + btnLabelPad*2
+		if fw < minW {
+			fw = minW
+		}
+
 		isHovered := gfx.uiHoveredID == id
 		isActive := gfx.uiActiveID == id && gfx.mouseDown
 		isClicked := false
@@ -1426,6 +1436,17 @@ func init() {
 		isOpen := uiDropdownOpen == id
 		isHovered := gfx.uiHoveredID == id
 
+		// Compute popup position once — upward-flip when the menu would overflow
+		// the window bottom. Shared by the outside-click guard and item handler.
+		popupMenuH := float32(numItems) * itemH
+		popupMenuY := fy + headerH
+		if popupMenuY+popupMenuH > float32(gfx.winH) {
+			popupMenuY = fy - popupMenuH
+			if popupMenuY < 0 {
+				popupMenuY = 0
+			}
+		}
+
 		if isHovered && gfx.mouseJustClicked {
 			if isOpen {
 				uiDropdownOpen = ""
@@ -1435,11 +1456,12 @@ func init() {
 				isOpen = true
 			}
 		} else if isOpen && gfx.mouseJustClicked {
-			menuH := float32(numItems) * itemH
 			mx, my := gfx.mouseX, gfx.mouseY
-			inside := mx >= float64(fx) && mx <= float64(fx+fw) &&
-				my >= float64(fy) && my <= float64(fy+headerH+menuH)
-			if !inside {
+			inHeader := mx >= float64(fx) && mx <= float64(fx+fw) &&
+				my >= float64(fy) && my <= float64(fy+headerH)
+			inMenu := mx >= float64(fx) && mx <= float64(fx+fw) &&
+				my >= float64(popupMenuY) && my <= float64(popupMenuY+popupMenuH)
+			if !inHeader && !inMenu {
 				uiDropdownOpen = ""
 				isOpen = false
 			}
@@ -1480,12 +1502,11 @@ func init() {
 		if isOpen {
 			// Handle item clicks inline (needed for correct return value this frame),
 			// then defer all drawing to uiEnd() so the popup renders on top.
-			const itemH2 = itemH
-			menuY := fy + headerH
+			// popupMenuY / popupMenuH already account for the upward-flip.
 			for i := 0; i < numItems; i++ {
-				itemY := menuY + float32(i)*itemH2
+				itemY := popupMenuY + float32(i)*itemH
 				isItemHovered := gfx.mouseX >= float64(fx) && gfx.mouseX <= float64(fx+fw) &&
-					gfx.mouseY >= float64(itemY) && gfx.mouseY <= float64(itemY+itemH2)
+					gfx.mouseY >= float64(itemY) && gfx.mouseY <= float64(itemY+itemH)
 				if isItemHovered && gfx.mouseJustClicked {
 					selectedIdx = i
 					gfx.uiListSelected[id] = i
@@ -1506,7 +1527,7 @@ func init() {
 					active:      true,
 					id:          id,
 					fx:          fx,
-					fy:          fy + headerH,
+					fy:          popupMenuY,
 					fw:          fw,
 					items:       items,
 					selectedIdx: selectedIdx,
@@ -2813,6 +2834,18 @@ func init() {
 		}
 		gfx.fillColor = savedFillTV
 
+		if maxScroll > 0 {
+			sbW := float32(8.0)
+			sbX := fx + fw - sbW - 2
+			thumbH := fh * float32(visibleRows) / float32(visibleCount)
+			if thumbH < 12 {
+				thumbH = 12
+			}
+			thumbY := fy + (fh-thumbH)*float32(scrollOff)/float32(maxScroll)
+			drawRoundedRectSDF(sbX, fy, sbW, fh, sbW*0.5, gfx.uiTheme.track, false, 0)
+			drawRoundedRectSDF(sbX, thumbY, sbW, thumbH, sbW*0.5, gfx.uiTheme.widgetBgHover, false, 0)
+		}
+
 		uiRegisterElement(id, fx, fy, fw, fh)
 		return &Array{Elements: []Object{
 			&Integer{Value: selectedIdx},
@@ -3310,6 +3343,24 @@ func uiCharH(scale float32) float32 {
 	return float32(gfx.fontCellH) * scale
 }
 
+// uiTextWidth returns the rendered pixel width of text at scale using whichever
+// font is currently active. This must match drawText / drawTextProp exactly so
+// that width calculations and rendering stay in sync.
+func uiTextWidth(text string, scale float32) float32 {
+	if gfx.uiActiveFont != nil {
+		var w float32
+		for _, ch := range text {
+			if g, ok := gfx.uiActiveFont.glyphs[ch]; ok {
+				w += g.advance
+			} else {
+				w += gfx.uiActiveFont.fallback.advance
+			}
+		}
+		return w * scale
+	}
+	return float32(len([]rune(text))*gfx.fontCellW) * scale
+}
+
 // drawText renders a string using the SDF font atlas.
 // x, y is the top-left origin of the first character when centered=false.
 // When centered=true, x, y is the centre point and text is centred both axes.
@@ -3346,6 +3397,7 @@ func drawText(text string, x, y int, centered bool, scale float32) {
 	gl.BindVertexArray(gfx.texVAO)
 	gl.BindBuffer(gl.ARRAY_BUFFER, gfx.texVBO)
 
+	verts := make([]float32, 0, len([]rune(text))*24)
 	pos := 0 // rune position for X — not byte offset
 	for _, r := range text {
 		drawR := r
@@ -3360,18 +3412,19 @@ func drawText(text string, x, y int, centered bool, scale float32) {
 		cx := fx + float32(pos)*charW
 		cy := fy
 
-		verts := []float32{
+		verts = append(verts,
 			cx, cy, tx, 0,
-			cx + charW, cy, tx + tw, 0,
-			cx + charW, cy + charH, tx + tw, 1,
+			cx+charW, cy, tx+tw, 0,
+			cx+charW, cy+charH, tx+tw, 1,
 			cx, cy, tx, 0,
-			cx + charW, cy + charH, tx + tw, 1,
-			cx, cy + charH, tx, 1,
-		}
-
-		gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.DYNAMIC_DRAW)
-		gl.DrawArrays(gl.TRIANGLES, 0, 6)
+			cx+charW, cy+charH, tx+tw, 1,
+			cx, cy+charH, tx, 1,
+		)
 		pos++
+	}
+	if len(verts) > 0 {
+		gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.DYNAMIC_DRAW)
+		gl.DrawArrays(gl.TRIANGLES, 0, int32(len(verts)/4))
 	}
 
 	gl.BindVertexArray(0)
@@ -3430,6 +3483,7 @@ func drawTextProp(text string, x, y int, centered bool, scale float32) {
 	gl.BindVertexArray(gfx.texVAO)
 	gl.BindBuffer(gl.ARRAY_BUFFER, gfx.texVBO)
 
+	verts := make([]float32, 0, len([]rune(text))*24)
 	penX := fx
 	for _, ch := range text {
 		g, ok := fnt.glyphs[ch]
@@ -3437,17 +3491,19 @@ func drawTextProp(text string, x, y int, centered bool, scale float32) {
 			g = fnt.fallback
 		}
 		qw := g.advance * scale
-		verts := []float32{
-			penX, fy, g.u0, 0,
-			penX + qw, fy, g.u1, 0,
-			penX + qw, fy + lineH, g.u1, 1,
-			penX, fy, g.u0, 0,
-			penX + qw, fy + lineH, g.u1, 1,
-			penX, fy + lineH, g.u0, 1,
-		}
-		gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.DYNAMIC_DRAW)
-		gl.DrawArrays(gl.TRIANGLES, 0, 6)
+		verts = append(verts,
+			penX, fy,          g.u0, 0,
+			penX+qw, fy,       g.u1, 0,
+			penX+qw, fy+lineH, g.u1, 1,
+			penX, fy,          g.u0, 0,
+			penX+qw, fy+lineH, g.u1, 1,
+			penX, fy+lineH,    g.u0, 1,
+		)
 		penX += qw
+	}
+	if len(verts) > 0 {
+		gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.DYNAMIC_DRAW)
+		gl.DrawArrays(gl.TRIANGLES, 0, int32(len(verts)/4))
 	}
 
 	gl.BindVertexArray(0)

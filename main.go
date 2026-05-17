@@ -28,8 +28,11 @@ import (
 	"klex/parser"
 	"klex/repl"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"syscall"
 )
 
 func init() {
@@ -37,10 +40,72 @@ func init() {
 	runtime.LockOSThread()
 }
 
-const Version = "v0.3.34"
+const Version = "v0.3.35"
+
+// printUsage writes the kLex command-line help to stderr. Registered as
+// flag.Usage so it is also invoked when an unknown flag is encountered.
+func printUsage() {
+	fmt.Fprintf(os.Stderr, `kLex (FROG) %s — a pure, strict-typed scripting language with
+built-in concurrency, graphics, UI widgets, and native bridges.
+
+USAGE
+  klex [options] <script.lex> [script-args...]
+  klex                          start the interactive REPL
+  klex --version                print version and exit
+
+OPTIONS
+  -h, --help            show this help and exit
+  -v, --version         print version and exit
+  --cpuprofile <file>   write a CPU profile to <file> (for go tool pprof)
+
+ENVIRONMENT
+  KLEX_PATH    Directory containing stdlib/ for import resolution.
+               Optional — kLex also finds stdlib next to the binary and
+               next to the script that is doing the importing.
+  MAXPROCS     Override GOMAXPROCS (default 12).
+
+IMPORT PATH RESOLUTION
+  When a script does:  import "stdlib/foo.lex" as foo
+  kLex tries, in order, the first existing file:
+    1. ./stdlib/foo.lex                  (current working directory)
+    2. <script-dir>/stdlib/foo.lex       (next to the importing .lex file)
+    3. $KLEX_PATH/stdlib/foo.lex         (user override)
+    4. <klex-bin-dir>/stdlib/foo.lex     (drop-in install: klex + stdlib together)
+    5. <klex-bin-parent>/stdlib/foo.lex  (bin/klex + share/klex/stdlib style)
+  On failure the error lists every path tried.
+
+EXAMPLES
+  klex test.lex                   run a script in the current directory
+  klex tests/unit/jsonTest.lex    run any path
+  klex /full/path/to/script.lex   run from anywhere — paths resolve
+                                  relative to the script and the binary
+  klex --cpuprofile=cpu.prof big.lex
+                                  profile a heavy run
+  klex                            start the interactive REPL
+
+`, Version)
+}
 
 func main() {
 	eval.KLexVersion = Version
+
+	// Bridge subprocess cleanup. Two mechanisms together cover every exit path:
+	//
+	//   1. defer — handles the normal return from main() (REPL quit, script
+	//      completion). os.Exit() bypasses defer, so this alone is insufficient.
+	//   2. signal handler — handles Ctrl+C, kill, terminal close. Without this,
+	//      a kLex hit with SIGINT during a long bridge call would leave the
+	//      Python/external process orphaned and consuming resources.
+	defer eval.CleanupAllBridges()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		eval.CleanupAllBridges()
+		// Conventional exit code for SIGINT: 130 = 128 + SIGINT(2).
+		os.Exit(130)
+	}()
 
 	// Optimize for parallelism: empirically tuned to 12 based on GOMAXPROCS benchmarking.
 	// This accounts for hyperthreading and scheduler oversubscription benefits.
@@ -54,8 +119,23 @@ func main() {
 		}
 	}
 
+	var showHelp, showVersion bool
+	flag.BoolVar(&showHelp, "help", false, "show this help and exit")
+	flag.BoolVar(&showHelp, "h", false, "show this help and exit (short)")
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
+	flag.BoolVar(&showVersion, "v", false, "print version and exit (short)")
 	cpuprofile := flag.String("cpuprofile", "", "write CPU profile to file")
+	flag.Usage = printUsage
 	flag.Parse()
+
+	if showHelp {
+		printUsage()
+		return
+	}
+	if showVersion {
+		fmt.Println("kLex (FROG) " + Version)
+		return
+	}
 
 	// Start CPU profiling if requested.
 	if *cpuprofile != "" {
@@ -78,12 +158,6 @@ func main() {
 	// No arguments — launch the interactive REPL.
 	if len(args) == 0 {
 		repl.Start()
-		return
-	}
-
-	// --version / -v — print version and exit.
-	if args[0] == "--version" || args[0] == "-v" {
-		fmt.Println("kLex (FROG) " + Version)
 		return
 	}
 
@@ -118,6 +192,15 @@ func main() {
 	// NewEnv() creates the top-level (global) variable scope.
 	env := eval.NewEnv()
 
+	// Record the script's directory so `import` resolves paths next to the
+	// entry file, not just CWD. Use the absolute path so the resolver isn't
+	// confused by `..` or other CWD-relative quirks in the supplied path.
+	if abs, absErr := filepath.Abs(path); absErr == nil {
+		env.SetScriptDir(filepath.Dir(abs))
+	} else {
+		env.SetScriptDir(filepath.Dir(path))
+	}
+
 	// Set the __args__ variable with command-line arguments passed to the script.
 	argsArray := make([]eval.Object, len(scriptArgs))
 	for i, arg := range scriptArgs {
@@ -127,6 +210,9 @@ func main() {
 
 	result := eval.Eval(program, env)
 	if eval.IsError(result) {
+		// Manually drain bridges before exiting — os.Exit() bypasses the
+		// deferred CleanupAllBridges at the top of main().
+		eval.CleanupAllBridges()
 		os.Exit(1)
 	}
 }

@@ -17,13 +17,18 @@ package eval
 // and handle it in eval.go.
 
 import (
+	"bufio"
+	"database/sql"
 	"fmt"
+	"io"
 	"klex/ast"
 	"net"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // ObjectType is a string tag naming the runtime type of a value.
@@ -58,6 +63,9 @@ const (
 	CONCURRENT_HASH_OBJ    ObjectType = "CONCURRENT_HASH"
 	IMAGE_OBJ              ObjectType = "IMAGE"
 	FONT_OBJ               ObjectType = "FONT"
+	DB_CONN_OBJ            ObjectType = "DB_CONN"
+	DB_TX_OBJ              ObjectType = "DB_TX"
+	BRIDGE_OBJ             ObjectType = "BRIDGE"
 )
 
 // Object is the interface every runtime value implements.
@@ -122,6 +130,57 @@ var (
 	FALSE = &Boolean{Value: false}
 	NULL  = &Null{}
 )
+
+// boolObj returns the singleton TRUE or FALSE for a Go bool, avoiding the
+// per-comparison allocation that &Boolean{Value: b} would cause. Use this
+// everywhere a boolean result needs to enter the kLex object graph — it is
+// the difference between O(1) allocations and O(comparisons) allocations
+// in any non-trivial program.
+func boolObj(b bool) Object {
+	if b {
+		return TRUE
+	}
+	return FALSE
+}
+
+// Small-integer pool — kLex programs allocate Integers constantly: loop
+// counters, array indices, intermediate arithmetic results. Pooling the
+// most-common range eliminates the bulk of those allocations.
+//
+// The range -128..255 catches the overwhelming majority of cases: small
+// literals, single-byte values, array indices in small arrays, and the
+// early iterations of any loop. Each Integer is ~16 bytes; the whole pool
+// is ~6KB of permanent memory.
+//
+// SAFETY: pooled Integers are SHARED — never mutate Integer.Value. kLex
+// arithmetic always produces new Integers (we never overwrite an existing
+// one), so this is enforced by convention, not by the type system. If you
+// ever find yourself wanting to mutate Integer.Value, you're holding it
+// wrong: allocate a fresh one instead.
+const (
+	smallIntMin = -128
+	smallIntMax = 255
+)
+
+var smallInts [smallIntMax - smallIntMin + 1]*Integer
+
+func init() {
+	for i := range smallInts {
+		smallInts[i] = &Integer{Value: smallIntMin + i}
+	}
+}
+
+// intObj returns the pooled Integer for n if it falls in the small-int range,
+// or allocates a fresh Integer otherwise. Drop-in replacement for
+// &Integer{Value: n} — pointer identity differs (pooled values are reused)
+// but kLex doesn't expose pointer identity for primitive types, so this is
+// invisible to user code.
+func intObj(n int) *Integer {
+	if n >= smallIntMin && n <= smallIntMax {
+		return smallInts[n-smallIntMin]
+	}
+	return &Integer{Value: n}
+}
 
 // -------------------- ERROR --------------------
 
@@ -241,9 +300,15 @@ func (a *AtomicFloatArray) Inspect() string {
 // using sync.Map.CompareAndSwap.
 //
 // Cnt is an atomic counter so len(ch) is O(1) instead of O(n) iterating sync.Map.
+// IMPORTANT: Cnt is incremented after a successful LoadOrStore / decremented
+// after a successful Delete, but the two operations are not atomic together.
+// Under concurrent mutation, len(ch) can briefly diverge from the actual map
+// size by the number of in-flight Store/Delete calls. The map itself is always
+// consistent; only the reported count is approximate during contention. For
+// exact size after a known quiescent point, len() is correct.
 type ConcurrentHash struct {
 	M   sync.Map // HashKey → Object
-	Cnt int64    // atomic count of live entries
+	Cnt int64    // atomic count of live entries (approximate under concurrent mutation)
 }
 
 func (c *ConcurrentHash) Type() ObjectType { return CONCURRENT_HASH_OBJ }
@@ -296,12 +361,13 @@ func (c *ContinueSignal) Inspect() string  { return "continue" }
 // variable (fn foo(x) { } → Name = "foo"). This enables recursion: foo can
 // refer to itself by name because foo is in the outer env when the body runs.
 type Function struct {
-	Name     string // empty for anonymous functions
-	Params   []string
-	Defaults []ast.Node   // parallel to Params; nil entry means the param is required
-	Variadic bool         // true if the last param collects remaining args as an array
-	Body     []ast.Node
-	Env      *Environment // the closure environment captured at definition time
+	Name        string // empty for anonymous functions
+	Params      []string
+	Defaults    []ast.Node // parallel to Params; nil entry means the param is required
+	Variadic    bool       // true if the last param collects remaining args as an array
+	NumRequired int        // count of leading required params; set once at construction
+	Body        []ast.Node
+	Env         *Environment // the closure environment captured at definition time
 }
 
 func (f *Function) Type() ObjectType { return FUNCTION_OBJ }
@@ -489,6 +555,128 @@ func (n *NetConn) Inspect() string {
 	}
 	return "conn(" + n.Conn.RemoteAddr().String() + ")"
 }
+
+// -------------------- DB_CONN / DB_TX --------------------
+
+// DBConn wraps a *sql.DB connection pool for use in kLex programs.
+// Produced by dbOpen; consumed by dbQuery, dbExec, dbBegin, dbClose, dbPing.
+// The pool is safe for concurrent use across goroutines.
+type DBConn struct {
+	DB      *sql.DB
+	Driver  string        // user-facing driver name ("mssql", "postgres")
+	Timeout time.Duration // 0 = no timeout (context.Background())
+}
+
+func (d *DBConn) Type() ObjectType { return DB_CONN_OBJ }
+func (d *DBConn) Inspect() string  { return "dbconn(" + d.Driver + ")" }
+
+// DBTx wraps a *sql.Tx database transaction.
+// Produced by dbBegin; consumed by dbQuery, dbExec, dbCommit, dbRollback.
+type DBTx struct {
+	Tx      *sql.Tx
+	Driver  string
+	Timeout time.Duration // inherited from DBConn; overridable via dbSetTimeout
+}
+
+func (d *DBTx) Type() ObjectType { return DB_TX_OBJ }
+func (d *DBTx) Inspect() string  { return "dbtx(" + d.Driver + ")" }
+
+// -------------------- BRIDGE --------------------
+
+// BridgeRingBuffer is a fixed-size byte buffer that drops oldest bytes
+// when capacity is exceeded. Used to capture the tail of a bridge
+// subprocess's stderr output so it can be surfaced in error messages
+// or via bridgeStderr().
+type BridgeRingBuffer struct {
+	mu    sync.Mutex
+	buf   []byte
+	limit int
+}
+
+func NewBridgeRingBuffer(limit int) *BridgeRingBuffer {
+	return &BridgeRingBuffer{limit: limit}
+}
+
+func (r *BridgeRingBuffer) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.buf = append(r.buf, p...)
+	if len(r.buf) > r.limit {
+		r.buf = r.buf[len(r.buf)-r.limit:]
+	}
+	return len(p), nil
+}
+
+func (r *BridgeRingBuffer) Snapshot() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]byte, len(r.buf))
+	copy(out, r.buf)
+	return out
+}
+
+// Bridge is a persistent subprocess connection for cross-language FFI.
+// kLex communicates with the subprocess via line-delimited JSON over
+// stdin/stdout. Any language that can read/write JSON lines can be a bridge.
+//
+// Phase 2 architecture: a single reader goroutine owns stdout exclusively.
+// It routes response lines to per-call channels (keyed by id) and
+// notification lines to notifCh. This enables:
+//   - Concurrent calls: no mutex held during the wait, only during the write.
+//   - Server-push notifications: bridge can emit {"notif": ...} at any time.
+type Bridge struct {
+	Cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	stdout    *bufio.Scanner
+	timeout   time.Duration     // 0 = no timeout
+	stderrBuf *BridgeRingBuffer // tail of stderr for error reporting
+	stderrLog string            // path to stderr log file (if set)
+
+	// mu protects all mutable lifecycle state: tainted, closed, pending, nextID.
+	// It is held only briefly (never during the long wait for a response).
+	mu      sync.Mutex
+	nextID  int
+	pending map[int]chan []byte // per-call response channels; keyed by request id
+	tainted   bool
+	taintMsg  string
+	taintCode string // error code delivered to the FIRST waiting call (BRIDGE_CLOSED, BRIDGE_TIMEOUT, etc.)
+	closed    bool
+
+	// writeMu serialises writes to stdin so concurrent calls don't interleave
+	// their JSON on the wire. Held only during the Write() call (microseconds).
+	writeMu sync.Mutex
+
+	// notifCh is the kLex channel to which the reader goroutine delivers
+	// unsolicited {"notif": ...} messages. Always created in nativeBridge;
+	// closed by the reader when stdout closes.
+	notifCh    *Channel
+	notifClose sync.Once
+
+	// schemas is the per-handler signature map populated during the
+	// __schema__ handshake in nativeBridge. nil when the bridge doesn't
+	// expose __schema__ (older-style bridges still work).
+	schemas map[string]*FnSchema
+}
+
+func (b *Bridge) Type() ObjectType { return BRIDGE_OBJ }
+func (b *Bridge) Inspect() string {
+	if len(b.Cmd.Args) > 0 {
+		return "bridge(" + strings.Join(b.Cmd.Args, " ") + ")"
+	}
+	return "bridge"
+}
+
+// Accessors used by builtins_bridge.go (same package, so unexported fields are
+// visible directly — these exist for readability and test use).
+func (b *Bridge) Stdin() io.WriteCloser    { return b.stdin }
+func (b *Bridge) Stdout() *bufio.Scanner   { return b.stdout }
+func (b *Bridge) Timeout() time.Duration   { return b.timeout }
+func (b *Bridge) StderrBuf() *BridgeRingBuffer { return b.stderrBuf }
+func (b *Bridge) StderrLog() string        { return b.stderrLog }
+func (b *Bridge) IsClosed() bool           { return b.closed }
+func (b *Bridge) IsTainted() bool          { return b.tainted }
+func (b *Bridge) TaintMsg() string         { return b.taintMsg }
+func (b *Bridge) NotifCh() *Channel        { return b.notifCh }
 
 // -------------------- ENUM --------------------
 

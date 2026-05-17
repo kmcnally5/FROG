@@ -110,18 +110,19 @@ fn chmod(path, mode) {
 fn readDir(path) {
     raw, err = _fsReadDir(path)
     if err != null { return null, err }
-    out = []
-    i = 0
-    while i < len(raw) {
+    n   = len(raw)
+    out = makeArray(n, null)
+    i   = 0
+    while i < n {
         info = raw[i]
-        out = push(out, FileInfo {
+        out[i] = FileInfo {
             name:      info["name"],
             size:      info["size"],
             isDir:     info["isDir"],
             isSymlink: info["isSymlink"],
             modTime:   info["modTime"],
             mode:      info["mode"]
-        })
+        }
         i = i + 1
     }
     return out, null

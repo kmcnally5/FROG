@@ -17,9 +17,10 @@
 //   println(results[0])   // "slow"
 //   println(results[1])   // "fast"
 fn await_all(tasks) {
-    results = []
-    for t in tasks {
-        results = push(results, await(t))
+    n = len(tasks)
+    results = makeArray(n)
+    for i, t in tasks {
+        results[i] = await(t)
     }
     return results
 }

@@ -172,6 +172,12 @@ func init() {
 // valuesEqual compares two kLex values by structural equality for primitive
 // types. Used by atomicHashCAS to determine if the current value matches the
 // expected "old" value the caller is trying to swap from.
+//
+// KEEP IN SYNC WITH evalEquals (eval.go). Both functions must agree on what
+// "equal" means for the primitive types — if one ever gains a numeric
+// coercion rule (e.g. Int == Float with same value) or any other comparison
+// extension, the other needs the matching change or CAS semantics will
+// silently diverge from the == operator users see in their kLex code.
 func valuesEqual(a, b Object) bool {
 	if a == b {
 		return true // same pointer or both nil

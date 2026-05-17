@@ -50,6 +50,57 @@ var stdinReader = bufio.NewReader(os.Stdin)
 // It is package-level because import evaluation recurses through Eval itself.
 var importingFiles = map[string]bool{}
 
+// resolveImportPath finds the file backing an `import "path"` statement.
+// It tries five locations in order; the first existing file wins. Returns
+// the resolved path, the list of paths it tried (for error messages), and
+// ok=true on success.
+//
+//	1. path as-is                  — CWD-relative
+//	2. <script-dir>/path           — next to the importing file
+//	3. $KLEX_PATH/path             — user override
+//	4. <klex-exe-dir>/path         — drop-in install
+//	5. <klex-exe-parent>/path      — bin/klex + share style install
+//
+// Duplicates in the list are dropped (e.g. when CWD happens to equal the
+// script directory) so the error message stays clean.
+func resolveImportPath(path string, env *Environment) (resolved string, tried []string, ok bool) {
+	seen := map[string]bool{}
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		tried = append(tried, p)
+	}
+
+	// 1. As given (CWD-relative).
+	add(path)
+
+	// 2. Next to the importing script.
+	if scriptDir := env.ScriptDir(); scriptDir != "" {
+		add(filepath.Join(scriptDir, path))
+	}
+
+	// 3. $KLEX_PATH.
+	if kp := os.Getenv("KLEX_PATH"); kp != "" {
+		add(filepath.Join(kp, path))
+	}
+
+	// 4 & 5. Next to the kLex binary and one level up.
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		add(filepath.Join(exeDir, path))
+		add(filepath.Join(filepath.Dir(exeDir), path))
+	}
+
+	for _, candidate := range tried {
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate, tried, true
+		}
+	}
+	return "", tried, false
+}
+
 // EnableAsyncYield controls whether loop statements (while, for-in) yield to Go's
 // scheduler periodically. When true, runtime.Gosched() is called to allow
 // goroutines to be preempted and distributed across CPU cores for better
@@ -119,19 +170,19 @@ var Builtins = map[string]*Builtin{
 		}
 		switch arg := args[0].(type) {
 		case *Array:
-			return &Integer{Value: len(arg.Elements)}
+			return intObj(len(arg.Elements))
 		case *String:
 			// Count Unicode code points, not bytes, so len("café") == 4.
 			// Use utf8.RuneCountInString to avoid allocating a rune array.
-			return &Integer{Value: utf8.RuneCountInString(arg.Value)}
+			return intObj(utf8.RuneCountInString(arg.Value))
 		case *Hash:
-			return &Integer{Value: len(arg.Pairs)}
+			return intObj(len(arg.Pairs))
 		case *AtomicIntArray:
-			return &Integer{Value: len(arg.Data)}
+			return intObj(len(arg.Data))
 		case *AtomicFloatArray:
-			return &Integer{Value: len(arg.Bits)}
+			return intObj(len(arg.Bits))
 		case *ConcurrentHash:
-			return &Integer{Value: int(atomic.LoadInt64(&arg.Cnt))}
+			return intObj(int(atomic.LoadInt64(&arg.Cnt)))
 		default:
 			return typeError(fmt.Sprintf("len not defined for %s", args[0].Type()), ast.Pos{})
 		}
@@ -509,7 +560,7 @@ var Builtins = map[string]*Builtin{
 		}
 		elements := make([]Object, 0, count)
 		for i := start; (step > 0 && i < stop) || (step < 0 && i > stop); i += step {
-			elements = append(elements, &Integer{Value: i})
+			elements = append(elements, intObj(i))
 		}
 		return &Array{Elements: elements}
 	}},
@@ -1216,15 +1267,23 @@ func init() {
 }
 
 // numRequired returns the count of parameters that have no default value.
-// Since the parser enforces that defaults come last, this is simply the
-// number of leading nil entries in fn.Defaults.
+// The result is computed once at Function construction time and cached on
+// the struct; this getter is on the hot path of every function call.
 func numRequired(fn *Function) int {
-	for i, d := range fn.Defaults {
+	return fn.NumRequired
+}
+
+// computeNumRequired walks the defaults slice to find the first non-nil
+// entry, which (since the parser enforces defaults-must-come-last) is the
+// boundary between required and optional params. Called exactly once per
+// Function — at construction — so numRequired() can be O(1).
+func computeNumRequired(defaults []ast.Node, paramCount int) int {
+	for i, d := range defaults {
 		if d != nil {
 			return i
 		}
 	}
-	return len(fn.Params)
+	return paramCount
 }
 
 // arityError builds a clear argument-count error message that accounts for
@@ -1446,7 +1505,7 @@ func toBool(obj Object) (bool, bool) {
 //   - Same-type values → compare by value
 func evalEquals(left, right Object, pos ast.Pos) Object {
 	if left.Type() == NULL_OBJ || right.Type() == NULL_OBJ {
-		return &Boolean{Value: left.Type() == NULL_OBJ && right.Type() == NULL_OBJ}
+		return boolObj(left.Type() == NULL_OBJ && right.Type() == NULL_OBJ)
 	}
 
 	// EnumInstance can be compared to EnumVariant for switch pattern matching:
@@ -1455,7 +1514,7 @@ func evalEquals(left, right Object, pos ast.Pos) Object {
 	if li, ok := left.(*EnumInstance); ok {
 		switch r := right.(type) {
 		case *EnumVariant:
-			return &Boolean{Value: li.TypeName == r.TypeName && li.VariantName == r.VariantName}
+			return boolObj(li.TypeName == r.TypeName && li.VariantName == r.VariantName)
 		case *EnumInstance:
 			// handled below after the type check
 		default:
@@ -1465,9 +1524,9 @@ func evalEquals(left, right Object, pos ast.Pos) Object {
 	if lv, ok := left.(*EnumVariant); ok {
 		switch r := right.(type) {
 		case *EnumInstance:
-			return &Boolean{Value: lv.TypeName == r.TypeName && lv.VariantName == r.VariantName}
+			return boolObj(lv.TypeName == r.TypeName && lv.VariantName == r.VariantName)
 		case *EnumVariant:
-			return &Boolean{Value: lv.TypeName == r.TypeName && lv.VariantName == r.VariantName}
+			return boolObj(lv.TypeName == r.TypeName && lv.VariantName == r.VariantName)
 		default:
 			return FALSE
 		}
@@ -1479,16 +1538,16 @@ func evalEquals(left, right Object, pos ast.Pos) Object {
 
 	switch l := left.(type) {
 	case *Integer:
-		return &Boolean{Value: l.Value == right.(*Integer).Value}
+		return boolObj(l.Value == right.(*Integer).Value)
 	case *Float:
-		return &Boolean{Value: l.Value == right.(*Float).Value}
+		return boolObj(l.Value == right.(*Float).Value)
 	case *Boolean:
-		return &Boolean{Value: l.Value == right.(*Boolean).Value}
+		return boolObj(l.Value == right.(*Boolean).Value)
 	case *String:
-		return &Boolean{Value: l.Value == right.(*String).Value}
+		return boolObj(l.Value == right.(*String).Value)
 	case *Array, *Hash, *Function:
 		// Reference types compare by identity (pointer equality), not by contents.
-		return &Boolean{Value: left == right}
+		return boolObj(left == right)
 	case *EnumInstance:
 		r := right.(*EnumInstance)
 		if l.TypeName != r.TypeName || l.VariantName != r.VariantName {
@@ -1503,7 +1562,7 @@ func evalEquals(left, right Object, pos ast.Pos) Object {
 			if isError(eq) {
 				return eq
 			}
-			if !eq.(*Boolean).Value {
+			if eq == FALSE {
 				return FALSE
 			}
 		}
@@ -1526,26 +1585,26 @@ func evalNumericCompare(left, right Object, op string, pos ast.Pos) Object {
 		r := right.(*String).Value
 		switch op {
 		case "<":
-			return &Boolean{Value: l < r}
+			return boolObj(l < r)
 		case ">":
-			return &Boolean{Value: l > r}
+			return boolObj(l > r)
 		case "<=":
-			return &Boolean{Value: l <= r}
+			return boolObj(l <= r)
 		case ">=":
-			return &Boolean{Value: l >= r}
+			return boolObj(l >= r)
 		}
 	}
 	l := toFloat64(left)
 	r := toFloat64(right)
 	switch op {
 	case "<":
-		return &Boolean{Value: l < r}
+		return boolObj(l < r)
 	case ">":
-		return &Boolean{Value: l > r}
+		return boolObj(l > r)
 	case "<=":
-		return &Boolean{Value: l <= r}
+		return boolObj(l <= r)
 	case ">=":
-		return &Boolean{Value: l >= r}
+		return boolObj(l >= r)
 	}
 	return runtimeError("unknown comparison operator: "+op, pos)
 }
@@ -1575,7 +1634,11 @@ func evalLogical(n *ast.InfixExpr, env *Environment) Object {
 	if !canLogical(right.Type()) {
 		return typeError(fmt.Sprintf("operator %s requires bool, got %s", n.Operator, right.Type()), n.Pos)
 	}
-	return &Boolean{Value: right.(*Boolean).Value}
+	// right is already a *Boolean (type-checked above) — return it directly
+	// rather than rewrapping. With evalEquals/evalNumericCompare now
+	// returning the TRUE/FALSE singletons, this propagates singleton
+	// identity through chained logical expressions too.
+	return right
 }
 
 // -------------------- EVAL CALL --------------------
@@ -1829,12 +1892,13 @@ func Eval(node ast.Node, env *Environment) Object {
 		}
 		for _, m := range n.Methods {
 			def.Methods[m.Name] = &Function{
-				Name:     m.Name,
-				Params:   m.Params,
-				Defaults: m.Defaults,
-				Variadic: m.Variadic,
-				Body:     m.Body,
-				Env:      env,
+				Name:        m.Name,
+				Params:      m.Params,
+				Defaults:    m.Defaults,
+				Variadic:    m.Variadic,
+				NumRequired: computeNumRequired(m.Defaults, len(m.Params)),
+				Body:        m.Body,
+				Env:         env,
 			}
 		}
 		env.Assign(n.Name, def)
@@ -1900,11 +1964,12 @@ func Eval(node ast.Node, env *Environment) Object {
 	// remembers where it was created, not where it will be called.
 	case *ast.FunctionLiteral:
 		return &Function{
-			Params:   n.Params,
-			Defaults: n.Defaults,
-			Variadic: n.Variadic,
-			Body:     n.Body,
-			Env:      env, // closure captured here
+			Params:      n.Params,
+			Defaults:    n.Defaults,
+			Variadic:    n.Variadic,
+			NumRequired: computeNumRequired(n.Defaults, len(n.Params)),
+			Body:        n.Body,
+			Env:         env, // closure captured here
 		}
 
 	// ---------------- SWITCH ----------------
@@ -1931,20 +1996,36 @@ func Eval(node ast.Node, env *Environment) Object {
 					if !ok {
 						break
 					}
-					patVal := Eval(pat.Pattern, env)
-					if isError(patVal) {
-						return patVal
+					// Resolve which variant this pattern targets.
+					// Short form — case Circle(r):    match by variant name only (no type check).
+					// Full form  — case Shape.Circle(r): evaluate and match type + variant.
+					patVariant := ""
+					skipCase := false
+					if ident, ok := pat.Pattern.(*ast.Ident); ok {
+						patVariant = ident.Value
+					} else {
+						patVal := Eval(pat.Pattern, env)
+						if isError(patVal) {
+							return patVal
+						}
+						switch pv := patVal.(type) {
+						case *EnumVariant:
+							if inst.TypeName != pv.TypeName || inst.VariantName != pv.VariantName {
+								skipCase = true
+							} else {
+								patVariant = pv.VariantName
+							}
+						case *EnumInstance:
+							if inst.TypeName != pv.TypeName || inst.VariantName != pv.VariantName {
+								skipCase = true
+							} else {
+								patVariant = pv.VariantName
+							}
+						default:
+							return runtimeError(fmt.Sprintf("enum pattern must reference an enum variant, got %s", patVal.Type()), pat.Pos)
+						}
 					}
-					var patType, patVariant string
-					switch pv := patVal.(type) {
-					case *EnumVariant:
-						patType, patVariant = pv.TypeName, pv.VariantName
-					case *EnumInstance:
-						patType, patVariant = pv.TypeName, pv.VariantName
-					default:
-						return runtimeError(fmt.Sprintf("enum pattern must reference an enum variant, got %s", patVal.Type()), pat.Pos)
-					}
-					if inst.TypeName != patType || inst.VariantName != patVariant {
+					if skipCase || inst.VariantName != patVariant {
 						break
 					}
 					if len(pat.Bindings) != len(inst.FieldNames) {
@@ -2530,28 +2611,27 @@ func Eval(node ast.Node, env *Environment) Object {
 	// Loads a kLex file, evaluates it in a fresh environment, and binds
 	// the resulting module to the alias name in the current scope.
 	//
-	// Resolution order:
-	//   1. n.Path as-is (relative to CWD — for local project files)
-	//   2. $KLEX_PATH/n.Path (for stdlib and shared libraries)
+	// Resolution order — first existing file wins:
+	//   1. n.Path as-is               (CWD-relative — explicit relative imports)
+	//   2. <script-dir>/n.Path        (next to the importing .lex file)
+	//   3. $KLEX_PATH/n.Path          (user-configured override)
+	//   4. <klex-binary-dir>/n.Path   (drop-in installs: klex.exe + stdlib/ together)
+	//   5. <klex-binary-parent>/n.Path (bin/klex + share/klex/stdlib style installs)
 	//
-	// This means `import "math.lex" as math` finds a local math.lex first,
-	// then falls back to $KLEX_PATH/math.lex — so local files can override stdlib.
+	// This makes `import "stdlib/strings.lex"` work out of the box whenever
+	// stdlib sits next to the kLex binary, regardless of where the script
+	// itself is located or what the current working directory is.
 	case *ast.ImportStmt:
-		// Resolve path: try local first, then KLEX_PATH.
-		var resolvedPath string
-		src, readErr := os.ReadFile(n.Path)
+		resolvedPath, tried, ok := resolveImportPath(n.Path, env)
+		if !ok {
+			return runtimeError(
+				fmt.Sprintf("cannot import %q: not found. Searched:\n  %s",
+					n.Path, strings.Join(tried, "\n  ")),
+				n.Pos)
+		}
+		src, readErr := os.ReadFile(resolvedPath)
 		if readErr != nil {
-			klexPath := os.Getenv("KLEX_PATH")
-			if klexPath == "" {
-				return runtimeError(fmt.Sprintf("cannot import %q: file not found (KLEX_PATH not set)", n.Path), n.Pos)
-			}
-			resolvedPath = klexPath + "/" + n.Path
-			src, readErr = os.ReadFile(resolvedPath)
-			if readErr != nil {
-				return runtimeError(fmt.Sprintf("cannot import %q: not found locally or in KLEX_PATH (%s)", n.Path, klexPath), n.Pos)
-			}
-		} else {
-			resolvedPath = n.Path
+			return runtimeError(fmt.Sprintf("cannot import %q: %s", n.Path, readErr.Error()), n.Pos)
 		}
 
 		absPath, err := filepath.Abs(resolvedPath)
@@ -2571,6 +2651,10 @@ func Eval(node ast.Node, env *Environment) Object {
 			return runtimeError(fmt.Sprintf("parse error in %q: %s", n.Path, program.Errors[0]), n.Pos)
 		}
 		modEnv := NewEnv()
+		// Record where this module lives so its own imports resolve relative
+		// to it — chained "import" calls in the module use its own dir, not
+		// the importer's.
+		modEnv.SetScriptDir(filepath.Dir(absPath))
 		result := Eval(program, modEnv)
 		delete(importingFiles, absPath) // clear before checking error so re-import after failure works
 		if isError(result) {
@@ -2690,10 +2774,10 @@ func Eval(node ast.Node, env *Environment) Object {
 		return NULL
 
 	case *ast.BoolLiteral:
-		return &Boolean{Value: n.Value}
+		return boolObj(n.Value)
 
 	case *ast.IntLiteral:
-		return &Integer{Value: n.Value}
+		return intObj(n.Value)
 
 	case *ast.FloatLiteral:
 		return &Float{Value: n.Value}
@@ -2720,6 +2804,28 @@ func Eval(node ast.Node, env *Environment) Object {
 	case *ast.CallExpr:
 		return evalCall(n, env)
 
+	// ---------------- UNWRAP (?) ----------------
+	// Postfix error-propagation operator: expr?
+	// The operand must evaluate to a 2-element tuple (value, err).
+	// If err != null: return the error from the enclosing function immediately.
+	// If err == null: evaluate to value (the tuple is unwrapped).
+	case *ast.UnwrapExpr:
+		val := Eval(n.Value, env)
+		if isError(val) {
+			return val
+		}
+		tup, ok := val.(*Tuple)
+		if !ok {
+			return typeError(fmt.Sprintf("?: operand must be a (value, err) tuple, got %s", val.Type()), n.Pos)
+		}
+		if len(tup.Elements) != 2 {
+			return typeError(fmt.Sprintf("?: expected a 2-element tuple, got %d elements", len(tup.Elements)), n.Pos)
+		}
+		if tup.Elements[1] != NULL {
+			return &ReturnValue{Value: tup.Elements[1]}
+		}
+		return tup.Elements[0]
+
 	// ---------------- PREFIX ----------------
 	// Unary operators: ! (logical not).
 	case *ast.PrefixExpr:
@@ -2732,7 +2838,7 @@ func Eval(node ast.Node, env *Environment) Object {
 			if !canLogical(val.Type()) {
 				return typeMismatchError("!", val.Type(), val.Type(), n.Pos)
 			}
-			return &Boolean{Value: !val.(*Boolean).Value}
+			return boolObj(!val.(*Boolean).Value)
 		case "-":
 			if !canArithmetic(val.Type()) {
 				return typeMismatchError("-", val.Type(), val.Type(), n.Pos)
@@ -2740,7 +2846,7 @@ func Eval(node ast.Node, env *Environment) Object {
 			if f, ok := val.(*Float); ok {
 				return &Float{Value: -f.Value}
 			}
-			return &Integer{Value: -val.(*Integer).Value}
+			return intObj(-val.(*Integer).Value)
 		}
 		return runtimeError("unknown prefix operator: "+n.Operator, n.Pos)
 
@@ -2769,7 +2875,7 @@ func Eval(node ast.Node, env *Environment) Object {
 				return typeMismatchError("+", left.Type(), right.Type(), n.Pos)
 			}
 			if left.Type() == INTEGER_OBJ && right.Type() == INTEGER_OBJ {
-				return &Integer{Value: left.(*Integer).Value + right.(*Integer).Value}
+				return intObj(left.(*Integer).Value + right.(*Integer).Value)
 			}
 			return &Float{Value: toFloat64(left) + toFloat64(right)}
 
@@ -2782,7 +2888,7 @@ func Eval(node ast.Node, env *Environment) Object {
 				if right.(*Integer).Value == 0 {
 					return runtimeError("modulo by zero", n.Pos)
 				}
-				return &Integer{Value: left.(*Integer).Value % right.(*Integer).Value}
+				return intObj(left.(*Integer).Value % right.(*Integer).Value)
 			}
 			if !canArithmetic(left.Type()) || !canArithmetic(right.Type()) {
 				return typeMismatchError(n.Operator, left.Type(), right.Type(), n.Pos)
@@ -2792,12 +2898,12 @@ func Eval(node ast.Node, env *Environment) Object {
 			switch n.Operator {
 			case "-":
 				if bothInt {
-					return &Integer{Value: left.(*Integer).Value - right.(*Integer).Value}
+					return intObj(left.(*Integer).Value - right.(*Integer).Value)
 				}
 				return &Float{Value: lf - rf}
 			case "*":
 				if bothInt {
-					return &Integer{Value: left.(*Integer).Value * right.(*Integer).Value}
+					return intObj(left.(*Integer).Value * right.(*Integer).Value)
 				}
 				return &Float{Value: lf * rf}
 			case "/":
@@ -2805,7 +2911,7 @@ func Eval(node ast.Node, env *Environment) Object {
 					if right.(*Integer).Value == 0 {
 						return runtimeError("division by zero", n.Pos)
 					}
-					return &Integer{Value: left.(*Integer).Value / right.(*Integer).Value}
+					return intObj(left.(*Integer).Value / right.(*Integer).Value)
 				}
 				if rf == 0 {
 					return runtimeError("division by zero", n.Pos)
@@ -2825,7 +2931,12 @@ func Eval(node ast.Node, env *Environment) Object {
 			if isError(result) {
 				return result
 			}
-			return &Boolean{Value: !result.(*Boolean).Value}
+			// evalEquals now returns the TRUE/FALSE singleton, so identity
+			// comparison is sufficient — no need to unwrap and re-wrap.
+			if result == TRUE {
+				return FALSE
+			}
+			return TRUE
 
 		case "<", ">", "<=", ">=":
 			return evalNumericCompare(left, right, n.Operator, n.Pos)

@@ -245,7 +245,12 @@ func asEnumPattern(expr ast.Node) ast.Node {
 	if !ok {
 		return expr
 	}
-	if _, ok := call.Function.(*ast.DotExpr); !ok {
+	// Full form:  case Shape.Circle(r)  — function is a DotExpr
+	// Short form: case Circle(r)        — function is a bare Ident
+	switch call.Function.(type) {
+	case *ast.DotExpr, *ast.Ident:
+		// valid pattern target — fall through
+	default:
 		return expr
 	}
 	bindings := make([]string, len(call.Args))
@@ -720,9 +725,10 @@ var precedences = map[lexer.TokenType]int{
 	lexer.TokenAsterisk: PRODUCT,
 	lexer.TokenSlash:    PRODUCT,
 	lexer.TokenPercent:  PRODUCT,
-	lexer.TokenLParen:   CALL,  // foo(args) — '(' as infix means "call the left side"
-	lexer.TokenLBracket: INDEX, // arr[i] — '[' is treated as an infix operator
-	lexer.TokenDot:      INDEX, // obj.prop — '.' binds as tightly as '['
+	lexer.TokenLParen:    CALL,  // foo(args) — '(' as infix means "call the left side"
+	lexer.TokenLBracket:  INDEX, // arr[i] — '[' is treated as an infix operator
+	lexer.TokenDot:       INDEX, // obj.prop — '.' binds as tightly as '['
+	lexer.TokenQuestion:  INDEX, // expr?   — postfix unwrap binds as tightly as indexing
 }
 
 // parseExpression is the heart of the Pratt parser.
@@ -749,6 +755,8 @@ func (p *Parser) parseExpression(precedence int) ast.Node {
 			left = p.parseDotExpr(left)
 		case lexer.TokenPipe:
 			left = p.parsePipeExpr(left)
+		case lexer.TokenQuestion:
+			left = p.parseUnwrapExpr(left)
 		default:
 			left = p.parseInfixExpression(left)
 		}
@@ -970,12 +978,13 @@ func (p *Parser) parsePrimary() ast.Node {
 		return &ast.BoolLiteral{Pos: p.curPos(), Value: false}
 
 	case lexer.TokenInt:
-		n, err := strconv.Atoi(p.curToken.Literal)
+		// ParseInt with base 0 handles 0x (hex), 0b (binary), 0o (octal), and decimal.
+		n, err := strconv.ParseInt(p.curToken.Literal, 0, 64)
 		if err != nil {
 			p.addError("integer literal " + p.curToken.Literal + " overflows int")
 			return nil
 		}
-		return &ast.IntLiteral{Pos: p.curPos(), Value: n}
+		return &ast.IntLiteral{Pos: p.curPos(), Value: int(n)}
 
 	case lexer.TokenFloat:
 		v, err := strconv.ParseFloat(p.curToken.Literal, 64)
@@ -1029,6 +1038,13 @@ func (p *Parser) parsePipeExpr(left ast.Node) ast.Node {
 	p.nextToken() // move to the start of the right-hand expression
 	right := p.parseExpression(PIPE)
 	return &ast.PipeExpr{Pos: pos, Left: left, Right: right}
+}
+
+// parseUnwrapExpr handles the postfix ? operator: expr?
+// curToken is '?' on entry. No right operand is consumed — ? is purely postfix.
+// The operand must be a 2-element tuple (value, err) at runtime.
+func (p *Parser) parseUnwrapExpr(left ast.Node) ast.Node {
+	return &ast.UnwrapExpr{Pos: p.curPos(), Value: left}
 }
 
 // parseInfixExpression handles binary operators: left OP right.
@@ -1311,9 +1327,29 @@ func (p *Parser) parseInterpolatedString() ast.Node {
 			// Scan for the matching '}' using a depth counter so that nested
 			// braces inside the expression (e.g. function bodies, hashes) are
 			// not mistaken for the closing delimiter.
+			// String literals inside the expression (e.g. hash["key"] or
+			// format("{}", x)) are skipped entirely so their braces do not
+			// affect the depth count.
 			depth := 1
 			start := i
 			for i < len(raw) && depth > 0 {
+				if raw[i] == '\\' {
+					i += 2 // skip escape sequence — e.g. \" or \{
+					continue
+				}
+				if raw[i] == '"' {
+					// Skip nested string literal inside the expression.
+					i++ // past opening quote
+					for i < len(raw) && raw[i] != '"' {
+						if raw[i] == '\\' {
+							i++ // skip escaped char
+						}
+						i++
+					}
+					// i now points at the closing '"' (or end of raw).
+					i++ // past closing quote
+					continue
+				}
 				if raw[i] == '{' {
 					depth++
 				} else if raw[i] == '}' {

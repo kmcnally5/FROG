@@ -1,6 +1,10 @@
-// VFS: In-memory block storage (Phase 1 implementation)
-// Note: File I/O builtins are not yet implemented in kLex,
-// so blocks are stored in memory for now. This is sufficient for Phase 1.
+// stdlib/vfs.lex — in-memory block store
+//
+// A lightweight key-value store backed by an integer-indexed hash.
+// Slots are addressed by integer ID; use save_fragment / load_fragment
+// to persist data across calls within the same process lifetime.
+// Data does not survive process exit — this is intentional for temporary
+// or test workloads. For persistent storage use stdlib/fs.lex.
 
 let vfs_blocks = {}
 
@@ -22,10 +26,17 @@ fn has_fragment(id) {
 }
 
 fn list_fragments() {
-    let ids = []
+    // Count occupied slots first, then fill — two-pass to avoid push() antipattern.
+    count = 0
+    for id in range(0, 10) {
+        if vfs_blocks[id] != null { count = count + 1 }
+    }
+    ids = makeArray(count)
+    idx = 0
     for id in range(0, 10) {
         if vfs_blocks[id] != null {
-            ids = push(ids, id)
+            ids[idx] = id
+            idx = idx + 1
         }
     }
     return ids
