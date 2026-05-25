@@ -1,6 +1,9 @@
-// ============================================================================
 // crypto.lex — Cryptographic functions
-// ============================================================================
+// @module    crypto
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   Hashing, HMAC, password hashing, and secure random tokens
 //
 // Provides hashing, HMAC, password hashing, and secure random token generation.
 // Use this for:
@@ -268,7 +271,7 @@ fn isValidHash(hash, hashType) {
         return false
     }
 
-    len_h = len(hash)
+    let len_h = len(hash)
 
     if hashType == "sha256" {
         return len_h == 64

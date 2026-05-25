@@ -24,6 +24,7 @@ import (
 	"klex/ast"
 	"klex/lexer"
 	"strconv"
+	"strings"
 )
 
 type Parser struct {
@@ -178,7 +179,7 @@ func (p *Parser) parseMultiAssign() ast.Node {
 	for p.peekToken.Type == lexer.TokenComma {
 		p.nextToken() // consume ','
 		if p.peekToken.Type != lexer.TokenIdent {
-			p.addError("expected variable name in multi-assignment")
+			p.addError("expected variable name in multi-assignment — e.g. `a, b = f()`")
 			return nil
 		}
 		p.nextToken() // move to ident
@@ -186,7 +187,7 @@ func (p *Parser) parseMultiAssign() ast.Node {
 	}
 
 	if !p.expectPeek(lexer.TokenAssign) {
-		p.addError("expected '=' in multi-assignment")
+		p.addError("expected '=' in multi-assignment — e.g. `a, b = f()` not `a, b f()`")
 		return nil
 	}
 	p.nextToken() // move to value expression
@@ -201,7 +202,7 @@ func (p *Parser) parseFor() ast.Node {
 	pos := p.curPos()
 
 	if !p.expectPeek(lexer.TokenIdent) {
-		p.addError("expected variable name after 'for'")
+		p.addError("expected variable name after 'for' — e.g. `for x in arr {` or `for i, x in arr {`")
 		return nil
 	}
 	varName := p.curToken.Literal
@@ -211,14 +212,14 @@ func (p *Parser) parseFor() ast.Node {
 	if p.peekToken.Type == lexer.TokenComma {
 		p.nextToken() // consume comma
 		if !p.expectPeek(lexer.TokenIdent) {
-			p.addError("expected variable name after ','")
+			p.addError("expected second variable name after ',' in for-in — e.g. `for i, x in arr {`")
 			return nil
 		}
 		valueVar = p.curToken.Literal
 	}
 
 	if !p.expectPeek(lexer.TokenIn) {
-		p.addError("expected 'in' after loop variable")
+		p.addError("expected 'in' after for-loop variable — e.g. `for x in arr {`")
 		return nil
 	}
 
@@ -228,7 +229,7 @@ func (p *Parser) parseFor() ast.Node {
 	p.noStructLit = false
 
 	if !p.expectPeek(lexer.TokenLBrace) {
-		p.addError("expected '{' after for-in collection")
+		p.addError("expected '{' to start for-in body — e.g. `for x in arr { ... }`")
 		return nil
 	}
 	p.nextToken()
@@ -343,7 +344,7 @@ func (p *Parser) parseSelect() ast.Node {
 	node := &ast.SelectStmt{Pos: pos}
 
 	if !p.expectPeek(lexer.TokenLBrace) {
-		p.addError("expected '{' after select")
+		p.addError("expected '{' after `select` — e.g. `select { case x = recv(ch) { ... } default { ... } }`")
 		return nil
 	}
 	p.nextToken() // move past '{'
@@ -373,7 +374,7 @@ func (p *Parser) parseSelect() ast.Node {
 			continue
 		}
 
-		p.addError("expected 'case' or 'default' in select, got '" + p.curToken.Literal + "'")
+		p.addError("expected 'case' or 'default' in select — e.g. `case x = recv(ch) { ... }` or `default { ... }`, got '" + p.curToken.Literal + "'")
 		return nil
 	}
 
@@ -393,13 +394,13 @@ func (p *Parser) parseSelectCase() *ast.SelectCase {
 		p.nextToken() // move to channel expression
 		chanExpr := p.parseExpression(LOWEST)
 		if !p.expectPeek(lexer.TokenComma) {
-			p.addError("expected ',' between channel and value in select send case")
+			p.addError("expected ',' between channel and value in select send case — e.g. `case send(ch, value) { ... }`")
 			return nil
 		}
 		p.nextToken() // move to value expression
 		valExpr := p.parseExpression(LOWEST)
 		if !p.expectPeek(lexer.TokenRParen) {
-			p.addError("expected ')' after select send case arguments")
+			p.addError("expected ')' after select send case arguments — e.g. `case send(ch, value) { ... }`")
 			return nil
 		}
 		if !p.expectPeek(lexer.TokenLBrace) {
@@ -431,7 +432,7 @@ func (p *Parser) parseSelectCase() *ast.SelectCase {
 		p.nextToken() // move past var name to '='
 		p.nextToken() // move past '=' — must be 'recv'
 		if p.curToken.Literal != "recv" || p.peekToken.Type != lexer.TokenLParen {
-			p.addError("expected recv(...) on right-hand side of select case binding")
+			p.addError("expected recv(...) on right-hand side of select case binding — e.g. `case x = recv(ch) { ... }` or `case val, ok = recv(ch) { ... }`")
 			return nil
 		}
 		chanExpr, ok := p.parseRecvArgs()
@@ -452,18 +453,18 @@ func (p *Parser) parseSelectCase() *ast.SelectCase {
 		p.nextToken() // move past var1 to ','
 		p.nextToken() // move past ',' to var2
 		if p.curToken.Type != lexer.TokenIdent {
-			p.addError("expected second variable name in select recv case")
+			p.addError("expected second variable name in select recv case — e.g. `case val, ok = recv(ch) { ... }` where ok is true if the channel is still open")
 			return nil
 		}
 		var2 := p.curToken.Literal
 		p.nextToken() // move past var2 to '='
 		if p.curToken.Type != lexer.TokenAssign {
-			p.addError("expected '=' after variable names in select recv case")
+			p.addError("expected '=' after variable names in select recv case — e.g. `case val, ok = recv(ch) { ... }`")
 			return nil
 		}
 		p.nextToken() // move past '=' — must be 'recv'
 		if p.curToken.Literal != "recv" || p.peekToken.Type != lexer.TokenLParen {
-			p.addError("expected recv(...) on right-hand side of select case binding")
+			p.addError("expected recv(...) on right-hand side of select case binding — e.g. `case x = recv(ch) { ... }` or `case val, ok = recv(ch) { ... }`")
 			return nil
 		}
 		chanExpr, ok := p.parseRecvArgs()
@@ -478,7 +479,7 @@ func (p *Parser) parseSelectCase() *ast.SelectCase {
 		return &ast.SelectCase{Pos: casePos, Kind: ast.SelectRecv, Chan: chanExpr, Vars: []string{var1, var2}, Body: body}
 	}
 
-	p.addError("unrecognised select case — expected recv(...), send(...), or variable binding")
+	p.addError("unrecognised select case — expected recv(ch) { … }, send(ch, val) { … }, x = recv(ch) { … }, or val, ok = recv(ch) { … }")
 	return nil
 }
 
@@ -489,7 +490,7 @@ func (p *Parser) parseRecvArgs() (ast.Node, bool) {
 	p.nextToken() // move to channel expression
 	chanExpr := p.parseExpression(LOWEST)
 	if !p.expectPeek(lexer.TokenRParen) {
-		p.addError("expected ')' after channel in select recv case")
+		p.addError("expected ')' after channel in select recv case — e.g. `case x = recv(ch) { ... }`, single channel argument only")
 		return nil, false
 	}
 	return chanExpr, true
@@ -650,24 +651,47 @@ func (p *Parser) parseAssign() ast.Node {
 	return &ast.AssignStmt{Pos: pos, Name: name, Value: value}
 }
 
-// parseLet handles `let name = expr` — an explicit local-scope declaration.
+// parseLet handles `let name = expr` — an explicit local-scope declaration —
+// and `let a, b, ... = expr` — multiple declarations from a tuple RHS.
 // curToken is TokenLet on entry; exits with curToken at last token of expr.
 func (p *Parser) parseLet() ast.Node {
 	pos := p.curPos()
 	p.nextToken() // move to identifier
 	if p.curToken.Type != lexer.TokenIdent {
-		p.addError("expected identifier after 'let', got " + p.curToken.Literal)
+		p.addError("expected identifier after 'let' — e.g. `let x = 0` — got " + p.curToken.Literal)
 		return nil
 	}
-	name := p.curToken.Literal
+	firstName := p.curToken.Literal
+
+	// Multi-let: `let a, b, ... = expr`
+	if p.peekToken.Type == lexer.TokenComma {
+		names := []string{firstName}
+		for p.peekToken.Type == lexer.TokenComma {
+			p.nextToken() // consume ','
+			if p.peekToken.Type != lexer.TokenIdent {
+				p.addError("expected variable name after ',' in `let " + strings.Join(names, ", ") + ", …` — e.g. `let a, b = f()`")
+				return nil
+			}
+			p.nextToken() // move to ident
+			names = append(names, p.curToken.Literal)
+		}
+		if !p.expectPeek(lexer.TokenAssign) {
+			p.addError("expected '=' in `let " + strings.Join(names, ", ") + " = …`")
+			return nil
+		}
+		p.nextToken() // move to first token of value expression
+		value := p.parseExpression(LOWEST)
+		return &ast.MultiLetStmt{Pos: pos, Names: names, Value: value}
+	}
+
 	if p.peekToken.Type != lexer.TokenAssign {
-		p.addError("expected '=' after 'let " + name + "'")
+		p.addError("expected '=' after 'let " + firstName + "' — e.g. `let " + firstName + " = 0`")
 		return nil
 	}
 	p.nextToken() // move to '='
 	p.nextToken() // move to first token of the value expression
 	value := p.parseExpression(LOWEST)
-	return &ast.LetStmt{Pos: pos, Name: name, Value: value}
+	return &ast.LetStmt{Pos: pos, Name: firstName, Value: value}
 }
 
 // parseConst handles `const name = expr` — an immutable binding in the current scope.
@@ -676,12 +700,12 @@ func (p *Parser) parseConst() ast.Node {
 	pos := p.curPos()
 	p.nextToken() // move to identifier
 	if p.curToken.Type != lexer.TokenIdent {
-		p.addError("expected identifier after 'const', got " + p.curToken.Literal)
+		p.addError("expected identifier after 'const' — e.g. `const PI = 3.14` — got " + p.curToken.Literal)
 		return nil
 	}
 	name := p.curToken.Literal
 	if p.peekToken.Type != lexer.TokenAssign {
-		p.addError("expected '=' after 'const " + name + "'")
+		p.addError("expected '=' after 'const " + name + "' — e.g. `const " + name + " = 3.14`")
 		return nil
 	}
 	p.nextToken() // move to '='
@@ -777,7 +801,7 @@ func (p *Parser) parseHashLiteral() ast.Node {
 			return nil
 		}
 		if !p.expectPeek(lexer.TokenColon) {
-			p.addError("expected ':' after hash key")
+			p.addError("expected ':' after hash key — e.g. `{\"name\": value}`")
 			return nil
 		}
 		p.nextToken() // move to value expression
@@ -910,6 +934,18 @@ func (p *Parser) parseFunctionBody() *ast.FunctionLiteral {
 				}
 				fn.Defaults = append(fn.Defaults, nil)
 			}
+		} else if p.curToken.Type != lexer.TokenComma {
+			// Non-identifier, non-comma token in a parameter slot — almost
+			// always a reserved keyword (case, if, while, …) being used as
+			// a parameter name. Silently swallowing it would leave the
+			// function with fewer parameters than the source declared,
+			// producing confusing "expects 0 argument(s), got N" errors
+			// at every call site instead of a parse error here at the
+			// source of the mistake. See memory:
+			//   feedback_klex_reserved_param_names.md
+			p.addError("invalid parameter name '" + p.curToken.Literal +
+				"': reserved keywords cannot be used as parameter names — rename it (e.g. 'tc', 'item', 'arg')")
+			return nil
 		}
 		if p.peekToken.Type == lexer.TokenComma {
 			p.nextToken()
@@ -929,7 +965,7 @@ func (p *Parser) parseFunctionBody() *ast.FunctionLiteral {
 	if p.peekToken.Type == lexer.TokenColon {
 		p.nextToken() // consume ':'
 		if p.peekToken.Type != lexer.TokenIdent {
-			p.addError("expected type name after ':'")
+			p.addError("expected return-type name after ':' — e.g. `fn add(int a, int b) : int { ... }` (kLex uses type-first param syntax, not `name: type`)")
 			return nil
 		}
 		p.nextToken() // move to type name
@@ -996,6 +1032,12 @@ func (p *Parser) parsePrimary() ast.Node {
 
 	case lexer.TokenStr, lexer.TokenRawStr:
 		return &ast.StringLiteral{Pos: p.curPos(), Value: p.curToken.Literal}
+
+	case lexer.TokenBytes:
+		// Lexer packs the decoded bytes into Literal as a Go string. Convert
+		// to []byte here so downstream code never has to remember that the
+		// string carries raw bytes rather than utf-8 text.
+		return &ast.BytesLiteral{Pos: p.curPos(), Value: []byte(p.curToken.Literal)}
 
 	case lexer.TokenInterpStr:
 		return p.parseInterpolatedString()
@@ -1091,7 +1133,7 @@ func (p *Parser) parseCallInfix(function ast.Node) ast.Node {
 func (p *Parser) parseDotExpr(left ast.Node) ast.Node {
 	pos := p.curPos()
 	if p.peekToken.Type != lexer.TokenIdent {
-		p.addError("expected property name after '.'")
+		p.addError("expected property name after '.' — e.g. `point.x` or `module.functionName`")
 		return nil
 	}
 	p.nextToken() // move to property name
@@ -1103,14 +1145,14 @@ func (p *Parser) parseEnum() ast.Node {
 	pos := p.curPos()
 
 	if p.peekToken.Type != lexer.TokenIdent {
-		p.addError("expected enum name after 'enum'")
+		p.addError("expected enum name after 'enum' — e.g. `enum Color { Red Green Blue }`")
 		return nil
 	}
 	p.nextToken()
 	name := p.curToken.Literal
 
 	if !p.expectPeek(lexer.TokenLBrace) {
-		p.addError("expected '{' after enum name")
+		p.addError("expected '{' after enum name — e.g. `enum Color { Red Green Blue }`")
 		return nil
 	}
 	p.nextToken() // move past '{'
@@ -1157,14 +1199,14 @@ func (p *Parser) parseStruct() ast.Node {
 	pos := p.curPos()
 
 	if p.peekToken.Type != lexer.TokenIdent {
-		p.addError("expected struct name after 'struct'")
+		p.addError("expected struct name after 'struct' — e.g. `struct Point { x, y }`")
 		return nil
 	}
 	p.nextToken()
 	name := p.curToken.Literal
 
 	if !p.expectPeek(lexer.TokenLBrace) {
-		p.addError("expected '{' after struct name")
+		p.addError("expected '{' after struct name — e.g. `struct Point { x, y }`")
 		return nil
 	}
 	p.nextToken() // move past '{'
@@ -1175,7 +1217,7 @@ func (p *Parser) parseStruct() ast.Node {
 		// Method declaration inside a struct body.
 		if p.curToken.Type == lexer.TokenFn {
 			if p.peekToken.Type != lexer.TokenIdent {
-				p.addError("expected method name after 'fn' in struct body")
+				p.addError("expected method name after 'fn' in struct body — e.g. `struct Foo { x, fn bar() { ... } }`")
 				return nil
 			}
 			p.nextToken() // move to method name
@@ -1205,7 +1247,7 @@ func (p *Parser) parseStruct() ast.Node {
 			for p.peekToken.Type == lexer.TokenComma {
 				p.nextToken() // consume ','
 				if p.peekToken.Type != lexer.TokenIdent {
-					p.addError("expected field name after ',' in struct")
+					p.addError("expected field name after ',' in struct definition — e.g. `struct Point { x, y, z }`")
 					return nil
 				}
 				p.nextToken()
@@ -1229,12 +1271,12 @@ func (p *Parser) parseStructLiteral(name string, pos ast.Pos) ast.Node {
 
 	for p.curToken.Type != lexer.TokenRBrace && p.curToken.Type != lexer.TokenEOF {
 		if p.curToken.Type != lexer.TokenIdent {
-			p.addError("expected field name in struct literal")
+			p.addError("expected field name in struct literal — e.g. `Point { x: 10, y: 20 }`")
 			return nil
 		}
 		fieldName := p.curToken.Literal
 		if !p.expectPeek(lexer.TokenColon) {
-			p.addError("expected ':' after field name in struct literal")
+			p.addError("expected ':' after field name in struct literal — e.g. `Point { x: 10, y: 20 }`")
 			return nil
 		}
 		p.nextToken() // move to value expression
@@ -1260,18 +1302,18 @@ func (p *Parser) parseImport() ast.Node {
 	pos := p.curPos()
 
 	if p.peekToken.Type != lexer.TokenStr {
-		p.addError("expected file path string after 'import'")
+		p.addError("expected quoted file path after 'import' — e.g. `import \"stdlib/fs.lex\" as fs`")
 		return nil
 	}
 	p.nextToken()
 	path := p.curToken.Literal
 
 	if !p.expectPeek(lexer.TokenAs) {
-		p.addError("expected 'as' after import path")
+		p.addError("expected `as` after import path — e.g. `import \"stdlib/fs.lex\" as fs`")
 		return nil
 	}
 	if !p.expectPeek(lexer.TokenIdent) {
-		p.addError("expected alias name after 'as'")
+		p.addError("expected alias name after `as` — e.g. `import \"stdlib/fs.lex\" as fs`")
 		return nil
 	}
 	alias := p.curToken.Literal
@@ -1279,118 +1321,85 @@ func (p *Parser) parseImport() ast.Node {
 	return &ast.ImportStmt{Pos: pos, Path: path, Alias: alias}
 }
 
-// parseInterpolatedString splits the raw token literal into alternating literal
-// and expression segments. The raw content uses the following conventions:
+// parseInterpolatedString consumes the structured segments the lexer built
+// from the interpolated string token. Each text segment is already fully
+// escape-decoded (including {{ / }} collapse and \xHH); each expression
+// segment is already lexed into kLex tokens with accurate outer-source
+// positions. The parser just feeds the tokens through ParseProgram via the
+// replay-lexer constructor and unwraps the first statement.
 //
-//   \{  — a literal '{' (not an interpolation start)
-//   {…} — an embedded expression; nested braces are tracked by depth so that
-//          e.g. "fn result: {fn(x) { x+1 }(5)}" works correctly
-//
-// Escape sequences inside literal segments (\n, \t, \\, \") are processed here,
-// matching the same rules as plain string literals in the lexer.
+// Before this rewrite the parser walked raw bytes from curToken.Literal,
+// hand-rolling brace counting AND a parallel escape switch that had to be
+// kept in lock-step with lexer.readString. Drift between the two surfaces
+// caused several real bugs (\} only worked in plain strings, \" inside an
+// expression triggered TokenIllegal in the inner lexer, etc.). All of that
+// logic now lives in exactly one place: lexer.readString.
 func (p *Parser) parseInterpolatedString() ast.Node {
 	pos := p.curPos()
-	raw := p.curToken.Literal
+	tok := p.curToken
 
-	var segments []ast.StringSegment
-	var textBuf []byte
-	i := 0
-
-	for i < len(raw) {
-		if raw[i] == '\\' && i+1 < len(raw) {
-			// Escape sequence inside a literal segment.
-			next := raw[i+1]
-			switch next {
-			case '{':
-				textBuf = append(textBuf, '{') // \{ → literal brace, not interpolation
-			case 'n':
-				textBuf = append(textBuf, '\n')
-			case 't':
-				textBuf = append(textBuf, '\t')
-			case '\\':
-				textBuf = append(textBuf, '\\')
-			case '"':
-				textBuf = append(textBuf, '"')
-			default:
-				textBuf = append(textBuf, '\\', next)
-			}
-			i += 2
-
-		} else if raw[i] == '{' {
-			// Flush any accumulated literal text before this expression.
-			if len(textBuf) > 0 {
-				segments = append(segments, ast.StringSegment{Text: string(textBuf)})
-				textBuf = nil
-			}
-			i++ // move past the opening '{'
-
-			// Scan for the matching '}' using a depth counter so that nested
-			// braces inside the expression (e.g. function bodies, hashes) are
-			// not mistaken for the closing delimiter.
-			// String literals inside the expression (e.g. hash["key"] or
-			// format("{}", x)) are skipped entirely so their braces do not
-			// affect the depth count.
-			depth := 1
-			start := i
-			for i < len(raw) && depth > 0 {
-				if raw[i] == '\\' {
-					i += 2 // skip escape sequence — e.g. \" or \{
-					continue
-				}
-				if raw[i] == '"' {
-					// Skip nested string literal inside the expression.
-					i++ // past opening quote
-					for i < len(raw) && raw[i] != '"' {
-						if raw[i] == '\\' {
-							i++ // skip escaped char
-						}
-						i++
-					}
-					// i now points at the closing '"' (or end of raw).
-					i++ // past closing quote
-					continue
-				}
-				if raw[i] == '{' {
-					depth++
-				} else if raw[i] == '}' {
-					depth--
-				}
-				if depth > 0 {
-					i++
-				}
-			}
-			if depth != 0 {
-				p.addError("unclosed '{' in string interpolation")
-				return nil
-			}
-
-			exprSource := raw[start:i]
-			i++ // move past the closing '}'
-
-			// Parse the expression using an inner parser operating on just that source.
-			innerProg := New(lexer.New(exprSource)).ParseProgram()
-			if len(innerProg.Errors) > 0 {
-				p.addError(fmt.Sprintf("in string interpolation: %s", innerProg.Errors[0]))
-				return nil
-			}
-			if len(innerProg.Statements) == 0 {
-				p.addError("empty expression in string interpolation")
-				return nil
-			}
-			segments = append(segments, ast.StringSegment{IsExpr: true, Expr: innerProg.Statements[0]})
-
-		} else {
-			textBuf = append(textBuf, raw[i])
-			i++
+	segments := make([]ast.StringSegment, 0, len(tok.Segments))
+	for _, seg := range tok.Segments {
+		if !seg.IsExpr {
+			segments = append(segments, ast.StringSegment{Text: seg.Text})
+			continue
 		}
-	}
 
-	// Flush any trailing literal text.
-	if len(textBuf) > 0 {
-		segments = append(segments, ast.StringSegment{Text: string(textBuf)})
+		// Re-parse the pre-lexed expression tokens.
+		innerProg := New(lexer.NewReplay(seg.Tokens)).ParseProgram()
+		if len(innerProg.Statements) == 0 && len(innerProg.Errors) == 0 {
+			p.program.Errors = append(p.program.Errors,
+				fmt.Sprintf("%d:%d: empty expression in string interpolation — e.g. `\"x={value}\"`, not `\"x={}\"`",
+					seg.Line, seg.Col))
+			return nil
+		}
+		if len(innerProg.Errors) > 0 {
+			// Inner errors already carry their outer-source line:col because the
+			// lexer tagged each replay token with its real position. Surface the
+			// inner message verbatim — it's already pointing at the right place.
+			p.program.Errors = append(p.program.Errors,
+				fmt.Sprintf("invalid expression in string interpolation: %s", innerProg.Errors[0]))
+			return nil
+		}
+		segments = append(segments, ast.StringSegment{IsExpr: true, Expr: innerProg.Statements[0]})
 	}
 
 	return &ast.InterpolatedString{Pos: pos, Segments: segments}
+}
+
+// stripPosPrefix removes a leading "<line>:<col>: " prefix from an inner
+// parser error message so the outer parseInterpolatedString can wrap it
+// with the outer string's source position instead.
+func stripPosPrefix(msg string) string {
+	colon := -1
+	for j := 0; j < len(msg); j++ {
+		c := msg[j]
+		if c >= '0' && c <= '9' {
+			continue
+		}
+		if c == ':' && j > 0 {
+			colon = j
+			break
+		}
+		return msg
+	}
+	if colon < 0 || colon+1 >= len(msg) {
+		return msg
+	}
+	// Past first colon — expect digits then second colon and a space.
+	rest := msg[colon+1:]
+	k := 0
+	for k < len(rest) && rest[k] >= '0' && rest[k] <= '9' {
+		k++
+	}
+	if k == 0 || k >= len(rest) || rest[k] != ':' {
+		return msg
+	}
+	rest = rest[k+1:]
+	for len(rest) > 0 && rest[0] == ' ' {
+		rest = rest[1:]
+	}
+	return rest
 }
 
 // -------------------- PRECEDENCE HELPERS --------------------

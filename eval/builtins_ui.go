@@ -486,6 +486,9 @@ func init() {
 		gfx.fillColor = savedFill
 
 		uiRegisterElement(id, fx, fy, fw, fh)
+		if isClicked && UiEventHookActive() {
+			FireUiEventHook("click", "button", label.Value, NULL, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Boolean{Value: isClicked}
 	}}
 
@@ -617,16 +620,21 @@ func init() {
 			isShift := gfx.keys[glfw.KeyLeftShift] || gfx.keys[glfw.KeyRightShift]
 
 			// ── Forward delete (Delete key) ───────────────────────────────────
-			if gfx.justPressed[glfw.KeyDelete] {
+			// Count-based so held Delete auto-repeats — mirrors Backspace.
+			if gfx.uiDeleteCount > 0 {
 				if hasSelection {
 					newText, cursor = deleteSelection(newText, cursor, anchor)
 					anchor = cursor
-				} else if cursor < runeLen(newText) {
-					r := []rune(newText)
-					newText = string(append(append([]rune{}, r[:cursor]...), r[cursor+1:]...))
+					hasSelection = false
+				} else {
+					for i := 0; i < gfx.uiDeleteCount; i++ {
+						if cursor < runeLen(newText) {
+							r := []rune(newText)
+							newText = string(append(append([]rune{}, r[:cursor]...), r[cursor+1:]...))
+						}
+					}
 				}
 				gfx.uiTextBlink[id] = now
-				hasSelection = false
 			}
 
 			// ── Backspace ─────────────────────────────────────────────────────
@@ -668,7 +676,11 @@ func init() {
 			}
 
 			// ── Arrow keys ────────────────────────────────────────────────────
-			if gfx.justPressed[glfw.KeyLeft] {
+			// Count-based so held arrows auto-repeat character-by-character.
+			// hasSelection is re-checked each iteration because the first
+			// iteration may collapse the selection (anchor == cursor) and
+			// subsequent ones should then move the cursor as normal.
+			for n := 0; n < gfx.uiLeftCount; n++ {
 				if hasSelection && !isShift {
 					if cursor > anchor { cursor = anchor }
 					anchor = cursor
@@ -683,9 +695,12 @@ func init() {
 					if cursor > 0 { cursor-- }
 					if !isShift { anchor = cursor }
 				}
+				hasSelection = cursor != anchor
+			}
+			if gfx.uiLeftCount > 0 {
 				gfx.uiTextBlink[id] = now
 			}
-			if gfx.justPressed[glfw.KeyRight] {
+			for n := 0; n < gfx.uiRightCount; n++ {
 				rl2 := runeLen(newText)
 				if hasSelection && !isShift {
 					if cursor < anchor { cursor = anchor }
@@ -701,6 +716,9 @@ func init() {
 					if cursor < rl2 { cursor++ }
 					if !isShift { anchor = cursor }
 				}
+				hasSelection = cursor != anchor
+			}
+			if gfx.uiRightCount > 0 {
 				gfx.uiTextBlink[id] = now
 			}
 
@@ -915,6 +933,9 @@ func init() {
 		}
 
 		uiRegisterElement(id, fx, fy, fw, fh)
+		if newText != currentText.Value && UiEventHookActive() {
+			FireUiEventHook("text", "textInput", label.Value, &String{Value: newText}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &String{Value: newText}
 	}}
 
@@ -980,6 +1001,7 @@ func init() {
 		if selectedIdx >= numItems {
 			selectedIdx = 0
 		}
+		originalListIdx := selectedIdx
 
 		if label.Value != "" {
 			drawText(label.Value, int(fx), int(fy-20), false, textScale)
@@ -1038,6 +1060,10 @@ func init() {
 			uiRegisterElement(fmt.Sprintf("%s_item_%d", id, itemIdx), fx, itemY, listW, itemHeightPx)
 		}
 		gfx.fillColor = savedFillList
+
+		if selectedIdx != originalListIdx && UiEventHookActive() && selectedIdx >= 0 && selectedIdx < numItems {
+			FireUiEventHook("select", "list", label.Value, itemsObj.Elements[selectedIdx], int(gfx.mouseX), int(gfx.mouseY))
+		}
 
 		if selectedIdx >= 0 && selectedIdx < numItems {
 			return itemsObj.Elements[selectedIdx]
@@ -1155,6 +1181,9 @@ func init() {
 
 			if isHovered && gfx.mouseJustClicked {
 				sel[itemIdx] = !sel[itemIdx]
+				if UiEventHookActive() {
+					FireUiEventHook("toggle", "listMulti", itemText, &Boolean{Value: sel[itemIdx]}, int(gfx.mouseX), int(gfx.mouseY))
+				}
 			}
 
 			isSelected := sel[itemIdx]
@@ -1248,6 +1277,9 @@ func init() {
 
 		hitW := boxSize + 6 + float32(len(label.Value))*float32(gfx.fontCellW)*textScale
 		uiRegisterElement(id, fx, fy, hitW, boxSize)
+		if newChecked != checked.Value && UiEventHookActive() {
+			FireUiEventHook("toggle", "checkbox", label.Value, &Boolean{Value: newChecked}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Boolean{Value: newChecked}
 	}}
 
@@ -1267,6 +1299,7 @@ func init() {
 			return typeError("slider: value, min, max must be numeric", ast.Pos{})
 		}
 		value := toFloat64(args[4])
+		originalValue := value
 		minVal := toFloat64(args[5])
 		maxVal := toFloat64(args[6])
 		var textScale float32 = 0.5
@@ -1343,6 +1376,9 @@ func init() {
 		drawRoundedRectSDF(hx-handleR, fy, handleR*2, handleR*2, handleR, handleColor, false, 0)
 
 		uiRegisterElement(id, fx-handleR, fy, fw+handleR*2, handleR*2)
+		if value != originalValue && UiEventHookActive() {
+			FireUiEventHook("drag", "slider", label.Value, &Float{Value: value}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Float{Value: value}
 	}}
 
@@ -1428,6 +1464,7 @@ func init() {
 		if selectedIdx >= numItems {
 			selectedIdx = 0
 		}
+		originalIdx := selectedIdx
 
 		fx, fy, fw := float32(x.Value), float32(y.Value), float32(w.Value)
 		const headerH = 28.0
@@ -1538,6 +1575,11 @@ func init() {
 		}
 		gfx.fillColor = savedFillDD
 
+		if selectedIdx != originalIdx && UiEventHookActive() {
+			picked := itemsObj.Elements[selectedIdx]
+			FireUiEventHook("select", "dropdown", label.Value, picked, int(gfx.mouseX), int(gfx.mouseY))
+		}
+
 		if selectedIdx >= 0 && selectedIdx < numItems {
 			return itemsObj.Elements[selectedIdx]
 		}
@@ -1624,6 +1666,9 @@ func init() {
 		gfx.fillColor = savedFill
 
 		uiRegisterElement(id, fx, fy, trackW, trackH)
+		if on != onObj.Value && UiEventHookActive() {
+			FireUiEventHook("toggle", "toggle", label.Value, &Boolean{Value: on}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Boolean{Value: on}
 	}}
 
@@ -1700,6 +1745,9 @@ func init() {
 
 		hitW := r*2 + 8 + float32(len(label.Value))*charW
 		uiRegisterElement(id, fx, fy, hitW, r*2)
+		if newGroupValue != groupValue.Value && UiEventHookActive() {
+			FireUiEventHook("select", "radio", label.Value, &String{Value: newGroupValue}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &String{Value: newGroupValue}
 	}}
 
@@ -1719,6 +1767,7 @@ func init() {
 			return typeError("numericStepper: value, min, max must be numeric", ast.Pos{})
 		}
 		value := int(toFloat64(args[4]))
+		originalValueNS := value
 		minVal := int(toFloat64(args[5]))
 		maxVal := int(toFloat64(args[6]))
 
@@ -1806,6 +1855,9 @@ func init() {
 
 		uiRegisterElement(minusID, fx, fy, btnW, h)
 		uiRegisterElement(plusID, fx+fw-btnW, fy, btnW, h)
+		if value != originalValueNS && UiEventHookActive() {
+			FireUiEventHook("step", "numericStepper", label.Value, &Integer{Value: value}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Integer{Value: value}
 	}}
 
@@ -1845,6 +1897,7 @@ func init() {
 		if activeIdx >= numTabs {
 			activeIdx = numTabs - 1
 		}
+		originalIdx := activeIdx
 
 		fx, fy, fw := float32(x.Value), float32(y.Value), float32(w.Value)
 		charH := float32(gfx.fontCellH) * textScale
@@ -1906,6 +1959,15 @@ func init() {
 		}
 
 		gfx.fillColor = savedFill
+		if activeIdx != originalIdx && UiEventHookActive() {
+			pickedLabel := ""
+			if str, ok := itemsObj.Elements[activeIdx].(*String); ok {
+				pickedLabel = str.Value
+			} else {
+				pickedLabel = itemsObj.Elements[activeIdx].Inspect()
+			}
+			FireUiEventHook("select", "tabs", pickedLabel, &Integer{Value: activeIdx}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Integer{Value: activeIdx}
 	}}
 
@@ -1938,6 +2000,22 @@ func init() {
 		gfx.uiNextID++
 
 		fx, fy, fw, fh := float32(x.Value), float32(y.Value), float32(w.Value), float32(h.Value)
+		const padX = float32(6.0)
+		const padY = float32(4.0)
+
+		// Lazy-init the selection state maps (shared with textInput).
+		if gfx.uiTextCursor == nil {
+			gfx.uiTextCursor = make(map[string]int)
+			gfx.uiTextAnchor = make(map[string]int)
+			gfx.uiTextScroll = make(map[string]float32)
+			gfx.uiTextBlink = make(map[string]float64)
+			gfx.uiUndoStacks = make(map[string][]string)
+			gfx.uiRedoStacks = make(map[string][]string)
+		}
+		if gfx.uiListScroll == nil {
+			gfx.uiListScroll = make(map[string]int)
+		}
+
 		isHovered := gfx.uiHoveredID == id
 		isFocused := gfx.uiActiveID == id
 
@@ -1950,40 +2028,20 @@ func init() {
 		}
 
 		newText := currentText.Value
-		if isFocused {
-			for i := 0; i < gfx.uiBackspaceCount; i++ {
-				runes := []rune(newText)
-				if len(runes) > 0 {
-					newText = string(runes[:len(runes)-1])
-				}
-			}
-			if gfx.justPressed[glfw.KeyEnter] {
-				newText += "\n"
-			}
-			for _, ch := range gfx.charBuf {
-				if ch >= 32 && ch < 127 {
-					newText += string(ch)
-				}
-			}
-			cmdOrCtrl := gfx.keys[glfw.KeyLeftSuper] || gfx.keys[glfw.KeyRightSuper] ||
-				gfx.keys[glfw.KeyLeftControl] || gfx.keys[glfw.KeyRightControl]
-			if cmdOrCtrl && gfx.justPressed[glfw.KeyV] {
-				clip := gfx.win.GetClipboardString()
-				for _, ch := range clip {
-					if ch == '\n' || (ch >= 32 && ch < 127) {
-						newText += string(ch)
-					}
-				}
-			}
-			if cmdOrCtrl && gfx.justPressed[glfw.KeyC] {
-				gfx.win.SetClipboardString(newText)
-			}
-			if cmdOrCtrl && gfx.justPressed[glfw.KeyX] {
-				gfx.win.SetClipboardString(newText)
-				newText = ""
-			}
+		now := time.Since(gfx.startTime).Seconds()
+		runeLen := func(s string) int { return len([]rune(s)) }
+		cursor := gfx.uiTextCursor[id]
+		anchor := gfx.uiTextAnchor[id]
+		// Clamp in case text was changed programmatically.
+		if cursor > runeLen(newText) {
+			cursor = runeLen(newText)
+		}
+		if anchor > runeLen(newText) {
+			anchor = runeLen(newText)
 		}
 
+		// Bg + label drawn first so the cursor/selection logic below can
+		// measure against the actual font set up for this widget.
 		bgColor := gfx.uiTheme.inputBg
 		if isFocused {
 			bgColor = gfx.uiTheme.inputFocusBg
@@ -1996,31 +2054,31 @@ func init() {
 		} else {
 			charH = float32(gfx.fontCellH) * textScale
 		}
-		charW := float32(gfx.fontCellW) * textScale
 		if label.Value != "" {
 			drawText(label.Value, int(fx), int(fy-charH-4), false, textScale)
 		}
 
-		if gfx.uiListScroll == nil {
-			gfx.uiListScroll = make(map[string]int)
+		// ── Wrap with offsets ────────────────────────────────────────────────
+		wrapBudget := fw - 20
+		if wrapBudget < 16 {
+			wrapBudget = 16
 		}
-
-		lines := strings.Split(newText, "\n")
+		wrapped := softWrapTextWithOffsets(newText, wrapBudget, textScale)
 		lineH := charH + 4.0
 		visibleLines := int(fh / lineH)
 		if visibleLines < 1 {
 			visibleLines = 1
 		}
-		maxScroll := len(lines) - visibleLines
+		maxScroll := len(wrapped) - visibleLines
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
-
 		scrollOff := gfx.uiListScroll[id]
 		if scrollOff > maxScroll {
 			scrollOff = maxScroll
 		}
 
+		// Wheel-scroll
 		if gfx.uiScrollDelta != 0 &&
 			gfx.mouseX >= float64(fx) && gfx.mouseX <= float64(fx+fw) &&
 			gfx.mouseY >= float64(fy) && gfx.mouseY <= float64(fy+fh) {
@@ -2034,45 +2092,402 @@ func init() {
 			gfx.uiListScroll[id] = scrollOff
 		}
 
-		// Keep cursor (end of text) visible when focused
-		if isFocused {
-			lastLineIdx := len(lines) - 1
-			if lastLineIdx < scrollOff {
-				scrollOff = lastLineIdx
-				gfx.uiListScroll[id] = scrollOff
+		// ── Mouse → text offset (used by click + drag) ──────────────────────
+		mouseToOffset := func() int {
+			if len(wrapped) == 0 {
+				return 0
 			}
-			if lastLineIdx >= scrollOff+visibleLines {
-				scrollOff = lastLineIdx - visibleLines + 1
-				gfx.uiListScroll[id] = scrollOff
+			my := float32(gfx.mouseY) - fy - padY
+			lineIdx := scrollOff + int(my/lineH)
+			if lineIdx < 0 {
+				lineIdx = 0
+			}
+			if lineIdx >= len(wrapped) {
+				lineIdx = len(wrapped) - 1
+			}
+			line := wrapped[lineIdx]
+			col := uiCharAtX(line.text, float32(gfx.mouseX)-fx-padX, textScale)
+			if col > line.runeCount {
+				col = line.runeCount
+			}
+			return line.startRune + col
+		}
+
+		// ── Click + drag → cursor/anchor ────────────────────────────────────
+		if isHovered && gfx.mouseJustClicked {
+			isShiftClick := gfx.keys[glfw.KeyLeftShift] || gfx.keys[glfw.KeyRightShift]
+			off := mouseToOffset()
+			if isShiftClick {
+				cursor = off
+			} else {
+				cursor = off
+				anchor = off
+			}
+			gfx.uiTextBlink[id] = now
+		}
+		// Drag: while focused and mouse held, the cursor follows the mouse
+		// to extend the selection from the anchor.
+		if isFocused && gfx.mouseDown && !gfx.mouseJustClicked {
+			off := mouseToOffset()
+			cursor = off
+			gfx.uiTextBlink[id] = now
+		}
+
+		// deleteSelection removes the selected range using rune-safe slicing.
+		deleteSelection := func(t string, cur, anc int) (string, int) {
+			lo, hi := cur, anc
+			if lo > hi {
+				lo, hi = hi, lo
+			}
+			r := []rune(t)
+			return string(append(append([]rune{}, r[:lo]...), r[hi:]...)), lo
+		}
+		hasSelection := cursor != anchor
+
+		// ── Keyboard ────────────────────────────────────────────────────────
+		if isFocused {
+			cmdOrCtrl := gfx.keys[glfw.KeyLeftSuper] || gfx.keys[glfw.KeyRightSuper] ||
+				gfx.keys[glfw.KeyLeftControl] || gfx.keys[glfw.KeyRightControl]
+			isShift := gfx.keys[glfw.KeyLeftShift] || gfx.keys[glfw.KeyRightShift]
+
+			// Backspace
+			if gfx.uiBackspaceCount > 0 {
+				if hasSelection {
+					newText, cursor = deleteSelection(newText, cursor, anchor)
+					anchor = cursor
+					hasSelection = false
+				} else {
+					for i := 0; i < gfx.uiBackspaceCount; i++ {
+						if cursor > 0 {
+							r := []rune(newText)
+							newText = string(append(append([]rune{}, r[:cursor-1]...), r[cursor:]...))
+							cursor--
+						}
+					}
+					anchor = cursor
+				}
+				gfx.uiTextBlink[id] = now
+			}
+
+			// Forward delete — count-based, mirrors Backspace's auto-repeat.
+			if gfx.uiDeleteCount > 0 {
+				if hasSelection {
+					newText, cursor = deleteSelection(newText, cursor, anchor)
+					anchor = cursor
+					hasSelection = false
+				} else {
+					for i := 0; i < gfx.uiDeleteCount; i++ {
+						if cursor < runeLen(newText) {
+							r := []rune(newText)
+							newText = string(append(append([]rune{}, r[:cursor]...), r[cursor+1:]...))
+						}
+					}
+				}
+				gfx.uiTextBlink[id] = now
+			}
+
+			// Enter — insert newline at cursor (or replace selection)
+			if gfx.justPressed[glfw.KeyEnter] {
+				if hasSelection {
+					newText, cursor = deleteSelection(newText, cursor, anchor)
+					anchor = cursor
+					hasSelection = false
+				}
+				r := []rune(newText)
+				r = append(append(append([]rune{}, r[:cursor]...), '\n'), r[cursor:]...)
+				newText = string(r)
+				cursor++
+				anchor = cursor
+				gfx.uiTextBlink[id] = now
+			}
+
+			// Character insertion
+			for _, ch := range gfx.charBuf {
+				if ch >= 32 {
+					if hasSelection {
+						newText, cursor = deleteSelection(newText, cursor, anchor)
+						anchor = cursor
+						hasSelection = false
+					}
+					r := []rune(newText)
+					r = append(append(append([]rune{}, r[:cursor]...), ch), r[cursor:]...)
+					newText = string(r)
+					cursor++
+					anchor = cursor
+				}
+			}
+			if len(gfx.charBuf) > 0 {
+				gfx.uiTextBlink[id] = now
+			}
+
+			// Arrows L/R — count-based so held arrows auto-repeat.
+			// hasSelection is re-checked each iteration because the first
+			// iteration may collapse the selection.
+			for n := 0; n < gfx.uiLeftCount; n++ {
+				if hasSelection && !isShift {
+					if cursor > anchor {
+						cursor = anchor
+					}
+					anchor = cursor
+				} else if cursor > 0 {
+					cursor--
+					if !isShift {
+						anchor = cursor
+					}
+				}
+				hasSelection = cursor != anchor
+			}
+			if gfx.uiLeftCount > 0 {
+				gfx.uiTextBlink[id] = now
+			}
+			for n := 0; n < gfx.uiRightCount; n++ {
+				rl2 := runeLen(newText)
+				if hasSelection && !isShift {
+					if cursor < anchor {
+						cursor = anchor
+					}
+					anchor = cursor
+				} else if cursor < rl2 {
+					cursor++
+					if !isShift {
+						anchor = cursor
+					}
+				}
+				hasSelection = cursor != anchor
+			}
+			if gfx.uiRightCount > 0 {
+				gfx.uiTextBlink[id] = now
+			}
+
+			// Arrows Up/Down — move between visual lines at same column.
+			// Count-based so the cursor advances by one line per held tick.
+			for n := 0; n < gfx.uiUpCount; n++ {
+				curLine := taLineForOffset(wrapped, cursor)
+				col := cursor - wrapped[curLine].startRune
+				if curLine > 0 {
+					targetLine := curLine - 1
+					newCol := col
+					if newCol > wrapped[targetLine].runeCount {
+						newCol = wrapped[targetLine].runeCount
+					}
+					cursor = wrapped[targetLine].startRune + newCol
+					if !isShift {
+						anchor = cursor
+					}
+				}
+				hasSelection = cursor != anchor
+			}
+			for n := 0; n < gfx.uiDownCount; n++ {
+				curLine := taLineForOffset(wrapped, cursor)
+				col := cursor - wrapped[curLine].startRune
+				if curLine < len(wrapped)-1 {
+					targetLine := curLine + 1
+					newCol := col
+					if newCol > wrapped[targetLine].runeCount {
+						newCol = wrapped[targetLine].runeCount
+					}
+					cursor = wrapped[targetLine].startRune + newCol
+					if !isShift {
+						anchor = cursor
+					}
+				}
+				hasSelection = cursor != anchor
+			}
+			if gfx.uiUpCount > 0 || gfx.uiDownCount > 0 {
+				gfx.uiTextBlink[id] = now
+			}
+
+			// Home / End — within the current visual line.
+			if gfx.justPressed[glfw.KeyHome] {
+				curLine := taLineForOffset(wrapped, cursor)
+				cursor = wrapped[curLine].startRune
+				if !isShift {
+					anchor = cursor
+				}
+				gfx.uiTextBlink[id] = now
+			}
+			if gfx.justPressed[glfw.KeyEnd] {
+				curLine := taLineForOffset(wrapped, cursor)
+				cursor = wrapped[curLine].endRune()
+				if !isShift {
+					anchor = cursor
+				}
+				gfx.uiTextBlink[id] = now
+			}
+
+			// Cmd/Ctrl + A — select all
+			if cmdOrCtrl && gfx.justPressed[glfw.KeyA] {
+				anchor = 0
+				cursor = runeLen(newText)
+				gfx.uiTextBlink[id] = now
+			}
+
+			// Clipboard
+			if cmdOrCtrl && gfx.justPressed[glfw.KeyV] {
+				clip := gfx.win.GetClipboardString()
+				filteredRunes := []rune{}
+				for _, ch := range clip {
+					if ch == '\n' || ch >= 32 {
+						filteredRunes = append(filteredRunes, ch)
+					}
+				}
+				if len(filteredRunes) > 0 {
+					if hasSelection {
+						newText, cursor = deleteSelection(newText, cursor, anchor)
+						anchor = cursor
+						hasSelection = false
+					}
+					r := []rune(newText)
+					r = append(append(append([]rune{}, r[:cursor]...), filteredRunes...), r[cursor:]...)
+					newText = string(r)
+					cursor += len(filteredRunes)
+					anchor = cursor
+					gfx.uiTextBlink[id] = now
+				}
+			}
+			if cmdOrCtrl && gfx.justPressed[glfw.KeyC] {
+				if hasSelection {
+					lo, hi := cursor, anchor
+					if lo > hi {
+						lo, hi = hi, lo
+					}
+					gfx.win.SetClipboardString(string([]rune(newText)[lo:hi]))
+				} else {
+					gfx.win.SetClipboardString(newText)
+				}
+			}
+			if cmdOrCtrl && gfx.justPressed[glfw.KeyX] {
+				if hasSelection {
+					lo, hi := cursor, anchor
+					if lo > hi {
+						lo, hi = hi, lo
+					}
+					gfx.win.SetClipboardString(string([]rune(newText)[lo:hi]))
+					newText, cursor = deleteSelection(newText, cursor, anchor)
+					anchor = cursor
+					hasSelection = false
+				} else {
+					gfx.win.SetClipboardString(newText)
+					newText = ""
+					cursor = 0
+					anchor = 0
+				}
+				gfx.uiTextBlink[id] = now
 			}
 		}
 
-		savedFillTA := gfx.fillColor
-		gfx.fillColor = gfx.uiTheme.widgetText
-		for i := 0; i < visibleLines && (scrollOff+i) < len(lines); i++ {
-			lineY := fy + float32(i)*lineH + 4.0
-			drawText(lines[scrollOff+i], int(fx+6), int(lineY), false, textScale)
+		// Clamp cursor after edits.
+		rl3 := runeLen(newText)
+		if cursor > rl3 {
+			cursor = rl3
 		}
-		gfx.fillColor = savedFillTA
+		if anchor > rl3 {
+			anchor = rl3
+		}
 
-		// Blinking cursor at end of last line
+		// Re-wrap if the text changed (so the caret renders at the new
+		// position immediately rather than one frame late).
+		if newText != currentText.Value {
+			wrapped = softWrapTextWithOffsets(newText, wrapBudget, textScale)
+			maxScroll = len(wrapped) - visibleLines
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			if scrollOff > maxScroll {
+				scrollOff = maxScroll
+			}
+		}
+
+		// Keep the cursor's visual line in view.
 		if isFocused {
-			lastLineIdx := len(lines) - 1
-			cursorLineInView := lastLineIdx - scrollOff
-			if cursorLineInView >= 0 && cursorLineInView < visibleLines {
-				lastLine := lines[lastLineIdx]
-				cursorX := fx + 6.0 + float32(len(lastLine))*charW
-				cursorY := fy + float32(cursorLineInView)*lineH + 4.0
-				if int(time.Since(gfx.startTime).Seconds()*2)%2 == 0 {
-					drawRoundedRectSDF(cursorX, cursorY, 2, charH, 1, gfx.uiTheme.handle, false, 0)
+			caretLine := taLineForOffset(wrapped, cursor)
+			if caretLine < scrollOff {
+				scrollOff = caretLine
+			}
+			if caretLine >= scrollOff+visibleLines {
+				scrollOff = caretLine - visibleLines + 1
+			}
+			gfx.uiListScroll[id] = scrollOff
+		}
+
+		// ── Selection highlight (per visible line) ──────────────────────────
+		if cursor != anchor {
+			lo, hi := cursor, anchor
+			if lo > hi {
+				lo, hi = hi, lo
+			}
+			for i := 0; i < visibleLines && (scrollOff+i) < len(wrapped); i++ {
+				line := wrapped[scrollOff+i]
+				le := line.endRune()
+				if hi < line.startRune || lo > le {
+					continue
+				}
+				selL := lo - line.startRune
+				if selL < 0 {
+					selL = 0
+				}
+				selR := hi - line.startRune
+				if selR > line.runeCount {
+					selR = line.runeCount
+				}
+				if selR < selL {
+					continue
+				}
+				lineRunes := []rune(line.text)
+				selX0 := fx + padX + uiTextWidth(string(lineRunes[:selL]), textScale)
+				selX1 := fx + padX + uiTextWidth(string(lineRunes[:selR]), textScale)
+				selY := fy + float32(i)*lineH + padY
+				w := selX1 - selX0
+				if w < 2 && hi > le {
+					// Spans across a wrap break — extend a thin trailing marker.
+					w = 4
+				}
+				if w > 0 {
+					drawRoundedRectSDF(selX0, selY-1, w, charH+2, 0,
+						gfx.uiTheme.accentBg, false, 0)
 				}
 			}
 		}
 
+		// ── Text ────────────────────────────────────────────────────────────
+		savedFillTA := gfx.fillColor
+		gfx.fillColor = gfx.uiTheme.widgetText
+		for i := 0; i < visibleLines && (scrollOff+i) < len(wrapped); i++ {
+			lineY := fy + float32(i)*lineH + padY
+			drawText(wrapped[scrollOff+i].text, int(fx+padX), int(lineY), false, textScale)
+		}
+		gfx.fillColor = savedFillTA
+
+		// ── Blinking caret ──────────────────────────────────────────────────
+		if isFocused {
+			blinkStart := gfx.uiTextBlink[id]
+			elapsed := now - blinkStart
+			caretVisible := elapsed < 0.5 || math.Mod(elapsed, 1.0) < 0.5
+			if caretVisible {
+				caretLine := taLineForOffset(wrapped, cursor)
+				lineInView := caretLine - scrollOff
+				if lineInView >= 0 && lineInView < visibleLines {
+					line := wrapped[caretLine]
+					col := cursor - line.startRune
+					if col < 0 {
+						col = 0
+					}
+					if col > line.runeCount {
+						col = line.runeCount
+					}
+					lineRunes := []rune(line.text)
+					caretX := fx + padX + uiTextWidth(string(lineRunes[:col]), textScale)
+					caretY := fy + float32(lineInView)*lineH + padY
+					drawRoundedRectSDF(caretX, caretY, 2, charH, 1, gfx.uiTheme.handle, false, 0)
+				}
+			}
+		}
+
+		// Scroll bar
 		if maxScroll > 0 {
 			sbW := float32(8.0)
 			sbX := fx + fw - sbW - 2
-			thumbH := fh * float32(visibleLines) / float32(len(lines))
+			thumbH := fh * float32(visibleLines) / float32(len(wrapped))
 			if thumbH < 12 {
 				thumbH = 12
 			}
@@ -2081,7 +2496,14 @@ func init() {
 			drawRoundedRectSDF(sbX, thumbY, sbW, thumbH, sbW*0.5, gfx.uiTheme.widgetBgHover, false, 0)
 		}
 
+		// Persist state.
+		gfx.uiTextCursor[id] = cursor
+		gfx.uiTextAnchor[id] = anchor
+
 		uiRegisterElement(id, fx, fy, fw, fh)
+		if newText != currentText.Value && UiEventHookActive() {
+			FireUiEventHook("text", "textArea", label.Value, &String{Value: newText}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &String{Value: newText}
 	}}
 
@@ -2144,6 +2566,7 @@ func init() {
 			gfx.uiListSelected = make(map[string]int)
 		}
 		selectedRow := gfx.uiListSelected[id]
+		originalSelectedRow := selectedRow
 		scrollOff := gfx.uiListScroll[id]
 
 		contentH := fh - headerH
@@ -2251,6 +2674,9 @@ func init() {
 
 		gfx.fillColor = savedFillTbl
 		uiRegisterElement(id, fx, fy, fw, fh)
+		if selectedRow != originalSelectedRow && UiEventHookActive() {
+			FireUiEventHook("select", "table", "", &Integer{Value: selectedRow}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Integer{Value: selectedRow}
 	}}
 
@@ -2280,10 +2706,12 @@ func init() {
 
 		fx, fy, fw := float32(x.Value), float32(y.Value), float32(w.Value)
 		openIdx := openIdxObj.Value
+		originalOpenIdx := openIdx
 		charH := uiCharH(textScale)
 		hdrH := charH + 14.0
 		mx, my := gfx.mouseX, gfx.mouseY
 		savedFillAcc := gfx.fillColor
+		var clickedSectionLabel string
 
 		for i, secObj := range sections.Elements {
 			lbl := ""
@@ -2324,9 +2752,17 @@ func init() {
 				} else {
 					openIdx = i
 				}
+				clickedSectionLabel = lbl
 			}
 		}
 		gfx.fillColor = savedFillAcc
+		if openIdx != originalOpenIdx && UiEventHookActive() {
+			kind := "expand"
+			if openIdx == -1 {
+				kind = "collapse"
+			}
+			FireUiEventHook(kind, "accordion", clickedSectionLabel, &Integer{Value: openIdx}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Integer{Value: openIdx}
 	}}
 
@@ -2422,6 +2858,13 @@ func init() {
 		}
 
 		uiRegisterElement(fmt.Sprintf("ctx_%d", gfx.uiNextID), fx, fy, menuW, menuH)
+		if result >= 0 && UiEventHookActive() {
+			pickedLabel := ""
+			if s, ok := items.Elements[result].(*String); ok {
+				pickedLabel = s.Value
+			}
+			FireUiEventHook("select", "contextMenu", pickedLabel, &Integer{Value: result}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Integer{Value: result}
 	}}
 
@@ -2492,6 +2935,7 @@ func init() {
 			return value
 		}
 
+		origR, origG, origB, origA := r, g, b, a
 		r = cpSlider(0, "R", r, [4]float32{float32(r), 0.1, 0.1, 1}, fy)
 		g = cpSlider(1, "G", g, [4]float32{0.1, float32(g), 0.1, 1}, fy+gap)
 		b = cpSlider(2, "B", b, [4]float32{0.1, 0.1, float32(b), 1}, fy+gap*2)
@@ -2502,12 +2946,16 @@ func init() {
 		drawRoundedRectSDF(fx, swatchY, fw, swatchH, 4, [4]float32{float32(r), float32(g), float32(b), float32(a)}, false, 0)
 		drawText("preview", int(fx+6), int(swatchY+(swatchH-charH)*0.5), false, textScale)
 
-		return &Array{Elements: []Object{
+		result := &Array{Elements: []Object{
 			&Float{Value: r},
 			&Float{Value: g},
 			&Float{Value: b},
 			&Float{Value: a},
 		}}
+		if (r != origR || g != origG || b != origB || a != origA) && UiEventHookActive() {
+			FireUiEventHook("drag", "colorPicker", "", result, int(gfx.mouseX), int(gfx.mouseY))
+		}
+		return result
 	}}
 
 	// modal(title, message, buttons[]) → string
@@ -2655,6 +3103,9 @@ func init() {
 		// Full-screen hit element blocks background widget hover on the next frame.
 		uiRegisterElement("__modal__", 0, 0, ww, wh)
 
+		if result != "" && UiEventHookActive() {
+			FireUiEventHook("click", "modal", result, &String{Value: title.Value}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &String{Value: result}
 	}}
 
@@ -2743,6 +3194,10 @@ func init() {
 		}
 		scrollOff := gfx.uiListScroll[id]
 		selectedIdx := gfx.uiListSelected[id]
+		originalSelectedIdxTV := selectedIdx
+		var toggledNodeIdx = -1
+		var toggledNodeLbl string
+		var toggledNodeNowExpanded bool
 
 		visibleCount := len(visible)
 		visibleRows := int(fh / rowH)
@@ -2805,8 +3260,16 @@ func init() {
 					my >= float64(ty) && my <= float64(ty+12) {
 					if nodeExpanded(nodeIdx) {
 						newExpanded[nodeIdx] = FALSE
+						toggledNodeNowExpanded = false
 					} else {
 						newExpanded[nodeIdx] = TRUE
+						toggledNodeNowExpanded = true
+					}
+					toggledNodeIdx = nodeIdx
+					if nodeIdx < len(labels.Elements) {
+						if s, ok := labels.Elements[nodeIdx].(*String); ok {
+							toggledNodeLbl = s.Value
+						}
 					}
 				}
 			}
@@ -2847,6 +3310,24 @@ func init() {
 		}
 
 		uiRegisterElement(id, fx, fy, fw, fh)
+		if UiEventHookActive() {
+			if toggledNodeIdx >= 0 {
+				kind := "expand"
+				if !toggledNodeNowExpanded {
+					kind = "collapse"
+				}
+				FireUiEventHook(kind, "treeView", toggledNodeLbl, &Integer{Value: toggledNodeIdx}, int(gfx.mouseX), int(gfx.mouseY))
+			}
+			if selectedIdx != originalSelectedIdxTV {
+				selLbl := ""
+				if selectedIdx < len(labels.Elements) {
+					if s, ok := labels.Elements[selectedIdx].(*String); ok {
+						selLbl = s.Value
+					}
+				}
+				FireUiEventHook("select", "treeView", selLbl, &Integer{Value: selectedIdx}, int(gfx.mouseX), int(gfx.mouseY))
+			}
+		}
 		return &Array{Elements: []Object{
 			&Integer{Value: selectedIdx},
 			&Array{Elements: newExpanded},
@@ -2961,6 +3442,7 @@ func init() {
 		fx, fy, fw, fh := float32(xf), float32(yf), float32(wf), float32(hf)
 		contentH := float32(cf)
 		scrollOff := float32(gfx.uiListScroll[id])
+		originalScrollOff := scrollOff
 		maxScroll := contentH - fh
 		if maxScroll < 0 {
 			maxScroll = 0
@@ -3013,6 +3495,9 @@ func init() {
 		}
 
 		uiRegisterElement(id, fx, fy, fw, fh)
+		if scrollOff != originalScrollOff && UiEventHookActive() {
+			FireUiEventHook("scroll", "scrollArea", "", &Float{Value: float64(scrollOff)}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Float{Value: float64(scrollOff)}
 	}}
 
@@ -3033,6 +3518,7 @@ func init() {
 			return 0, false
 		}
 		pos, ok1 := getInt(args[0])
+		originalPos := pos
 		rx, ok2 := getInt(args[1])
 		ry, ok3 := getInt(args[2])
 		length, ok4 := getInt(args[3])
@@ -3114,6 +3600,9 @@ func init() {
 		}
 
 		uiRegisterElement(id, hx, hy, hw, hh)
+		if pos != originalPos && UiEventHookActive() {
+			FireUiEventHook("drag", "splitter", orient.Value, &Integer{Value: int(pos)}, int(gfx.mouseX), int(gfx.mouseY))
+		}
 		return &Integer{Value: int(pos)}
 	}}
 
@@ -3346,6 +3835,164 @@ func uiCharH(scale float32) float32 {
 // uiTextWidth returns the rendered pixel width of text at scale using whichever
 // font is currently active. This must match drawText / drawTextProp exactly so
 // that width calculations and rendering stay in sync.
+// wrappedLine is one visual row produced by soft-wrapping. It carries the
+// rune-offset bookkeeping that lets the textArea map mouse positions to
+// underlying text offsets (and vice versa) for selection / caret placement.
+//
+//	startRune  — first rune index in the underlying text this line covers
+//	runeCount  — number of runes in `text` (== len([]rune(text)))
+//
+// Visual lines do NOT include separator characters that the wrap consumed:
+// a hard newline between two lines lives at runes[prev.endRune()] and is
+// not part of either visual line; a soft-wrap on a space similarly skips
+// that single space. Per-rune fallback breaks (a single long token) leave
+// no gap — the next visual line begins exactly where the previous ended.
+type wrappedLine struct {
+	text      string
+	startRune int
+	runeCount int
+}
+
+func (l wrappedLine) endRune() int { return l.startRune + l.runeCount }
+
+// softWrapTextWithOffsets is the offset-aware companion to softWrapText. It
+// runs the same wrap algorithm and then re-derives the rune offsets by
+// walking the original text — simpler than threading offsets through the
+// wrap loop and correct for the three cases the wrap produces (hard newline,
+// space-eaten soft wrap, rune-fallback split).
+func softWrapTextWithOffsets(text string, maxW, scale float32) []wrappedLine {
+	lines := softWrapText(text, maxW, scale)
+	runes := []rune(text)
+	out := make([]wrappedLine, len(lines))
+	cursor := 0
+	for i, line := range lines {
+		lineRunes := []rune(line)
+		// Try to match the line text at the current cursor. If it doesn't
+		// align, advance over a single skipped separator (newline or space)
+		// and retry — that's how soft-wrap "eats" the space between two
+		// visual lines, and how hard newlines get consumed between segments.
+		if !runesMatchAt(runes, cursor, lineRunes) && cursor < len(runes) {
+			cursor++
+		}
+		out[i] = wrappedLine{
+			text:      line,
+			startRune: cursor,
+			runeCount: len(lineRunes),
+		}
+		cursor += len(lineRunes)
+	}
+	if len(out) == 0 {
+		out = append(out, wrappedLine{startRune: 0, runeCount: 0})
+	}
+	return out
+}
+
+func runesMatchAt(haystack []rune, pos int, needle []rune) bool {
+	if pos+len(needle) > len(haystack) {
+		return false
+	}
+	for i, r := range needle {
+		if haystack[pos+i] != r {
+			return false
+		}
+	}
+	return true
+}
+
+// taLineForOffset returns the index of the visual line that should host the
+// cursor at the given rune offset. Walks lines in order and picks the FIRST
+// line whose [startRune, endRune] range contains offset — so a cursor at
+// the boundary between two lines stays at the end of the earlier line
+// (natural typing behaviour: text just typed appears at end-of-line N, so
+// the caret stays there).
+func taLineForOffset(lines []wrappedLine, offset int) int {
+	for i := range lines {
+		if offset >= lines[i].startRune && offset <= lines[i].endRune() {
+			return i
+		}
+	}
+	if len(lines) == 0 {
+		return 0
+	}
+	return len(lines) - 1
+}
+
+// softWrapText returns visual lines for `text` such that each line's rendered
+// width (using uiTextWidth at the given scale) does not exceed maxW. Hard
+// newlines are preserved as line breaks; in addition, each hard line is
+// broken on word (space) boundaries when it would otherwise overflow.
+//
+// Edge case: a single word longer than maxW falls back to a per-rune break.
+// Empty hard lines are preserved as empty visual lines so blank rows survive
+// wrapping.
+//
+// Used by the textArea widget for auto-wrap; safe to call from any UI code
+// that wants to measure how a string will lay out.
+func softWrapText(text string, maxW float32, scale float32) []string {
+	var out []string
+	for _, hard := range strings.Split(text, "\n") {
+		out = append(out, wrapOneLine(hard, maxW, scale)...)
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
+func wrapOneLine(line string, maxW float32, scale float32) []string {
+	if line == "" {
+		return []string{""}
+	}
+	if uiTextWidth(line, scale) <= maxW {
+		return []string{line}
+	}
+	// Word-boundary pass.
+	var lines []string
+	words := strings.Split(line, " ")
+	current := ""
+	for _, w := range words {
+		candidate := w
+		if current != "" {
+			candidate = current + " " + w
+		}
+		if uiTextWidth(candidate, scale) > maxW && current != "" {
+			lines = append(lines, current)
+			current = w
+		} else {
+			current = candidate
+		}
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	// Fallback pass: any single-word line still over budget gets broken by
+	// runes so a glued URL or token doesn't push the cursor off-screen.
+	var final []string
+	for _, l := range lines {
+		if uiTextWidth(l, scale) <= maxW {
+			final = append(final, l)
+			continue
+		}
+		chunk := ""
+		for _, r := range []rune(l) {
+			try := chunk + string(r)
+			if uiTextWidth(try, scale) > maxW && chunk != "" {
+				final = append(final, chunk)
+				chunk = string(r)
+			} else {
+				chunk = try
+			}
+		}
+		if chunk != "" {
+			final = append(final, chunk)
+		}
+	}
+	if len(final) == 0 {
+		return []string{""}
+	}
+	return final
+}
+
 func uiTextWidth(text string, scale float32) float32 {
 	if gfx.uiActiveFont != nil {
 		var w float32

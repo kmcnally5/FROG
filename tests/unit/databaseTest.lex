@@ -1,6 +1,6 @@
 import "stdlib/db.lex" as db
 
-conn, err = dbOpenWithPool("mssql", "server=localhost,1434;database=master;user id=sa;password=YourPasswordHere!", {
+let conn, err = dbOpenWithPool("mssql", "server=localhost,1433;database=master;user id=sa;password=YourStrongPassword123!", {
     "maxIdle": 5,
     "maxOpen": 20,
     "idleTimeout": 300,
@@ -34,7 +34,7 @@ if err != null {
 println("✓ Inserted 3 test records")
 
 // Retrieve all rows with dbQuery (buffered)
-rows, err = dbQuery(conn, "SELECT id, name, email, age FROM test_users ORDER BY id", [])
+let rows, err = dbQuery(conn, "SELECT id, name, email, age FROM test_users ORDER BY id", [])
 if err != null {
     println("Query error: {err.message}")
     dbClose(conn)
@@ -43,15 +43,15 @@ if err != null {
 
 println("\n--- Test Users (dbQuery) ---")
 for row in rows {
-    id = row["id"]
-    name = row["name"]
-    email = row["email"]
-    age = row["age"]
+    let id = row["id"]
+    let name = row["name"]
+    let email = row["email"]
+    let age = row["age"]
     println("ID: {id} | Name: {name} | Email: {email} | Age: {age}")
 }
 
 // Retrieve rows one at a time with dbQueryStream
-stream, err = dbQueryStream(conn, "SELECT id, name, email, age FROM test_users ORDER BY id", [])
+let stream, err = dbQueryStream(conn, "SELECT id, name, email, age FROM test_users ORDER BY id", [])
 if err != null {
     println("Stream error: {err.message}")
     dbClose(conn)
@@ -60,8 +60,8 @@ if err != null {
 
 println("\n--- Test Users (dbQueryStream) ---")
 for row in stream {
-    id = row["id"]
-    name = row["name"]
+    let id = row["id"]
+    let name = row["name"]
     println("Streamed: {id} — {name}")
 }
 
@@ -69,7 +69,7 @@ for row in stream {
 _, err = dbExec(conn, "DROP TABLE IF EXISTS bulk_test", [])
 _, err = dbExec(conn, "CREATE TABLE bulk_test (id INT, name VARCHAR(100), score INT)", [])
 
-n, err = dbBulkInsert(conn, "bulk_test", ["id", "name", "score"], [
+let n, err = dbBulkInsert(conn, "bulk_test", ["id", "name", "score"], [
     [1, "Alice", 95],
     [2, "Bob",   87],
     [3, "Carol", 91],
@@ -86,15 +86,15 @@ rows, err = dbQuery(conn, "SELECT id, name, score FROM bulk_test ORDER BY score 
 if err != null { println(err.message) } else {
     println("--- Bulk results (by score) ---")
     for row in rows {
-        id = row["id"]
-        name = row["name"]
-        score = row["score"]
+        let id = row["id"]
+        let name = row["name"]
+        let score = row["score"]
         println("  {id}. {name} — {score}")
     }
 }
 
 // withTx: auto-commit on success
-result, err = db.withTx(conn, fn(tx) {
+let result, err = db.withTx(conn, fn(tx) {
     _, err = dbExec(tx, "UPDATE test_users SET age = age + 1 WHERE id = ?", [1])
     if err != null { return null, err }
     _, err = dbExec(tx, "UPDATE test_users SET age = age + 1 WHERE id = ?", [2])
@@ -120,11 +120,11 @@ if err != null {
 }
 
 // Confirm row 3 still has original age (rollback worked)
-row, err = dbQueryOne(conn, "SELECT age FROM test_users WHERE id = ?", [3])
+let row, err = dbQueryOne(conn, "SELECT age FROM test_users WHERE id = ?", [3])
 if err != null {
     println("check error: {err.message}")
 } else {
-    age = row["age"]
+    let age = row["age"]
     println("✓ Row 3 age after rollback: {age} (should be 32)")
 }
 
@@ -135,8 +135,8 @@ rows, err = dbExecReturning(conn, "INSERT INTO returning_test (name) OUTPUT INSE
 if err != null {
     println("dbExecReturning error: {err.message}")
 } else {
-    id = rows[0]["id"]
-    name = rows[0]["name"]
+    let id = rows[0]["id"]
+    let name = rows[0]["name"]
     println("\n✓ dbExecReturning: inserted id={id} name={name}")
 }
 

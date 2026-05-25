@@ -6,6 +6,86 @@ import (
 	"klex/parser"
 )
 
+// getNodePos returns the source position of any AST node we care about for
+// LSP positioning (find-node-at-cursor, signature-help active-parameter
+// counting). Returns (Pos{}, false) for node kinds without a Pos field —
+// callers must treat those as "skip me, no positional information."
+//
+// Shared by FindNodeAtPosition (analysis.go) and computeActiveParam
+// (hover.go) so they can never drift on which AST node types are
+// position-bearing.
+func getNodePos(node ast.Node) (ast.Pos, bool) {
+	switch n := node.(type) {
+	case *ast.Ident:
+		return n.Pos, true
+	case *ast.IntLiteral:
+		return n.Pos, true
+	case *ast.FloatLiteral:
+		return n.Pos, true
+	case *ast.StringLiteral:
+		return n.Pos, true
+	case *ast.BoolLiteral:
+		return n.Pos, true
+	case *ast.NullLiteral:
+		return n.Pos, true
+	case *ast.ArrayLiteral:
+		return n.Pos, true
+	case *ast.HashLiteral:
+		return n.Pos, true
+	case *ast.FunctionLiteral:
+		return n.Pos, true
+	case *ast.CallExpr:
+		return n.Pos, true
+	case *ast.InfixExpr:
+		return n.Pos, true
+	case *ast.PrefixExpr:
+		return n.Pos, true
+	case *ast.IndexExpr:
+		return n.Pos, true
+	case *ast.DotExpr:
+		return n.Pos, true
+	case *ast.PipeExpr:
+		return n.Pos, true
+	case *ast.AssignStmt:
+		return n.Pos, true
+	case *ast.LetStmt:
+		return n.Pos, true
+	case *ast.ConstStmt:
+		return n.Pos, true
+	case *ast.ReturnStmt:
+		return n.Pos, true
+	case *ast.IfStmt:
+		return n.Pos, true
+	case *ast.WhileStmt:
+		return n.Pos, true
+	case *ast.ForInStmt:
+		return n.Pos, true
+	case *ast.SwitchStmt:
+		return n.Pos, true
+	case *ast.BreakStmt:
+		return n.Pos, true
+	case *ast.ContinueStmt:
+		return n.Pos, true
+	case *ast.MultiAssignStmt:
+		return n.Pos, true
+	case *ast.MultiLetStmt:
+		return n.Pos, true
+	case *ast.ImportStmt:
+		return n.Pos, true
+	case *ast.IndexAssignStmt:
+		return n.Pos, true
+	case *ast.DotAssignStmt:
+		return n.Pos, true
+	case *ast.SelectStmt:
+		return n.Pos, true
+	case *ast.StructDecl:
+		return n.Pos, true
+	case *ast.EnumDecl:
+		return n.Pos, true
+	}
+	return ast.Pos{}, false
+}
+
 type SymbolKind int
 
 const (
@@ -179,6 +259,26 @@ func walkStatement(node ast.Node, uri string, symtab *SymbolTable) {
 			// Store line number for each variable by offset if needed
 			if i > 0 {
 				// Approximate line numbers for multiple assignments on same line
+				symtab.Symbols[name].DefPos = ast.Pos{Line: n.Pos.Line, Col: n.Pos.Col + i}
+			}
+		}
+		walkExpression(n.Value, uri, symtab)
+
+	case *ast.MultiLetStmt:
+		// Tuple-unpacking declaration: let x, y = func()
+		// Same symbol shape as MultiAssignStmt — every name is a fresh
+		// variable in the current scope and we can't infer tuple-element
+		// types without deeper analysis.
+		for i, name := range n.Names {
+			symtab.Symbols[name] = &Symbol{
+				Name:      name,
+				Kind:      KindVariable,
+				Type:      "unknown",
+				FromTuple: true,
+				DefURI:    uri,
+				DefPos:    n.Pos,
+			}
+			if i > 0 {
 				symtab.Symbols[name].DefPos = ast.Pos{Line: n.Pos.Line, Col: n.Pos.Col + i}
 			}
 		}
@@ -358,73 +458,8 @@ func FindNodeAtPosition(program *ast.Program, line, col int) ast.Node {
 		}
 
 		// Get position of this node
-		var nodePos ast.Pos
-		switch n := node.(type) {
-		case *ast.Ident:
-			nodePos = n.Pos
-		case *ast.IntLiteral:
-			nodePos = n.Pos
-		case *ast.FloatLiteral:
-			nodePos = n.Pos
-		case *ast.StringLiteral:
-			nodePos = n.Pos
-		case *ast.BoolLiteral:
-			nodePos = n.Pos
-		case *ast.NullLiteral:
-			nodePos = n.Pos
-		case *ast.ArrayLiteral:
-			nodePos = n.Pos
-		case *ast.HashLiteral:
-			nodePos = n.Pos
-		case *ast.FunctionLiteral:
-			nodePos = n.Pos
-		case *ast.CallExpr:
-			nodePos = n.Pos
-		case *ast.InfixExpr:
-			nodePos = n.Pos
-		case *ast.PrefixExpr:
-			nodePos = n.Pos
-		case *ast.IndexExpr:
-			nodePos = n.Pos
-		case *ast.DotExpr:
-			nodePos = n.Pos
-		case *ast.PipeExpr:
-			nodePos = n.Pos
-		case *ast.AssignStmt:
-			nodePos = n.Pos
-		case *ast.LetStmt:
-			nodePos = n.Pos
-		case *ast.ConstStmt:
-			nodePos = n.Pos
-		case *ast.ReturnStmt:
-			nodePos = n.Pos
-		case *ast.IfStmt:
-			nodePos = n.Pos
-		case *ast.WhileStmt:
-			nodePos = n.Pos
-		case *ast.ForInStmt:
-			nodePos = n.Pos
-		case *ast.SwitchStmt:
-			nodePos = n.Pos
-		case *ast.BreakStmt:
-			nodePos = n.Pos
-		case *ast.ContinueStmt:
-			nodePos = n.Pos
-		case *ast.MultiAssignStmt:
-			nodePos = n.Pos
-		case *ast.ImportStmt:
-			nodePos = n.Pos
-		case *ast.IndexAssignStmt:
-			nodePos = n.Pos
-		case *ast.DotAssignStmt:
-			nodePos = n.Pos
-		case *ast.SelectStmt:
-			nodePos = n.Pos
-		case *ast.StructDecl:
-			nodePos = n.Pos
-		case *ast.EnumDecl:
-			nodePos = n.Pos
-		default:
+		nodePos, ok := getNodePos(node)
+		if !ok {
 			return
 		}
 
@@ -552,6 +587,8 @@ func walkAST2(node ast.Node, visit func(ast.Node)) {
 			walkAST2(elem, visit)
 		}
 	case *ast.MultiAssignStmt:
+		walkAST2(n.Value, visit)
+	case *ast.MultiLetStmt:
 		walkAST2(n.Value, visit)
 	case *ast.ImportStmt:
 		// No child nodes to walk

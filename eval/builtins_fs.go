@@ -82,6 +82,68 @@ func init() {
 		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
+	// _fsReadBytes(path) → (bytes, err)
+	//
+	// Counterpart to _fsRead but returns the raw file bytes — required
+	// for binary data (float32 vectors, image bytes, encrypted blobs)
+	// where the string-based _fsRead would corrupt or fail to round-trip.
+	Builtins["_fsReadBytes"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("_fsReadBytes expects 1 argument", ast.Pos{})
+		}
+		p, ok := args[0].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("_fsReadBytes: argument must be string, got %s", args[0].Type()), ast.Pos{})
+		}
+		data, err := os.ReadFile(p.Value)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		return &Tuple{Elements: []Object{&Bytes{Value: data}, NULL}}
+	}}
+
+	// _fsAppendBytesSync(path, bytes) → (null, err)
+	//
+	// Append `bytes` to the file and call fsync(2) before close. This
+	// is the durable variant of _fsAppend: on a power loss after this
+	// function returns, the bytes ARE on disk (assuming the underlying
+	// hardware honours fsync — true for normal SSDs and HDDs).
+	//
+	// Use for crash-safe append-only logs (vector indexes, journals,
+	// audit trails). The fsync adds ~1-5 ms per call; batch small
+	// writes into one call where possible.
+	Builtins["_fsAppendBytesSync"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("_fsAppendBytesSync expects 2 arguments", ast.Pos{})
+		}
+		p, ok := args[0].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("_fsAppendBytesSync: first argument must be string, got %s", args[0].Type()), ast.Pos{})
+		}
+		bs, ok := args[1].(*Bytes)
+		if !ok {
+			return typeError(fmt.Sprintf("_fsAppendBytesSync: second argument must be bytes, got %s", args[1].Type()), ast.Pos{})
+		}
+		f, err := os.OpenFile(p.Value, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		// Don't defer Close — we need the explicit Sync to complete
+		// before Close so any error surfaces.
+		if _, err = f.Write(bs.Value); err != nil {
+			f.Close()
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		if err = f.Sync(); err != nil {
+			f.Close()
+			return &Tuple{Elements: []Object{NULL, &String{Value: "fsync: " + err.Error()}}}
+		}
+		if err = f.Close(); err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		return &Tuple{Elements: []Object{NULL, NULL}}
+	}}
+
 	// _fsAppend(path, content) → (null, err)  — creates or appends
 	Builtins["_fsAppend"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {

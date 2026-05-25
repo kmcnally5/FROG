@@ -1,269 +1,330 @@
-# kLex v0.3.35 Release Notes
+# kLex v0.3.36 Release Notes
 
 ## Overview
 
-v0.3.35 is a cross-platform, quality, and performance release. **Windows now has full native graphics support** for the first time, the release build produces self-contained drop-in packages for every supported OS, **scripts run from anywhere with no `KLEX_PATH` configuration**, the bridge system gained schema declaration and validation, and a two-pass audit removed every known `push()`-in-loop antipattern from the stdlib while eliminating ~25 hot-path Boolean allocations and adding a small-integer pool in the evaluator. The CLI also gained a real `--help`.
+v0.3.36 is a **bridge, IDE, and ecosystem** release. The bridge system gains **streaming**, **worker pools**, and **per-bridge observability metrics**. The LSP/IDE story expands substantially with **code actions**, **document formatting**, **signature help**, and a **cross-file parsed-AST cache**. The standard library gains a **Node.js bridge helper** mirroring Python's, an **ultra-fast Go-backed JSONL helper** for million-line catalogs, and a new **stream_fusion** module. **tadPole** — the multi-provider AI image-generation + agentic-chat desktop app — enters the tree for the first time, bringing the project's flagship demo into the release. **SecretHunter** (the showcase example) gets a significant rewrite to use the new bridge pool primitives.
 
-This is the largest single-release improvement in performance, portability, and developer-experience kLex has shipped.
+This release pushes kLex's positioning further: a language that ships with everything you need to drive AI tooling and live-extend applications, not just a runtime.
 
 ---
 
 ## Headline features
 
-### Native Windows graphics
+### Bridge Phase 4 — streaming, pools, metrics
 
-The four `*_windows.go` "not supported" stub files (`graphics`, `ui`, `charts`, `path`) have been deleted. The `//go:build !windows` constraints have been removed from their non-Windows counterparts. The result: a single cross-platform codebase that compiles with real OpenGL + GLFW for every supported target, including Windows.
+Builds on v0.3.35's schema phase. Three new pillars and a Node.js companion to the existing Python helper.
 
-- Cross-compiling Windows binaries from macOS now requires MinGW-w64 (`brew install mingw-w64`). The release script handles this automatically when the toolchain is present.
-- Cross-compiling darwin/amd64 from darwin/arm64 uses Xcode's clang with `-arch x86_64` (no extra install).
-- Linux cross-compile from macOS would also need a Linux X11 dev-headers sysroot; for now, **Linux is best built natively on a Linux host** (the script will simply skip Linux if the cross-toolchain is missing).
-- Verified: kLex now runs **45/47 master-test cases on first launch in a Windows VM** — the two failures (`fsTest`, `databaseTest`) are test-content portability issues, not runtime bugs.
+**`bridgeStream(bridge, fn, args, timeout?)` — streaming results.**
 
-### Cross-platform release packaging
-
-`build_releases.sh` was rewritten to produce a clean drop-in package per target:
-
-```
-releases/
-├── klex-darwin-arm64/
-│   ├── klex-darwin-arm64
-│   └── stdlib/
-├── klex-darwin-arm64.zip
-├── klex-darwin-amd64/...   klex-darwin-amd64.zip
-├── klex-windows-amd64/...  klex-windows-amd64.zip
-```
-
-Each zip contains the binary plus a full stdlib alongside it. Combined with the new import-path resolver (below), unzipping anywhere and running the binary "just works" — no environment variable to configure.
-
-### Import path resolution — scripts run from anywhere
-
-The `ImportStmt` resolver was rewritten to consult **five locations in order** instead of two:
-
-1. As given (CWD-relative)
-2. Next to the importing `.lex` file
-3. `$KLEX_PATH/<path>`
-4. Next to the kLex binary
-5. One level up from the binary (`bin/klex` + `share/klex/stdlib` style installs)
-
-The interpreter now tracks each module's source directory on its `Environment`, so chained imports resolve relative to the importing file — not just the entry script.
-
-**Practical effect:** `klex /full/path/to/myScript.lex` works from any cwd, with no `KLEX_PATH` set, as long as `stdlib/` lives next to either the script or the binary. On failure the error message lists every path tried.
-
-### Bridge Phase 3 — Schema declaration and validation
-
-Bridges can now declare argument and return types, exchanged with kLex via a `__schema__` handshake performed automatically during `nativeBridge()`. Mismatched calls fail at the call site with `BRIDGE_SCHEMA_ARG` instead of after a wire round-trip.
-
-```python
-# Python — the new way
-from klex_bridge import handler, serve
-
-@handler(args=[("a", "int"), ("b", "int")], returns="int")
-def add(a, b):
-    return a + b
-
-serve()
-```
+Bridges can now yield multiple values per call (generators, scan results, log lines). Subprocess emits `{"id": N, "stream": item}` per yielded value, then `{"id": N, "stream_end": true}`. The kLex consumer receives them through a channel; breaking the `for-in` cancels the stream cleanly (subprocess gets `{"cancel": id}` and stops producing). Optional idle and total timeouts via the 4th argument hash:
 
 ```frog
-// kLex — automatic validation
-bridge, _ = nativeBridge("python3", ["my_bridge.py"])
-r, err = bridgeCall(bridge, "add", ["two", 3])
-// err.code   == "BRIDGE_SCHEMA_ARG"
-// err.message == "add: arg 0 \"a\": expected int, got string"
-
-schemas = bridgeSchema(bridge)             // introspect all handlers
-sch     = bridgeSchema(bridge, "add")      // or one
+ch, err = bridgeStream(bridge, "scan_batch_stream", [files], {"idle": 30})
+for item in ch {
+    if isError(item) && item.code == "BRIDGE_TIMEOUT" { break }
+    if item.kind == "finding" { ... }
+}
 ```
 
-Schema mini-language: `int`, `float`, `string`, `bool`, `array`, `hash`, `null`, `any`, plus trailing `?` for nullable.
+**`bridgePool(n, cmd, args)` — round-robin worker pools.**
 
-Helper module ships at `stdlib/python/klex_bridge.py`. `nativeBridge` automatically injects this directory into the subprocess's `PYTHONPATH`, so bridge authors just `import klex_bridge` without any setup. Existing hand-rolled bridges continue to work unchanged — schemas are opt-in.
+N pre-started bridges with a round-robin counter. Routing skips dead members (failed init or tainted). SecretHunter uses this to fan 16 Python workers across YARA + entropy scanning of a whole repo. New primitives:
 
-### Real `--help`
+- `bridgePoolCall(pool, fn, args, timeout?)` — non-stream call on next alive bridge
+- `bridgePoolStream(pool, fn, args, timeout?)` — streaming variant
+- `bridgePoolHealth(pool) -> {size, alive, dead}` — snapshot for diagnostic panels
+- `bridgePoolStderr(pool) -> array` — concatenated stderr ring buffer, prefixed by member index
+- `bridgePoolClose(pool)` — close every member (idempotent)
 
-The previous `--help` output showed only the cpuprofile flag. v0.3.35 ships a proper help screen with usage, options, environment variables, the new import-path resolution chain, and examples. `-h` is now a registered alias.
+Members that fail init or get tainted mid-session are latched dead. The picker routes around them automatically — callers never see `BRIDGE_TAINTED` from a tainted pool member.
 
-A bonus fix while the file was open: `--version` and `-v` were dead code in v0.3.34 (`flag.Parse()` would have rejected them as unknown flags before reaching the manual check). They are now proper registered flags and work correctly.
+**`bridgeMetrics(bridge) -> hash` — per-bridge observability.**
+
+Single mutex acquisition + a sort over a 256-sample latency buffer = cheap enough for a dashboard polling every second. Returns:
+
+```frog
+{
+  "calls_total":     230, "calls_inflight": 1, "calls_failed": 2,
+  "streams_total":    18, "streams_active": 0, "streams_failed": 0,
+  "bytes_sent":  1240488, "bytes_received": 2810451,
+  "errors_by_code": {"BRIDGE_TIMEOUT": 4},
+  "per_function": {
+    "scan_file": {"count": 220, "errors": 1, "p50_ms": 12.0, "p95_ms": 84.0, "p99_ms": 230.0}
+  }
+}
+```
+
+**Node.js bridge helper.** `stdlib/node/klex_bridge.js` ships alongside the existing Python helper, mirroring the API:
+
+```js
+const { handler, streamHandler, serve } = require('./klex_bridge');
+
+handler({args: [['n', 'int']], returns: 'int'}, function double(n) { return n * 2; });
+streamHandler({args: [['files', 'array']], yields: 'hash'}, function* scan(files) {
+    for (const f of files) yield { path: f, ok: true };
+});
+serve();
+```
+
+Same wire protocol as Python — kLex doesn't care which side it talks to. Schema validation, streaming, cancellation, and the protocol-negotiation handshake all work identically.
+
+**Stream cancellation hygiene.** Streams that timeout reap cleanly: cancel sent to subprocess, dispatcher state cleared, final timeout error delivered as the channel's last item before close. No leaked goroutines.
+
+### LSP/IDE — production-grade developer experience
+
+The LSP (`snowball/froglsp/`) gains substantial capability across hover, completion, diagnostics, and editor integration. **~+2,100 lines** of LSP code total, plus **+149 lines** of new VS Code snippets.
+
+**New server capabilities:**
+
+- **Code actions (quickfix family)** — the lint pass surfaces diagnostics with one-click fixes
+- **Document formatting + range formatting** — Format Document and Format Selection both work
+- **Signature help** — pop the param-help bubble on `(` and re-trigger on `,` so the active-parameter highlight tracks the cursor
+- **Document symbols with full-body ranges** — VS Code's breadcrumb stays anchored to the function as the cursor moves through its body
+- **Cross-file hover** — hovering `module.symbol` reads + parses the imported `.lex` file. Backed by new `parsed_cache.go`: mtime-keyed LRU (cap 64) of parsed ASTs, so hovering inside dot-chains doesn't re-parse the stdlib on every keystroke.
+
+**Completion improvements:**
+
+- User symbols sort above builtins (`SortText: "1_"` prefix)
+- Function completions insert a snippet with placeholders that Tab-jump through each parameter
+- Markdown-rendered hover documentation in the completion popup
+- Const/var/module symbols carry their inferred type in the `Detail` field
+
+**Hover improvements:**
+
+- Builtin hovers render full markdown documentation (`snowball/froglsp/builtins.go` +1,260 lines of builtin descriptions)
+- User-symbol hovers extract the contiguous `//` comment block above the definition and join it with the rendered signature
+
+**VS Code extension:**
+
+- 149 new snippets across the kLex language surface (`klex.json`)
+- Extension JS updated for the new server capabilities
+
+### tadPole — multi-provider AI image generation and agentic chat (NEW, IN-TREE)
+
+**Tadpole** — the project's flagship demo app — enters the tree at `snowball/tadPole/`. **5,662 lines** total: 4,880 of kLex (`tadPole.lex`), 543 of Python (`ai_image_bridge.py`), plus README, fonts, and logo. Cross-platform (macOS, Linux, Windows).
+
+**Image generation across five providers in one UI:**
+- Local Stable Diffusion (AUTOMATIC1111 / Forge / reForge) over pure HTTP — no Python bridge needed
+- AI Horde (free, anonymous works)
+- Hugging Face (free tier with token)
+- OpenAI DALL·E (paid, best prompt adherence)
+
+**Agentic chat** backed by Claude (Anthropic API) or Ollama (qwen3 / llama3.1 etc. for tool use). Built-in tools the chat agent can invoke: `read_file`, `list_dir`, `http`, `write_file`, `shell`, `launch` (OS-aware app launcher).
+
+**Optional MCP integration as a CLIENT** — drops in `frogMcp` so the chat agent gets first-class kLex-language navigation: `klex_search`, `klex_describe_symbol`, `klex_list_builtins`, etc.
+
+**Self-exposes as an MCP SERVER on `:7778`** — Tadpole runs `_mcpServeHTTP` and advertises **11 tools** that any MCP client (Claude Code, Claude Desktop, the MCP Inspector, scripts) can drive:
+
+| Category | Tools | Notes |
+|---|---|---|
+| Observe | `current_state`, `list_history`, `list_providers`, `tape_query` | `tape_query` whitelists `/tmp/*.lextape` and `~/.tadpole/*.lextape` |
+| Chat | `chat`, `transform` | `transform` is a bounded one-shot prose transform via local ollama (stateless) |
+| Image | `generate_image` | fires the active provider's pipeline |
+| UI | `set_right_tab`, `set_theme`, `set_adjust`, `reset_adjust` | drive the UI from outside — switch tabs, change theme, set sliders |
+
+**Prompt caching** wired through Anthropic's `cache_control: ephemeral` markers — system prompt + tool definitions cached for ~90% input-token discount on repeated turns within 5 minutes.
+
+**Adjust panel** with live preview: exposure, contrast, saturation, hue shift, vignette, sepia, brightness, gamma + invert/desaturate toggles. Built on the `mtl_fx` Metal-backed filter chain (sub-ms per filter on macOS; 5–20 ms CPU fallback on Linux/Windows).
+
+### SecretHunter — bridge pool rewrite (showcase)
+
+The SecretHunter example (`tests/examples/SecretHunter/`) gets a significant rewrite to use the new bridge pool primitives. Spawns 16 Python workers for parallel YARA + entropy scanning of a target tree; streams findings back via `bridgePoolStream`; per-worker stderr surfaced via `bridgePoolStderr` to a diagnostic panel. The showcase app for the bridge pool feature.
+
+Cumulative change: roughly +1,100 / −1,119 lines across `secretHunterLib.lex` and `secretHunterUI.lex` plus the YARA Python bridge.
 
 ---
 
-## Performance — evaluator allocation audit
+## Standard library — expansions
 
-A focused review of the tree-walking evaluator removed ~25 per-operation allocations from hot paths. Functions that previously returned `&Boolean{...}` or `&Integer{...}` on every call now reuse pre-allocated singleton or pooled values.
+### Performance — Go-backed JSONL fast path
 
-### Boolean singletons everywhere
+New `eval/builtins_jsonl.go` with `_replaySeenFile(path)` — bypasses the kLex JSON parser entirely for streaming JSONL processing. Used by frogLight's cataloger on `catalog.jsonl` files of millions of lines. **~30 s → ~1-2 s** for 4M lines. Returns a `{path: mtime}` hash — exactly the shape `isFileFresh` needs.
 
-Every comparison and logical operator in a kLex program used to allocate a fresh `*Boolean` on every result — `1M` loop iterations of `while i < n { i = i + 1 }` allocated `~7M` Booleans just for the loop condition and arithmetic flags. After v0.3.35 these all return the `TRUE`/`FALSE` singletons.
+The kLex stdlib `json.parse` is still the right tool for general JSON; this is the surgical optimisation for the JSONL-as-state-file pattern.
 
-Sites converted: `evalEquals` (9), `evalNumericCompare` (8), `evalLogical` short-circuit and fall-through (3), `!=` (1), `PrefixExpr !` (1), `BoolLiteral` evaluation (1) — 23 hot-path allocations eliminated.
+### `stdlib/parallel.lex` — pmap, parallel_reduce, chunked
 
-### Small-integer pool
+High-performance parallel data processing on async Tasks. `pmap`, `parallel_reduce` with custom merge strategies, early termination. Built atop the snapshot model from v0.3.35.
 
-A 384-entry pool covering `-128..255` is pre-allocated at startup. The new `intObj(n int) *Integer` helper is the new path for creating Integers; if the value falls in the pool range, it returns the shared instance, otherwise it allocates. Total pool footprint: ~6 KB of permanent memory.
+```frog
+let result, err = s.collect(p.pmap([1..1000], fn(x) { x * 2 }, 4))
+let sum, err = p.parallel_reduce([1..1000], fn(a, x) { a + x }, fn(a, b) { a + b }, 4, 0)
+```
 
-Sites converted: all `InfixExpr` integer arithmetic (`+`, `-`, `*`, `/`, `%`), `PrefixExpr -` (negation), `IntLiteral` evaluation, `len()` builtin (all 6 kinds), `range()` builtin.
+### `stdlib/retry.lex` — exponential backoff + circuit breaker patterns
 
-Measured impact: `range(0, 100) × 1000` (100k Integer references) completed in 22ms — effectively zero allocations.
+(+236 lines) — production-ready retry strategies with jitter and breaker state.
 
-### Function-call hot path
+### `stdlib/stream_fusion.lex` — NEW
 
-- `numRequired(fn)` was an O(n) walk through `fn.Defaults` on every function call. The result is now cached on the `Function` struct at construction (new `NumRequired int` field) and the getter is O(1).
-- `env.Snapshot()` was a two-pass operation (count, then copy) with double read-lock acquisitions on the shared global env. Rewritten as a single pass; halves global-env lock contention during async-heavy code.
+Stream-of-streams composition for pipeline-style data processing.
 
-### Other audit follow-ups
+### `stdlib/cache.lex`, `stdlib/event.lex`, `stdlib/stream.lex`
 
-- `valuesEqual` (used by `atomicHashCAS`) now carries a "KEEP IN SYNC WITH evalEquals" header so future numeric-coercion changes can't silently diverge.
-- `tryAssign`'s in-progress comment in `env.go` was replaced with a real rationale explaining the per-level locking strategy and the concurrent-writer semantics.
-- `Snapshot()`'s doc was expanded with concrete primitive-vs-reference examples — `arr[0] = 99` inside an `async()` task **does** affect the caller, and the doc now spells that out.
+Significant expansions to the cache, event bus, and stream modules. (Combined ~+300 lines.)
 
----
+### `stdlib/json.lex` — parser polish (+325)
 
-## Standard library — quality pass
+Builds on the v0.3.35 string rune-cache fix; further parser ergonomics and error reporting improvements.
 
-A three-day audit removed every `push()`-in-loop antipattern from the stdlib (Karl-banned per CLAUDE.md) and replaced multiple O(n²) string-concatenation loops with O(n) buffered-array + `join` patterns.
+### Deletions
 
-### Performance fixes
-
-| File | Function(s) | Before | After |
-|---|---|---|---|
-| `stdlib/strings.lex` | `repeat()` + `padLeft()` + `padRight()` | char-by-char concat | pre-allocated array + `join("")` |
-| `stdlib/url.lex` | `build()` | `push()` per param | `makeArray` + index |
-| `stdlib/url.lex` | `joinPath()` | 6-line char loop | one `substr()` call |
-| `stdlib/kv_store.lex` | `allValues()` | `push()` in while | delegates to builtin `values()` |
-| `stdlib/fs.lex` | `readDir()` | `push()` in while | `makeArray` + index |
-| `stdlib/json.lex` | `parseString()` | char-by-char string concat | buffered char array + `join("")` |
-| `stdlib/json.lex` | `parseArray()` | `push()` per element | doubling buffer + final `slice()` |
-| `stdlib/json.lex` | `_stringify()` ARRAY + HASH | `push()` in for-loop | `makeArray(len, "")` + index |
-| `stdlib/json.lex` | `_substr()` helper | O(n²) wrapper around builtin | helper deleted, calls use builtin `substr()` directly |
-| `stdlib/merkle.lex` | `build_leaves()` / `tree_root()` / `get_proof()` | `push()` per node, per level | pre-allocated arrays with known per-level sizes |
-| `stdlib/stream_fusion.lex` | `fuse()` | hardcoded 5-step ceiling, double final copy, no short-circuit | variadic, single `slice()` at end, short-circuit on filter `skip` |
-
-### Wrapper-antipattern removal
-
-- `stdlib/hash.lex` `values()` wrapper deleted — was an O(n²) `push()`-in-loop reimplementation of the O(n) builtin. The module's docstring now points users at the builtin directly.
-
-### Documentation
-
-- `stdlib/csv.lex` and `stdlib/csvfrog.lex` now cross-reference each other: `csv.lex` is the production choice (wraps Go's `encoding/csv`); `csvfrog.lex` is documented as a pure-FROG teaching demo.
-- `ConcurrentHash` documents that `len(ch)` is **approximate during concurrent mutation** — the counter is atomic but not synchronised with the underlying `sync.Map` operations.
+- `stdlib/csvfrog.lex` — consolidated into `stdlib/csv.lex`
 
 ---
 
-## SecretHunter UI polish
+## Python bridge helper — robustness pass
 
-The bundled example application received a focused UI pass:
-
-- **Clickable severity tiles** — CRIT / HIGH / MED / LOW counters in the sidebar are now interactive filters with hover and active states, mirroring the dropdown's behaviour.
-- **Count-up animation** — when a scan finishes, counter values tween from 0 to final over 0.55s with ease-out cubic.
-- **Modal click-leak fixed** — opening the CFG settings dialog used to allow background tree-row selection to fire through the dimmed background. Tree clicks, right-clicks, remediation panel COPY buttons, and severity tile clicks are now all gated by `!settingsOpen`. A full-window 55%-opacity shade renders behind the modal so the inactive background reads as frozen.
-- **Tile accent style** — active severity now shows a 3px left-edge accent bar (matches the title's house style) instead of a bottom underline that overflowed adjacent cells.
-- **Tile text centred** — `textWidth()` measurement positions numbers and abbreviations dead-centre in each tile.
-- **Title scale** — reduced to fit the CFG button without overlap.
-- **Threat bar** — 6px → 10px tall with a 1px top highlight for depth.
-- **"Suppressed: N"** — colour changed from green (which reads as "good") to dim grey (informational).
+`stdlib/python/klex_bridge.py` gains **+398 lines**. Highlights:
+- `@stream_handler` decorator for streaming subprocess functions
+- Auto-registration of `__hello__` and `__schema__` so kLex can introspect the bridge with no per-script wiring
+- Background reader thread owns stdin; main thread reads classified lines from a queue
+- Errors at any point (parse, validation, exception inside the handler) surface as structured `{"id": N, "error": "...", "error_type": "...", "traceback": "..."}` responses
 
 ---
 
-## CLI
+## Documentation overhaul
+
+The language documentation got a significant consolidation pass.
+
+**Deleted:**
+- `docs/KLEX_LANGUAGE.TXT` (−3,832 lines) — the old monolithic language reference; superseded
+- `docs/LLMs_AND_FROG.md` (−307) — folded into broader docs
+- `docs/ASYNC_QUICK_REFERENCE.md` (−177) — folded into ASYNC_BEST_PRACTICES.md
+
+**Substantially expanded:**
+- `docs/ASYNC_BEST_PRACTICES.md` — **+1,012 lines**. Now the single source of truth for async/await/channels: snapshot model, primitives, patterns (pure async, worker pools, pipelines, cancel, timeout, errors), anti-patterns, performance, FAQ.
+- `docs/KLEX_GRAMMAR.MD` — **+517 lines**. Formal grammar reference, kept in sync with the parser.
+- `docs/BRIDGE_DEVELOPER_GUIDE.md` — **+206 lines**. Bridge protocol, schema declaration, streaming, pools, metrics, Python and Node helpers, debugging.
+- `docs/FROG_GRAPHICS_GUIDE.MD` — minor updates.
+
+---
+
+## Tests
+
+Almost every `tests/unit/*Test.lex` file was touched — primarily test-framework format updates as part of `stdlib/test.lex`'s polish (+21 lines), plus new coverage for `bridgeStream`, `bridgePool`, `bridgeMetrics`, and updated bridge examples in `tests/examples/bridge/`.
+
+---
+
+## Files changed
+
+(The biggest movers — see git diff for the complete list.)
+
+### Core runtime (`eval/`, `lexer/`, `parser/`, `ast/`)
 
 ```
-kLex (FROG) v0.3.35 — a pure, strict-typed scripting language with
-built-in concurrency, graphics, UI widgets, and native bridges.
+eval/builtins_bridge.go        +1,310
+eval/eval.go                     +911
+eval/builtins_ui.go              +783
+eval/object.go                   +621
+lexer/lexer.go                   +456
+eval/builtins_graphics.go        +302
+parser/parser.go                 +287
+eval/env.go                      +159
+eval/builtins_strings.go         +123
+eval/builtins_process.go         +102
+eval/builtins_os.go               +89
+eval/builtins_concurrent_hash.go  +65
+eval/typecheck.go                 +65
+eval/builtins_fs.go               +62
+eval/builtins_http.go             +56
+eval/builtins_parallel.go         +55
+ast/ast.go                        +23
+NEW: eval/builtins_bridge_pool.go
+NEW: eval/builtins_jsonl.go
+```
 
-USAGE
-  klex [options] <script.lex> [script-args...]
-  klex                          start the interactive REPL
-  klex --version                print version and exit
+### LSP / IDE (`snowball/froglsp/`)
 
-OPTIONS
-  -h, --help            show this help and exit
-  -v, --version         print version and exit
-  --cpuprofile <file>   write a CPU profile to <file> (for go tool pprof)
+```
+snowball/froglsp/builtins.go    +1,260
+snowball/froglsp/hover.go         +315
+snowball/froglsp/completion.go    +231
+snowball/froglsp/diagnostics.go   +203
+snowball/froglsp/analysis.go      +171
+snowball/froglsp/server.go        +148
+snowball/froglsp/protocol.go      +148
+NEW: snowball/froglsp/parsed_cache.go
+NEW: snowball/froglsp/documentSymbol.go
+```
 
-ENVIRONMENT
-  KLEX_PATH    Directory containing stdlib/ for import resolution.
-               Optional — kLex also finds stdlib next to the binary and
-               next to the script that is doing the importing.
-  MAXPROCS     Override GOMAXPROCS (default 12).
-...
+### Standard library (`stdlib/`)
+
+```
+stdlib/json.lex                   +325
+stdlib/retry.lex                  +236
+stdlib/ui.lex                     +198
+stdlib/parallel.lex               +140
+stdlib/cache.lex                  +114
+stdlib/stream.lex                 +105
+NEW: stdlib/stream_fusion.lex      +27
+NEW: stdlib/node/klex_bridge.js
+DEL: stdlib/csvfrog.lex          (−475)
++ event/functional/graph/merkle/rest/ui_themes polish
+```
+
+### Python bridge (`stdlib/python/`)
+
+```
+stdlib/python/klex_bridge.py      +398
+```
+
+### tadPole — NEW IN TREE
+
+```
+snowball/tadPole/tadPole.lex            +4,880
+snowball/tadPole/ai_image_bridge.py      +543
+snowball/tadPole/README.md               +239
+snowball/tadPole/fonts/*.ttf            (binary)
+snowball/tadPole/tadpole_logo.png       (binary)
+```
+
+### Documentation (`docs/`)
+
+```
+docs/ASYNC_BEST_PRACTICES.md    +1,012
+docs/KLEX_GRAMMAR.MD              +517
+docs/BRIDGE_DEVELOPER_GUIDE.md    +206
+DEL: docs/KLEX_LANGUAGE.TXT     (−3,832)
+DEL: docs/LLMs_AND_FROG.md        (−307)
+DEL: docs/ASYNC_QUICK_REFERENCE.md (−177)
+```
+
+### Examples (`tests/examples/`)
+
+```
+SecretHunter/secretHunterLib.lex    ~+1,100 / −1,119
+SecretHunter/secretHunterUI.lex     ~+774
+SecretHunter/secretHunterTest.lex      +52
+SecretHunter/yaraTest.lex              +22
+SecretHunter/yara_bridge.py           +245
+SecretHunter/github_bridge.py         +117
+bridge/{schemaTest, robustnessTest, phase2Test, …}  various
+```
+
+### Editor extensions
+
+```
+editors/vscode_froglsp/klex-language/snippets/klex.json   +149
+editors/vscode_froglsp/klex-language/extension.js          +11
+editors/vscode_froglsp/klex-language/syntaxes/klex.tmLanguage.json  +2
 ```
 
 ---
 
 ## Migration notes
 
-These changes are user-facing and worth knowing:
-
-- **`stdlib/hash.lex` no longer exports `values()`.** Use the built-in `values(myHash)` directly — same return value, drops the `h.` prefix.
-- **`stdlib/json.lex` no longer exposes `_substr`** as a private helper. It was always underscore-prefixed (private) and unused outside the file, but if you copied it elsewhere, replace those calls with the builtin `substr()`.
-- **`stream_fusion.lex` `fuse()` is now variadic.** Callers that already passed multiple step arguments work unchanged. Callers that relied on the old fixed-positional `step1..step5` signature still work (those positions just route through the variadic collector now), but the silent 5-step ceiling is gone.
-- **Import path resolution can now find files it previously couldn't.** If you had a script that previously failed with "KLEX_PATH not set", it may now succeed — kLex consults the script's directory and the binary's directory automatically. If that's not what you want, set `KLEX_PATH` explicitly or rely on CWD-relative paths first in the resolution order.
-
----
-
-## Files changed
-
-### Core (`eval/`, `main.go`, `lexer/`, `parser/`, `ast/`)
-| File | Change |
-|---|---|
-| `main.go` | New `printUsage()` with full sectioned help; proper `-h/--help` and `-v/--version` flags; sets `env.SetScriptDir()` so imports resolve relative to the entry script |
-| `eval/eval.go` | New `resolveImportPath()` — 5-location resolver; rewritten `ImportStmt` case; Boolean singleton fixes (`evalEquals`, `evalNumericCompare`, `evalLogical`, `!`, `!=`, `BoolLiteral`); small-int pool wired in (`InfixExpr`, `PrefixExpr -`, `IntLiteral`, `len()`, `range()`); `computeNumRequired()` helper |
-| `eval/object.go` | New `boolObj()` helper; `intObj()` helper + 384-entry small-int pool initialised in `init()`; `NumRequired int` field added to `Function` |
-| `eval/env.go` | `scriptDir` field + `ScriptDir()` / `SetScriptDir()` on `Environment`; `Snapshot()` rewritten as single-pass with expanded reference-sharing doc; `tryAssign` rationale replaces the WIP comment |
-| `eval/bridge_schema.go` | **New** — schema parser, `ParseSchema`, `ValidateValue`, `FnSchema`, `validateArgs`, JSON-roundtrip helpers, `*Hash` converters |
-| `eval/bridge_schema_test.go` | **New** — 14 unit tests covering the schema mini-language and validator |
-| `eval/builtins_bridge.go` | `klexPythonPath()` + `buildBridgeEnv()` + `fetchBridgeSchemas()` handshake; new `bridgeSchema()` builtin; new `BRIDGE_SCHEMA_ARG` error code; arg validation inside `bridgeCall` |
-| `eval/builtins_concurrent_hash.go` | "KEEP IN SYNC WITH evalEquals" doc on `valuesEqual` |
-| `eval/builtins_graphics.go` / `builtins_ui.go` / `builtins_charts.go` / `builtins_path.go` | `//go:build !windows` constraint removed — all four now build on every platform |
-| `eval/builtins_graphics_windows.go` / `builtins_ui_windows.go` / `builtins_charts_windows.go` / `builtins_path_windows.go` | **Deleted** — were stub files returning "not supported" errors |
-
-### Standard library (`stdlib/`)
-| File | Change |
-|---|---|
-| `stdlib/python/klex_bridge.py` | **New** — Python helper module with `@handler` decorator, `register()`, `serve()`, `notify()`, schema validator |
-| `stdlib/json.lex` | `parseString`, `parseArray`, `_stringify` ARRAY/HASH rewritten with `makeArray`/buffered patterns; `_substr` wrapper deleted (4 callers migrated to builtin `substr`) |
-| `stdlib/merkle.lex` | `build_leaves` / `tree_root` / `get_proof` rewritten using `makeArray` with known sizes per tree level |
-| `stdlib/strings.lex` | `repeat()` uses `makeArray` + `join`; `padLeft` / `padRight` collapsed to one-liners that call `repeat` |
-| `stdlib/url.lex` | `build()` uses `makeArray`; `joinPath()` 6-line char loop replaced with one `substr()` |
-| `stdlib/hash.lex` | `values()` wrapper deleted (use builtin); doc updated |
-| `stdlib/kv_store.lex` | `allValues()` collapsed to `return values(self.store)` |
-| `stdlib/fs.lex` | `readDir()` uses `makeArray` + indexed write |
-| `stdlib/stream_fusion.lex` | `fuse()` now variadic; removed hardcoded 5-step ceiling and final double-copy; added short-circuit on filter skip |
-| `stdlib/csv.lex` / `stdlib/csvfrog.lex` | Cross-reference comments — `csv.lex` for production, `csvfrog.lex` as a teaching demo |
-
-### Tooling and IDE (`snowball/froglsp/`)
-| File | Change |
-|---|---|
-| `snowball/froglsp/builtins.go` | LSP signature for `bridgeSchema`; updated `concurrentHash` doc to mention approximate-during-mutation `len()` semantics |
-
-### Documentation (`docs/`)
-| File | Change |
-|---|---|
-| `docs/BRIDGE_DEVELOPER_GUIDE.md` | Rewritten primary "Writing a Bridge Script" section around the `klex_bridge` helper (decorator + imperative styles); legacy hand-rolled template kept as a fallback; new Phase 3 schema section; `BRIDGE_SCHEMA_ARG` added to the error-codes table |
-
-### Examples (`tests/examples/`)
-| File | Change |
-|---|---|
-| `tests/examples/SecretHunter/secretHunterUI.lex` | Clickable severity tiles + count-up animation; modal click-leak fixes; tile accent style; title scale; threat-bar chunkier; suppressed colour |
-| `tests/examples/bridge/python_bridge.py` | Migrated to `@handler` decorator + `serve()` — first bridge to use the new style |
-| `tests/examples/bridge/schemaTest.lex` | **New** — end-to-end verification of `bridgeSchema()` + `BRIDGE_SCHEMA_ARG` |
-
-### Release tooling
-| File | Change |
-|---|---|
-| `build_releases.sh` | Rewritten — per-target `build_package` function that creates `releases/<name>/{binary, stdlib/}` and zips it. Cross-toolchain CC env vars for darwin/amd64, linux/amd64, windows/amd64. Failed builds print a clear message and continue, producing zips only for successful targets |
+- **`bridgeCall` signature unchanged** — no breaking change for existing bridge users. The new primitives (`bridgeStream`, `bridgePool*`, `bridgeMetrics`) are additive.
+- **`csvfrog.lex` users:** migrate imports to `csv.lex`. Same surface, less to import.
+- **Old language reference removed:** if you were linking to `docs/KLEX_LANGUAGE.TXT`, switch to `docs/KLEX_GRAMMAR.MD` + `docs/ASYNC_BEST_PRACTICES.md`.
 
 ---
 
 ## Verified
 
-- 47-test master suite passes on macOS (native) and 45/47 on Windows (the 2 failures are test-content portability — hard-coded `/tmp` paths, file-permission strings — not interpreter bugs)
-- All 14 bridge schema unit tests pass
-- All 8 stdlib audit tests (`stringsTest`, `hashTest`, `urlTest`, `kv_storeTest`, `fsTest`, `jsonTest`, `merkleTest`, `csvTest`) pass on macOS
-- `schemaTest.lex` confirms end-to-end schema handshake, validation, and `bridgeSchema()` introspection
-- Cross-compile produces working zips for darwin/arm64, darwin/amd64, windows/amd64 from a single macOS run
-- Stress tests: 1M iterations of mixed boolean+integer operators run in ~0.40s; `range(0, 100) × 1000` runs in 22ms; 100 async tasks × 3000 function calls finish in 42ms
-
----
-
-*Previous release: [v0.3.34](https://github.com/karlmcnally/kLex/releases/tag/v0.3.34)*
+- All tests pass on macOS arm64 (M4) — full master test suite
+- Bridge pool stress-tested via SecretHunter on multi-thousand-file repos
+- LSP cross-file hover validated against the kLex stdlib
+- tadPole verified end-to-end: image gen across all five providers, MCP server reachable on `:7778`, slider chain rendering on macOS Metal path
+- Windows VM smoke: image gen + bridge pool + LSP cross-file hover all functional
+- Linux native build (Debian/Ubuntu fonts auto-detected)

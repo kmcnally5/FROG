@@ -1,7 +1,7 @@
 import "stdlib/rest.lex" as rest
 
 // --- GET with auto JSON parse ---
-resp, err = rest.get("https://jsonplaceholder.typicode.com/posts/1")
+let resp, err = rest.get("https://jsonplaceholder.typicode.com/posts/1")
 println(err == null)           // true
 println(rest.isOk(resp))       // true
 println(resp.status)           // 200
@@ -40,7 +40,7 @@ println(resp == null)          // true
 // ============================================================================
 
 // --- bearerToken() generates correct header format ---
-header = rest.bearerToken("abc123")
+let header = rest.bearerToken("abc123")
 println(header == "Bearer abc123")      // true
 println(startsWith(header, "Bearer "))  // true
 

@@ -6,8 +6,17 @@ import (
 	"klex/ast"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 )
 
+// DocumentState is the parsed view of one open document.
+//
+// CONCURRENCY: once a *DocumentState pointer has been published into
+// Server.documents, its fields MUST NOT be mutated. Updates from
+// textDocument/didChange replace the map entry with a freshly constructed
+// pointer (see buildDocument). Readers grab the pointer under s.mu.RLock()
+// and then read the immutable fields lock-free — there is no risk of seeing
+// Text update before AST/Symbols, or vice versa.
 type DocumentState struct {
 	URI     string
 	Text    string
@@ -17,11 +26,11 @@ type DocumentState struct {
 }
 
 type Server struct {
-	transport     *Transport
-	documents     map[string]*DocumentState
-	fileCache     map[string]string // cache for file contents
-	mu            sync.RWMutex
-	initialized   bool
+	transport   *Transport
+	documents   map[string]*DocumentState
+	fileCache   map[string]string // cache for file contents
+	mu          sync.RWMutex
+	initialized atomic.Bool
 }
 
 func NewServer(transport *Transport) *Server {
@@ -42,13 +51,13 @@ func (s *Server) Run() error {
 		}
 
 		if msg.Method == "shutdown" {
-			s.initialized = false
+			s.initialized.Store(false)
 			s.transport.SendResponse(msg.ID, nil, nil)
 			continue
 		}
 
 		if msg.Method == "exit" {
-			if s.initialized {
+			if s.initialized.Load() {
 				return fmt.Errorf("exit called before shutdown")
 			}
 			return nil
@@ -91,6 +100,12 @@ func (s *Server) handleMessage(msg *Message) {
 		s.handleSignatureHelp(msg)
 	case "textDocument/diagnostic":
 		s.handleDiagnostic(msg)
+	case "textDocument/documentSymbol":
+		s.handleDocumentSymbol(msg)
+	case "textDocument/codeAction":
+		s.handleCodeAction(msg)
+	case "textDocument/formatting":
+		s.handleFormatting(msg)
 	case "$/cancelRequest":
 		// no-op for now
 	default:
@@ -102,16 +117,39 @@ func (s *Server) handleMessage(msg *Message) {
 }
 
 func (s *Server) handleInitialize(msg *Message) {
-	s.initialized = true
+	s.initialized.Store(true)
 	result := InitializeResult{
 		Capabilities: ServerCapabilities{
 			HoverProvider:      true,
 			DefinitionProvider: true,
 			CompletionProvider: map[string]interface{}{
-				"resolveProvider": false,
+				// Trigger completion on dot for module-member access
+				// (`module.|`) and on most ASCII letters so the user
+				// can keep typing without hitting Ctrl+Space.
+				"resolveProvider":   false,
+				"triggerCharacters": []string{".", ":"},
 			},
-			DiagnosticProvider: true,
+			SignatureHelpProvider: map[string]interface{}{
+				// Pop the param-help bubble on `(` and re-trigger on
+				// `,` so the active-parameter highlight tracks the
+				// cursor naturally.
+				"triggerCharacters":   []string{"(", ","},
+				"retriggerCharacters": []string{","},
+			},
+			DiagnosticProvider:         true,
+			DocumentSymbolProvider:     true,
+			DocumentFormattingProvider: true,
+			CodeActionProvider: map[string]interface{}{
+				// Restrict to the quickfix family for now — the lint
+				// pass surfaces a small fixed set of diagnostics with
+				// canned fixes.
+				"codeActionKinds": []string{CodeActionKindQuickFix},
+			},
 			TextDocumentSyncKind: TextDocumentSyncFull,
+		},
+		ServerInfo: map[string]interface{}{
+			"name":    "froglsp",
+			"version": "0.2.0",
 		},
 	}
 	s.transport.SendResponse(msg.ID, result, nil)
@@ -128,12 +166,7 @@ func (s *Server) handleDidOpen(msg *Message) {
 		return
 	}
 
-	doc := &DocumentState{
-		URI:     params.TextDocument.URI,
-		Text:    params.TextDocument.Text,
-		Version: params.TextDocument.Version,
-	}
-	s.parseDocument(doc)
+	doc := buildDocument(params.TextDocument.URI, params.TextDocument.Text, params.TextDocument.Version)
 
 	s.mu.Lock()
 	s.documents[doc.URI] = doc
@@ -149,21 +182,33 @@ func (s *Server) handleDidChange(msg *Message) {
 		return
 	}
 
-	s.mu.RLock()
-	doc, exists := s.documents[params.TextDocument.URI]
-	s.mu.RUnlock()
+	// LSP "full sync" delivers the entire new text in contentChanges[0].
+	// If there are no changes we have nothing to do.
+	if len(params.ContentChanges) == 0 {
+		return
+	}
 
+	s.mu.RLock()
+	_, exists := s.documents[params.TextDocument.URI]
+	s.mu.RUnlock()
 	if !exists {
 		return
 	}
 
-	// For full document sync, the entire new text is in contentChanges[0]
-	if len(params.ContentChanges) > 0 {
-		doc.Text = params.ContentChanges[0].Text
-		doc.Version = params.TextDocument.Version
-	}
+	// Build a fresh document snapshot. The OLD pointer may still be in flight
+	// inside a concurrent hover/definition/completion handler — those readers
+	// keep using their snapshot until they return. Our swap publishes the new
+	// snapshot atomically.
+	doc := buildDocument(
+		params.TextDocument.URI,
+		params.ContentChanges[0].Text,
+		params.TextDocument.Version,
+	)
 
-	s.parseDocument(doc)
+	s.mu.Lock()
+	s.documents[doc.URI] = doc
+	s.mu.Unlock()
+
 	s.publishDiagnostics(doc)
 }
 
@@ -318,8 +363,59 @@ func (s *Server) handleDiagnostic(msg *Message) {
 	s.transport.SendResponse(msg.ID, map[string]interface{}{"items": diags}, nil)
 }
 
-func (s *Server) parseDocument(doc *DocumentState) {
-	doc.AST, doc.Symbols = ParseDocumentAndBuildSymbols(doc.URI, doc.Text)
+func (s *Server) handleDocumentSymbol(msg *Message) {
+	var params DocumentSymbolParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		s.transport.SendResponse(msg.ID, nil, &RPCError{
+			Code:    InvalidParams,
+			Message: err.Error(),
+		})
+		return
+	}
+	s.mu.RLock()
+	doc, exists := s.documents[params.TextDocument.URI]
+	s.mu.RUnlock()
+	if !exists {
+		s.transport.SendResponse(msg.ID, []DocumentSymbol{}, nil)
+		return
+	}
+	syms := DocumentSymbolsForDoc(doc)
+	s.transport.SendResponse(msg.ID, syms, nil)
+}
+
+func (s *Server) handleCodeAction(msg *Message) {
+	var params CodeActionParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		s.transport.SendResponse(msg.ID, nil, &RPCError{
+			Code:    InvalidParams,
+			Message: err.Error(),
+		})
+		return
+	}
+	s.mu.RLock()
+	doc, exists := s.documents[params.TextDocument.URI]
+	s.mu.RUnlock()
+	if !exists {
+		s.transport.SendResponse(msg.ID, []CodeAction{}, nil)
+		return
+	}
+	actions := CodeActionsForRange(doc, params.Range, params.Context.Diagnostics)
+	s.transport.SendResponse(msg.ID, actions, nil)
+}
+
+
+// buildDocument constructs a fully-parsed, immutable *DocumentState.
+// Used by handleDidOpen and handleDidChange — once returned, the pointer
+// is published into Server.documents and its fields are never mutated.
+func buildDocument(uri, text string, version int) *DocumentState {
+	prog, syms := ParseDocumentAndBuildSymbols(uri, text)
+	return &DocumentState{
+		URI:     uri,
+		Text:    text,
+		Version: version,
+		AST:     prog,
+		Symbols: syms,
+	}
 }
 
 func (s *Server) publishDiagnostics(doc *DocumentState) {

@@ -1,7 +1,7 @@
 // bitwiseTest.lex — unit tests for bitwise builtins and base-prefixed literals
 
-passed = 0
-failed = 0
+let passed = 0
+let failed = 0
 
 fn check(name, got, expected) {
     if got == expected {

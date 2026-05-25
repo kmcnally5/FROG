@@ -5,7 +5,7 @@ println(path.normalize("a/b/c"))     // a/b/c
 println(path.normalize("a\\b\\c"))   // a/b/c
 
 println("== parts ==")
-ps = path.parts("/a/b/c")
+let ps = path.parts("/a/b/c")
 println(len(ps))    // 4 (includes empty string before leading /)
 println(ps[1])      // a
 println(ps[3])      // c

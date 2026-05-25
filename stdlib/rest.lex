@@ -1,4 +1,9 @@
 // rest.lex
+// @module    rest
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   JSON REST client for kLex — combines http.lex and json.lex.
 // JSON REST client for kLex — combines http.lex and json.lex.
 //
 // All functions return (RestResponse, err). On success err is null.
@@ -33,13 +38,16 @@ struct RestResponse {
 }
 
 // request is the base function all others delegate to.
-// method      — HTTP verb string
-// url         — full URL including scheme
+// method       — HTTP verb string
+// url          — full URL including scheme
 // extraHeaders — hash of additional headers, or null
-// body        — kLex value to send as JSON, or null for no body
-fn request(method, url, extraHeaders, body) {
+// body         — kLex value to send as JSON, or null for no body
+// timeoutSec   — optional per-call timeout (number of seconds, or null).
+//                Overrides the shared 30s default for LLM cold-starts
+//                and other long-running endpoints.
+fn request(method, url, extraHeaders, body, timeoutSec = null) {
     // Build a fresh headers hash so we never mutate the caller's hash.
-    headers = {}
+    let headers = {}
     if extraHeaders != null {
         for k, v in extraHeaders {
             headers[k] = v
@@ -47,20 +55,20 @@ fn request(method, url, extraHeaders, body) {
     }
 
     // Serialise body to JSON and set Content-Type.
-    jsonBody = null
+    let jsonBody = null
     if body != null {
         jsonBody = _json.stringify(body)
         headers["Content-Type"] = "application/json"
     }
 
-    resp, err = _http.request(method, url, headers, jsonBody)
+    let resp, err = _http.request(method, url, headers, jsonBody, timeoutSec)
     if err != null { return null, err }
 
     // Auto-parse JSON responses.
-    data = resp.body
-    ct = _http.header(resp, "content-type")
+    let data = resp.body
+    let ct = _http.header(resp, "content-type")
     if ct != null && indexOf(ct, "application/json") != -1 {
-        parsed, parseErr = _json.parse(resp.body)
+        let parsed, parseErr = _json.parse(resp.body)
         if parseErr == null {
             data = parsed
         }
@@ -69,11 +77,29 @@ fn request(method, url, extraHeaders, body) {
     return RestResponse { status: resp.status, data: data, headers: resp.headers }, null
 }
 
+// postWithTimeout / postWithHeadersAndTimeout — convenience wrappers that
+// surface the per-call timeout without having to thread it through the
+// generic request() call.
+fn postWithTimeout(url, body, timeoutSec) {
+    return request("POST", url, null, body, timeoutSec)
+}
+
+// postWithHeadersAndTimeout(url, body, headers, timeoutSec) — POST with custom headers and a per-call timeout in seconds.
+fn postWithHeadersAndTimeout(url, body, headers, timeoutSec) {
+    return request("POST", url, headers, body, timeoutSec)
+}
+
+// getWithTimeout(url, timeoutSec) — GET with a per-call timeout in seconds.
+fn getWithTimeout(url, timeoutSec) {
+    return request("GET", url, null, null, timeoutSec)
+}
+
 // get performs a GET request with optional extra headers.
 fn get(url) {
     return request("GET", url, null, null)
 }
 
+// getWith(url, headers) — GET with custom request headers hash.
 fn getWith(url, headers) {
     return request("GET", url, headers, null)
 }
@@ -83,6 +109,7 @@ fn post(url, body) {
     return request("POST", url, null, body)
 }
 
+// postWith(url, body, headers) — POST with body serialised as JSON and custom request headers hash.
 fn postWith(url, body, headers) {
     return request("POST", url, headers, body)
 }
@@ -92,6 +119,7 @@ fn put(url, body) {
     return request("PUT", url, null, body)
 }
 
+// putWith(url, body, headers) — PUT with body serialised as JSON and custom request headers hash.
 fn putWith(url, body, headers) {
     return request("PUT", url, headers, body)
 }
@@ -101,6 +129,7 @@ fn patch(url, body) {
     return request("PATCH", url, null, body)
 }
 
+// patchWith(url, body, headers) — PATCH with body serialised as JSON and custom request headers hash.
 fn patchWith(url, body, headers) {
     return request("PATCH", url, headers, body)
 }
@@ -110,6 +139,7 @@ fn del(url) {
     return request("DELETE", url, null, null)
 }
 
+// delWith(url, headers) — DELETE with custom request headers hash.
 fn delWith(url, headers) {
     return request("DELETE", url, headers, null)
 }
@@ -140,8 +170,8 @@ fn bearerToken(token) {
 //   headers["Authorization"] = rest.basicAuth("user", "pass")
 //   resp, err = rest.getWith(url, headers)
 fn basicAuth(username, password) {
-    credentials = username + ":" + password
-    encoded = _b64.encode(credentials)
+    let credentials = username + ":" + password
+    let encoded = _b64.encode(credentials)
     return "Basic " + encoded
 }
 
@@ -162,35 +192,35 @@ fn apiKeyHeader(key) {
 
 // getBearer performs a GET request with Bearer token authentication.
 fn getBearer(url, token) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = bearerToken(token)
     return getWith(url, headers)
 }
 
 // postBearer performs a POST request with Bearer token authentication.
 fn postBearer(url, body, token) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = bearerToken(token)
     return postWith(url, body, headers)
 }
 
 // putBearer performs a PUT request with Bearer token authentication.
 fn putBearer(url, body, token) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = bearerToken(token)
     return putWith(url, body, headers)
 }
 
 // patchBearer performs a PATCH request with Bearer token authentication.
 fn patchBearer(url, body, token) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = bearerToken(token)
     return patchWith(url, body, headers)
 }
 
 // delBearer performs a DELETE request with Bearer token authentication.
 fn delBearer(url, token) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = bearerToken(token)
     return delWith(url, headers)
 }
@@ -198,35 +228,35 @@ fn delBearer(url, token) {
 
 // getBasic performs a GET request with HTTP Basic authentication.
 fn getBasic(url, username, password) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = basicAuth(username, password)
     return getWith(url, headers)
 }
 
 // postBasic performs a POST request with HTTP Basic authentication.
 fn postBasic(url, body, username, password) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = basicAuth(username, password)
     return postWith(url, body, headers)
 }
 
 // putBasic performs a PUT request with HTTP Basic authentication.
 fn putBasic(url, body, username, password) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = basicAuth(username, password)
     return putWith(url, body, headers)
 }
 
 // patchBasic performs a PATCH request with HTTP Basic authentication.
 fn patchBasic(url, body, username, password) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = basicAuth(username, password)
     return patchWith(url, body, headers)
 }
 
 // delBasic performs a DELETE request with HTTP Basic authentication.
 fn delBasic(url, username, password) {
-    headers = {}
+    let headers = {}
     headers["Authorization"] = basicAuth(username, password)
     return delWith(url, headers)
 }

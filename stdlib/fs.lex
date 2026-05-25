@@ -1,4 +1,9 @@
 // fs.lex
+// @module    fs
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   Filesystem operations for kLex.
 // Filesystem operations for kLex.
 //
 // All mutating operations return (null, err) tuples.
@@ -72,7 +77,7 @@ fn rename(src, dst) {
 
 // stat returns (FileInfo, err) for the given path. Follows symbolic links.
 fn stat(path) {
-    info, err = _fsStat(path)
+    let info, err = _fsStat(path)
     if err != null { return null, err }
     return FileInfo {
         name:      info["name"],
@@ -87,7 +92,7 @@ fn stat(path) {
 // lstat returns (FileInfo, err) like stat, but does not follow symbolic links.
 // If path names a symlink, FileInfo describes the link itself (isSymlink == true).
 fn lstat(path) {
-    info, err = _fsLstat(path)
+    let info, err = _fsLstat(path)
     if err != null { return null, err }
     return FileInfo {
         name:      info["name"],
@@ -108,13 +113,13 @@ fn chmod(path, mode) {
 // readDir returns (array_of_FileInfo, err) for the given directory.
 // Unlike listDir, each entry is a full FileInfo including size, mode, and isSymlink.
 fn readDir(path) {
-    raw, err = _fsReadDir(path)
+    let raw, err = _fsReadDir(path)
     if err != null { return null, err }
-    n   = len(raw)
-    out = makeArray(n, null)
-    i   = 0
+    let n   = len(raw)
+    let out = makeArray(n, null)
+    let i   = 0
     while i < n {
-        info = raw[i]
+        let info = raw[i]
         out[i] = FileInfo {
             name:      info["name"],
             size:      info["size"],

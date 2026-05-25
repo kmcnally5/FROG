@@ -1,14 +1,12 @@
-// ============================================================================
 // csv.lex — CSV and TSV parsing and formatting
-// ============================================================================
+// @module    csv
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   RFC 4180 CSV/TSV parsing and formatting
 //
 // Parses and formats RFC 4180-compliant CSV using Go's encoding/csv.
 // Handles quoted fields with embedded commas, newlines, and quotes correctly.
-//
-// USE THIS FOR PRODUCTION CSV WORK. There is a sibling stdlib/csvfrog.lex
-// that implements the same parsing entirely in FROG as a teaching demo —
-// noticeably slower, exists only to showcase the language. Prefer this
-// file unless you specifically want the pure-FROG implementation.
 //
 // CRITICAL: All functions validate input types and return (data, error) tuples.
 // Check error before using the result — error is null on success.
@@ -195,7 +193,7 @@ fn headers(data) {
     if type(data) != "STRING" {
         return null, error("TYPE_ERROR", "headers expects string, got " + type(data))
     }
-    rows, err = safe(_csvParse, data)
+    let rows, err = safe(_csvParse, data)
     if err != null {
         return null, err
     }
@@ -218,7 +216,7 @@ fn dataRows(data) {
     if type(data) != "STRING" {
         return null, error("TYPE_ERROR", "dataRows expects string, got " + type(data))
     }
-    rows, err = safe(_csvParse, data)
+    let rows, err = safe(_csvParse, data)
     if err != null {
         return null, err
     }
@@ -227,10 +225,10 @@ fn dataRows(data) {
     }
 
     // Extract rows[1:] manually using while loop
-    dataLen = len(rows) - 1
-    result = makeArray(dataLen, null)
-    i = 1
-    j = 0
+    let dataLen = len(rows) - 1
+    let result = makeArray(dataLen, null)
+    let i = 1
+    let j = 0
     while i < len(rows) {
         result[j] = rows[i]
         i = i + 1
@@ -255,7 +253,7 @@ fn rowCount(data) {
     if type(data) != "STRING" {
         return null, error("TYPE_ERROR", "rowCount expects string, got " + type(data))
     }
-    rows, err = safe(_csvParse, data)
+    let rows, err = safe(_csvParse, data)
     if err != null {
         return null, err
     }
@@ -295,10 +293,10 @@ fn column(rows, index) {
         return null, error("TYPE_ERROR", "column: index must be integer, got " + type(index))
     }
 
-    result = makeArray(len(rows), null)
-    i = 0
+    let result = makeArray(len(rows), null)
+    let i = 0
     while i < len(rows) {
-        row = rows[i]
+        let row = rows[i]
         if type(row) == "ARRAY" && index < len(row) {
             result[i] = row[index]
         } else {
@@ -326,7 +324,7 @@ fn isEmpty(data) {
     if len(data) == 0 {
         return true
     }
-    hasRows, err = safe(_csvHasRows, data, ",")
+    let hasRows, err = safe(_csvHasRows, data, ",")
     if err != null {
         return true
     }

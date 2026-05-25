@@ -9,7 +9,7 @@ assert(1 + 1 == 2, "maths is broken")
 println("assert with message passed")
 
 // Fail — default message
-result, err = safe(fn() { assert(false) })
+let result, err = safe(fn() { assert(false) })
 println(err.message)
 
 // Fail — custom message
@@ -34,7 +34,7 @@ result, err = safe(divide, 10, 0)
 println(err.message)
 
 // assert with comparison expressions
-x = 42
+let x = 42
 assert(x > 0, "x must be positive")
 assert(x == 42, "x must be 42")
 assert(type(x) == "INTEGER", "x must be an integer")

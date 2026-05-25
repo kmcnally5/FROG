@@ -87,7 +87,7 @@ func init() {
 	}}
 	Builtins["colorize"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 2 {
-			return runtimeError(fmt.Sprintf("colorize: expected 2 arguments, got %d", len(args)), ast.Pos{})
+			return runtimeError(fmt.Sprintf("colorize: expected 2 arguments (text, colorCode), got %d — e.g. colorize(\"hello\", color_red())", len(args)), ast.Pos{})
 		}
 
 		text, ok := args[0].(*String)

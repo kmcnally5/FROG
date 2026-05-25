@@ -1,4 +1,9 @@
 // url.lex
+// @module    url
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   URL building and encoding utilities for kLex.
 // URL building and encoding utilities for kLex.
 //
 // Usage:
@@ -22,15 +27,15 @@ fn decode(s) {
 // Values are automatically converted to strings and percent-encoded.
 // Returns the base URL unchanged if params is empty.
 fn build(base, params) {
-    ks = keys(params)
-    n  = len(ks)
+    let ks = keys(params)
+    let n  = len(ks)
     if n == 0 { return base }
 
-    parts = makeArray(n, "")
-    i = 0
+    let parts = makeArray(n, "")
+    let i = 0
     while i < n {
-        k = ks[i]
-        v = str(params[k])
+        let k = ks[i]
+        let v = str(params[k])
         parts[i] = _urlEncode(k) + "=" + _urlEncode(v)
         i = i + 1
     }

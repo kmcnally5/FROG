@@ -32,7 +32,7 @@ It is not a general-purpose language. It is a runtime for people who want to bui
 A full parallel security scanner built entirely in FROG. Scans codebases and git history for leaked API keys, passwords, and tokens. Ships a live OpenGL interface with real-time progress, severity distribution, and filtering.
 
 ```bash
-./klex tests/examples/SecretHunter/secretHunterUI.lex
+./klex examples/SecretHunter/secretHunterUI.lex
 ```
 
 40 parallel workers. Native OpenGL GUI at 60fps during scan. Built in ~900 lines of FROG.
@@ -54,18 +54,18 @@ The REPL supports multi-line input (automatically detects when blocks are comple
 ### 1 — Async and channels in seven lines
 
 ```lex
-jobs    = channel(200)
-results = channel(200)
+let jobs    = channel(200)
+let results = channel(200)
 
-worker = async(fn() {
+let worker = async(fn() {
     while true {
-        job = recv(jobs)
+        let job = recv(jobs)
         send(results, process(job))
     }
 })
 
 send(jobs, "file.txt")
-result = recv(results)
+let result = recv(results)
 ```
 
 No executors, no event loops. Each `async()` spawns a real goroutine. Channels are typed, bounded, and blocking.
@@ -73,7 +73,7 @@ No executors, no event loops. Each `async()` spawns a real goroutine. Channels a
 ### 2 — Native OpenGL GUI, built in
 
 ```lex
-font = loadFont("/System/Library/Fonts/SFNS.ttf", 18)
+let font = loadFont("/System/Library/Fonts/SFNS.ttf", 18)
 
 window(800, 600, "App", fn(frame) {
     background(0.07, 0.07, 0.10)
@@ -92,7 +92,7 @@ SDF-rendered shapes and text. 8× MSAA. Immediate-mode widget system. Runs at na
 ```lex
 1 == "1"     // TypeError — no coercion
 if 1 { }     // TypeError — integer is not a boolean
-x = null     // explicit null, not an error
+let x = null     // explicit null, not an error
 ```
 
 No hidden type coercion. No implicit threading. No magic. Every behaviour in a FROG program is declared.
@@ -121,11 +121,12 @@ The built `klex` binary auto-discovers `stdlib/` next to itself, so scripts that
 fn add(a, b) { return a + b }
 
 // Arrays, hashes, structs
-points = [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+let points = [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
 
 // Parallel processing
-tasks = makeArray(n)
-i = 0
+let n      = len(slices)
+let tasks  = makeArray(n, null)
+let i      = 0
 while i < n {
     let chunk = slices[i]
     tasks[i] = async(fn() { return scan(chunk) })
@@ -133,7 +134,7 @@ while i < n {
 }
 
 // Error handling — Go-style, no exceptions
-result, err = safe(riskyCall, [arg])
+let result, err = safe(riskyCall, [arg])
 if err != null { println(err) }
 ```
 
@@ -143,13 +144,40 @@ if err != null { println(err) }
 
 ---
 
-## Built-in tooling
+## Language Server (froglsp)
 
-| Tool | What it does |
+`froglsp` is a full LSP server for FROG, built from the ground up for the language. Source lives in `snowball/froglsp/`.
+
+**Capabilities:**
+
+| Feature | Detail |
 |---|---|
-| `klex file.lex` | Run a program |
-| `froglsp` | LSP server — autocomplete, hover docs, diagnostics |
-| VS Code extension | Syntax highlighting + LSP integration |
+| Completion | Symbol, module-member (`.`), and builtin completions with snippet tab-stops |
+| Signature help | Parameter hints on `(` and `,` — tracks the active argument as you type |
+| Hover | Inline docs for builtins, user-defined functions, and imported module members |
+| Go to definition | Jump to where a symbol is declared |
+| Diagnostics | Parser errors and a static lint pass surfaced in-editor as you type |
+| Document symbols | Outline view of all functions and declarations in the file |
+| Formatting | Full document formatting via the built-in `klexfmt` formatter |
+| Code actions | Quick-fixes for lint diagnostics |
+
+The VS Code extension (`editors/vscode_froglsp/`) configuration wires the server up automatically — install the extension, open a `.lex` file, and all features are active with no additional configuration.
+
+---
+
+## Bytecode VM
+
+kLex includes a bytecode compiler and VM. Rather than walking the AST node-by-node at runtime, the compiler translates your program to a compact instruction set that the VM dispatches in a tight flat loop — no recursion, no interpreter overhead per node.
+
+Enable it with `--vm`:
+
+```bash
+./klex --vm your_program.lex
+```
+
+The VM delivers the most noticeable gains on compute-heavy workloads: tight arithmetic loops, deep recursion, and programs that call functions millions of times. Programs that spend most of their time in I/O, channels, or the graphics pipeline see smaller differences since those paths run in native Go regardless.
+
+The VM is under active development. The vast majority of the language is supported; a small number of constructs (`select`, some advanced async patterns) are not yet implemented in the compiler.
 
 ---
 
@@ -187,13 +215,35 @@ The restraint is intentional. No decorators, no metaclasses, no reactive state s
 
 ## Testing status
 
-kLex is extensively tested on **macOS** — its primary development platform, where every release passes the full master test suite before tagging.
+**macOS** is the primary development platform. Every release passes the full master test suite before tagging.
 
-**Windows** has received initial verification: the v0.3.35 release passes 45 of 47 stdlib tests on a fresh Windows install (the two failures are test-content portability issues, not interpreter bugs), but the platform has not yet been exercised in real production workloads.
+**Windows** — v0.3.35 passes 45 of 47 stdlib tests on a fresh install (the two failures are test-content portability issues, not interpreter bugs). v0.3.36 and the bytecode VM are untested on Windows.
 
-**Linux** native testing is planned but has not yet started. The runtime is expected to behave the same as macOS given the overlap in concurrency, OpenGL, and filesystem subsystems, but no firsthand verification has been done.
+**Linux** — v0.3.35 has been verified and is working. v0.3.36 and the bytecode VM are untested on Linux.
 
 If you hit anything platform-specific, a GitHub issue with reproduction steps is the fastest way to get it looked at.
+
+---
+
+## Project Structure
+
+| Folder | Purpose |
+|---|---|
+| `ast/` | AST node types |
+| `cmd/` | CLI entry-point helpers |
+| `docs/` | Language and library documentation |
+| `editors/` | Editor integrations (VSCode extension) |
+| `eval/` | Tree-walking evaluator and all builtins |
+| `examples/` | Runnable example programs |
+| `formatter/` | Source code formatter |
+| `lexer/` | Tokeniser |
+| `parser/` | Pratt parser |
+| `repl/` | Interactive REPL |
+| `snowball/` | Developer and build-time tooling |
+| `stdlib/` | Standard library — `.lex` files |
+| `tests/` | Test suite |
+| `tools/` | Source for kLex-specific CLI tools |
+| `vm/` | Bytecode compiler and VM (experimental) |
 
 ---
 

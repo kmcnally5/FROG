@@ -43,13 +43,13 @@ println(upper("hello"))    // HELLO
 println(lower("HELLO"))    // hello
 
 println("== lines ==")
-ls = s.lines("a\nb\nc")
+let ls = s.lines("a\nb\nc")
 println(len(ls))    // 3
 println(ls[0])      // a
 println(ls[2])      // c
 
 println("== words ==")
-ws = s.words("hello world foo")
+let ws = s.words("hello world foo")
 println(len(ws))    // 3
 println(ws[0])      // hello
 println(ws[2])      // foo

@@ -53,6 +53,36 @@ type Environment struct {
 	// (function frames, blocks) leave it empty and inherit from outer via
 	// ScriptDir(). Empty string means "no script context" (e.g. REPL).
 	scriptDir string
+
+	// liveBindings is a name → live-getter map populated by the VM's
+	// module loader (M6, audit follow-up 2026-05-22). When an
+	// imported module is compiled to bytecode, its top-level
+	// bindings live as *UpvalueCell values that the module's
+	// internal functions mutate through closures. To match
+	// tree-walker semantics where external readers of a module's
+	// mutable top-level state see the current value, the VM
+	// installs a getter per binding that reads the cell's Value
+	// live. Get() checks this BEFORE store so reads from outside
+	// (DotExpr on a *Module) reflect ongoing mutations.
+	//
+	// nil for tree-walker-evaluated environments. The nil-check is
+	// a single pointer load on every Get — negligible cost.
+	liveBindings map[string]func() Object
+}
+
+// SetLiveBinding registers a live-value getter for `name`. Used by
+// vm.CompileAndRunModule to expose module top-level cells without
+// snapshotting their Value. Subsequent Get(name) calls invoke the
+// getter and return the cell's current value.
+//
+// liveBindings shadows store: if both exist for the same name, the
+// getter wins. Regular env.Set on the same name clears the getter
+// (the bind reverts to a stored value).
+func (e *Environment) SetLiveBinding(name string, getter func() Object) {
+	if e.liveBindings == nil {
+		e.liveBindings = make(map[string]func() Object)
+	}
+	e.liveBindings[name] = getter
 }
 
 // ScriptDir returns the directory of the script that introduced this scope
@@ -108,58 +138,68 @@ func (e *Environment) SetConst(name string, value Object) Object {
 // CheckWritable returns a RuntimeError if name resolves to a const binding in
 // this scope chain, or nil if the assignment is permitted.
 // Mirrors Assign's lookup logic: checks current scope first, then walks outer.
+// Iterative walk — each scope locks/unlocks independently to keep the shared
+// global env's read window brief and avoid Go-stack growth on deep nests.
 func (e *Environment) CheckWritable(name string) *Error {
-	if e.shared {
-		e.mu.RLock()
-	}
-	isConst := e.consts != nil && e.consts[name]
-	_, inStore := e.store[name]
-	if e.shared {
-		e.mu.RUnlock()
-	}
-
-	if isConst {
-		return &Error{Kind: RuntimeErr, Message: "cannot reassign constant " + name}
-	}
-	if inStore {
-		return nil // found here and not const — writable
-	}
-	if e.outer != nil {
-		return e.outer.CheckWritable(name)
+	for env := e; env != nil; env = env.outer {
+		if env.shared {
+			env.mu.RLock()
+		}
+		isConst := env.consts != nil && env.consts[name]
+		_, inStore := env.store[name]
+		if env.shared {
+			env.mu.RUnlock()
+		}
+		if isConst {
+			return &Error{Kind: RuntimeErr, Message: "cannot reassign constant " + name}
+		}
+		if inStore {
+			return nil // found here and not const — writable
+		}
 	}
 	return nil
 }
 
 // Get looks up a variable name. It searches:
 //  1. This scope's own store
-//  2. The outer (enclosing) scope, recursively
+//  2. The outer (enclosing) scopes in order
 //  3. The built-in functions (println, len, push, etc.)
 //
 // If nothing is found, it returns (nil, false) and the evaluator will
 // produce an "undefined variable" RuntimeError.
+//
+// Iterative walk so deep scope chains (closures inside modules inside
+// loops, etc.) don't stack a Go frame per level. Only the global env can
+// be shared, so the RLock cost is bounded.
 func (e *Environment) Get(name string) (Object, bool) {
-	if e.shared {
-		e.mu.RLock()
-	}
-	val, ok := e.store[name]
-	if e.shared {
-		e.mu.RUnlock()
-	}
-	if ok {
-		return val, true
+	for env := e; env != nil; env = env.outer {
+		// M6: live-bindings (VM-compiled module top-level cells)
+		// shadow regular store entries. The nil-check on the map
+		// is a single pointer load; for tree-walker envs this is
+		// always nil-fast.
+		if env.liveBindings != nil {
+			if getter, ok := env.liveBindings[name]; ok {
+				return getter(), true
+			}
+		}
+		if env.shared {
+			env.mu.RLock()
+		}
+		val, ok := env.store[name]
+		if env.shared {
+			env.mu.RUnlock()
+		}
+		if ok {
+			return val, true
+		}
 	}
 
-	// Walk the full scope chain before falling back to builtins.
-	// This means a user-defined function in any enclosing scope (e.g. a module)
-	// can shadow a builtin of the same name for closures defined within it.
-	if e.outer != nil {
-		return e.outer.Get(name)
-	}
-
+	// Fall back to builtins only after exhausting the scope chain — a
+	// user-defined function in any enclosing scope can shadow a builtin
+	// of the same name for closures defined within it.
 	if builtin, ok := Builtins[name]; ok {
 		return builtin, true
 	}
-
 	return nil, false
 }
 
@@ -245,29 +285,24 @@ func (e *Environment) Assign(name string, value Object) Object {
 // concurrent-map semantics kLex programs are expected to handle via
 // concurrentHash() or async barriers, not via the global env.
 func (e *Environment) tryAssign(name string, value Object) (Object, bool) {
-	if e.shared {
-		e.mu.Lock()
-	}
-
-	// Check if it exists in THIS scope
-	if _, ok := e.store[name]; ok {
-		e.store[name] = value
-		if e.shared {
-			e.mu.Unlock()
+	// Iterative walk — each scope locks/unlocks independently so we never
+	// hold two locks at once (deadlock prevention) and don't stack a Go
+	// frame per scope level.
+	for env := e; env != nil; env = env.outer {
+		if env.shared {
+			env.mu.Lock()
 		}
-		return value, true
+		if _, ok := env.store[name]; ok {
+			env.store[name] = value
+			if env.shared {
+				env.mu.Unlock()
+			}
+			return value, true
+		}
+		if env.shared {
+			env.mu.Unlock()
+		}
 	}
-
-	// Unlock before recursing to avoid holding multiple locks (deadlock prevention)
-	if e.shared {
-		e.mu.Unlock()
-	}
-
-	// Recurse to parent
-	if e.outer != nil {
-		return e.outer.tryAssign(name, value)
-	}
-
 	return nil, false
 }
 
@@ -327,6 +362,18 @@ func (e *Environment) Snapshot() *Environment {
 		if env.shared {
 			env.mu.RUnlock()
 		}
+	}
+
+	// M5 lazy mutex: Snapshot is called BEFORE a goroutine starts
+	// (async / parallel / select tasks). Every reference-type value
+	// in the snapshot is now reachable from both the original
+	// goroutine (which still has the parent env) AND the new
+	// goroutine (which gets `snap`). Mark every reachable Hash as
+	// shared so subsequent reads/writes from either side acquire
+	// the mutex. Primitives + non-hash references fall through
+	// cheaply.
+	for _, v := range snap.store {
+		MarkSharedRecursive(v)
 	}
 
 	return snap

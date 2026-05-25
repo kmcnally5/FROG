@@ -40,7 +40,7 @@ fn test_granularity(arraySize, granularities) {
 
         let start = dt.nowNanos()
 
-        sum, err = p.parallel_reduce(
+        let sum, err = p.parallel_reduce(
             arr,
             fn(acc, x) { acc + x },
             fn(a, b) { a + b },

@@ -35,6 +35,7 @@ const (
 	SchemaArray
 	SchemaHash
 	SchemaNull
+	SchemaBytes
 )
 
 func (k SchemaKind) String() string {
@@ -55,6 +56,8 @@ func (k SchemaKind) String() string {
 		return "hash"
 	case SchemaNull:
 		return "null"
+	case SchemaBytes:
+		return "bytes"
 	}
 	return "?"
 }
@@ -105,6 +108,8 @@ func ParseSchema(s string) (Schema, error) {
 		kind = SchemaHash
 	case "null":
 		kind = SchemaNull
+	case "bytes":
+		kind = SchemaBytes
 	default:
 		return Schema{}, fmt.Errorf("unknown schema type %q", s)
 	}
@@ -158,6 +163,10 @@ func ValidateValue(obj Object, schema Schema) error {
 		}
 	case SchemaHash:
 		if _, ok := obj.(*Hash); ok {
+			return nil
+		}
+	case SchemaBytes:
+		if _, ok := obj.(*Bytes); ok {
 			return nil
 		}
 	case SchemaNull:

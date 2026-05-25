@@ -1,4 +1,9 @@
 // http.lex
+// @module    http
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   HTTP client stdlib for kLex
 // HTTP client stdlib for kLex
 //
 // All functions return (Response, err) tuples.
@@ -16,12 +21,15 @@ struct Response {
 }
 
 // request is the base function — all others delegate to it.
-// method  — HTTP verb: "GET", "POST", "PUT", "PATCH", "DELETE"
-// url     — full URL including scheme
-// headers — hash of string → string, or null
-// body    — string body, or null
-fn request(method, url, headers, body) {
-    status, rbody, rheaders, err = _httpDo(method, url, headers, body)
+// method     — HTTP verb: "GET", "POST", "PUT", "PATCH", "DELETE"
+// url        — full URL including scheme
+// headers    — hash of string → string, or null
+// body       — string body, or null
+// timeoutSec — optional number of seconds; null or 0 keeps the shared
+//              30s client default. Pass a positive number to override
+//              per-call (LLM cold-start, slow endpoints, etc.).
+fn request(method, url, headers, body, timeoutSec = null) {
+    let status, rbody, rheaders, err = _httpDo(method, url, headers, body, timeoutSec)
     if err != null { return null, err }
     return Response { status: status, body: rbody, headers: rheaders }, null
 }

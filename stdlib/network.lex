@@ -1,4 +1,9 @@
 // stdlib/network.lex — TCP networking and DNS for kLex
+// @module    network
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   TCP networking and DNS for kLex
 //
 // Wraps the tcpDial, tcpListen, netRead, netWrite, netClose, dnsLookup
 // builtins into a consistent, named API.
@@ -80,7 +85,7 @@ fn lookup(host) {
 fn readAll(conn) {
     let result = ""
     while true {
-        chunk, err = netRead(conn, 4096)
+        let chunk, err = netRead(conn, 4096)
         if err != null { return null, err }
         if chunk == "" { break }
         result = result + chunk

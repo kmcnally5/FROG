@@ -1,4 +1,9 @@
 // ui_themes.lex — named UI colour themes for kLex applications.
+// @module    ui_themes
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   named UI colour themes for kLex applications.
 //
 // Usage:
 //   import "stdlib/ui_themes.lex" as themes
@@ -15,8 +20,10 @@
 // ── Helper: wire widget palette from a theme map ──────────────────────────────
 // Call once per window (ideally on the first frame with a themeApplied flag).
 
+// applyTheme(t) — wire all widget palette slots from a theme hash and activate it via uiTheme().
+// Call once per window (typically on the first frame with a themeApplied guard flag).
 fn applyTheme(t) {
-    pal = makeTheme()
+    let pal = makeTheme()
     pal[0]  = t["wBg"]
     pal[1]  = t["wBgHover"]
     pal[2]  = t["wBgActive"]
@@ -52,10 +59,12 @@ fn _sev() {
 // ── dark ──────────────────────────────────────────────────────────────────────
 // Neutral dark grey — matches the default widget palette. Good general purpose.
 
+// dark() — return the neutral dark-grey theme hash. Good general-purpose dark palette.
 fn dark() {
-    s = _sev()
+    let s = _sev()
     s["bg"]              = [0.09, 0.09, 0.11, 1.0]
     s["panelBg"]         = [0.13, 0.13, 0.15, 1.0]
+    // (wInputBg sits ~3 steps darker than panelBg so idle text fields read as recessed)
     s["panelBgShade"]    = [0.00, 0.00, 0.00, 0.18]
     s["panelBorder"]     = [0.22, 0.22, 0.26, 0.80]
     s["panelBorderFade"] = [0.30, 0.30, 0.36, 0.20]
@@ -115,7 +124,7 @@ fn dark() {
     s["wTrack"]          = [0.16, 0.16, 0.20, 1.0]
     s["wTrackFill"]      = [0.52, 0.52, 0.62, 1.0]
     s["wHandle"]         = [0.84, 0.84, 0.90, 1.0]
-    s["wInputBg"]        = [0.18, 0.18, 0.22, 1.0]
+    s["wInputBg"]        = [0.10, 0.10, 0.12, 1.0]   // ~20% lighter than the recessed-too-dark first pass, still below panelBg
     s["wInputFocus"]     = [0.10, 0.28, 0.48, 1.0]
     s["wShadow"]         = [0.00, 0.00, 0.00, 0.50]
     return s
@@ -124,8 +133,9 @@ fn dark() {
 // ── crimson ───────────────────────────────────────────────────────────────────
 // Dark navy with red accent — the Secret Hunter palette.
 
+// crimson() — return the dark-navy-with-red-accent theme hash. The SecretHunter palette.
 fn crimson() {
-    s = _sev()
+    let s = _sev()
     s["bg"]              = [0.07, 0.07, 0.10, 1.0]
     s["panelBg"]         = [0.10, 0.10, 0.14, 1.0]
     s["panelBgShade"]    = [0.00, 0.00, 0.00, 0.18]
@@ -187,7 +197,7 @@ fn crimson() {
     s["wTrack"]          = [0.10, 0.10, 0.14, 1.0]
     s["wTrackFill"]      = [0.44, 0.07, 0.10, 1.0]
     s["wHandle"]         = [0.90, 0.88, 0.96, 1.0]
-    s["wInputBg"]        = [0.10, 0.10, 0.14, 1.0]
+    s["wInputBg"]        = [0.06, 0.06, 0.11, 1.0]   // ~20% lighter than the recessed-too-dark first pass, still below panelBg
     s["wInputFocus"]     = [0.16, 0.12, 0.20, 1.0]
     s["wShadow"]         = [0.00, 0.00, 0.00, 0.55]
     return s
@@ -196,8 +206,9 @@ fn crimson() {
 // ── midnight ──────────────────────────────────────────────────────────────────
 // Deep indigo-blue with cyan accent.
 
+// midnight() — return the deep-indigo theme hash with cyan accent.
 fn midnight() {
-    s = _sev()
+    let s = _sev()
     s["bg"]              = [0.04, 0.04, 0.12, 1.0]
     s["panelBg"]         = [0.07, 0.07, 0.18, 1.0]
     s["panelBgShade"]    = [0.00, 0.00, 0.00, 0.22]
@@ -259,7 +270,7 @@ fn midnight() {
     s["wTrack"]          = [0.07, 0.07, 0.18, 1.0]
     s["wTrackFill"]      = [0.10, 0.50, 0.88, 1.0]
     s["wHandle"]         = [0.75, 0.88, 1.00, 1.0]
-    s["wInputBg"]        = [0.07, 0.08, 0.18, 1.0]
+    s["wInputBg"]        = [0.04, 0.04, 0.14, 1.0]   // ~20% lighter than the recessed-too-dark first pass, still below panelBg
     s["wInputFocus"]     = [0.10, 0.20, 0.45, 1.0]
     s["wShadow"]         = [0.00, 0.00, 0.00, 0.55]
     return s
@@ -268,8 +279,9 @@ fn midnight() {
 // ── forest ────────────────────────────────────────────────────────────────────
 // Deep green with bright lime accent.
 
+// forest() — return the deep-green theme hash with bright lime accent.
 fn forest() {
-    s = _sev()
+    let s = _sev()
     s["bg"]              = [0.04, 0.08, 0.05, 1.0]
     s["panelBg"]         = [0.06, 0.12, 0.07, 1.0]
     s["panelBgShade"]    = [0.00, 0.00, 0.00, 0.18]
@@ -331,7 +343,7 @@ fn forest() {
     s["wTrack"]          = [0.05, 0.10, 0.06, 1.0]
     s["wTrackFill"]      = [0.14, 0.68, 0.24, 1.0]
     s["wHandle"]         = [0.78, 0.96, 0.80, 1.0]
-    s["wInputBg"]        = [0.05, 0.10, 0.06, 1.0]
+    s["wInputBg"]        = [0.04, 0.08, 0.05, 1.0]   // ~20% lighter than the recessed-too-dark first pass, still below panelBg
     s["wInputFocus"]     = [0.08, 0.28, 0.12, 1.0]
     s["wShadow"]         = [0.00, 0.00, 0.00, 0.50]
     return s
@@ -340,8 +352,9 @@ fn forest() {
 // ── light ─────────────────────────────────────────────────────────────────────
 // Clean light / white theme with deep blue accent.
 
+// light() — return the clean light/white theme hash with deep-blue accent.
 fn light() {
-    s = _sev()
+    let s = _sev()
     s["bg"]              = [0.94, 0.94, 0.96, 1.0]
     s["panelBg"]         = [0.88, 0.88, 0.92, 1.0]
     s["panelBgShade"]    = [0.00, 0.00, 0.00, 0.06]

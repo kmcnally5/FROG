@@ -290,9 +290,7 @@ func init() {
 		if !ok {
 			return typeError(fmt.Sprintf("parallelArrayForEach: first argument must be an array, got %s", args[0].Type()), ast.Pos{})
 		}
-		switch args[1].(type) {
-		case *Function, *Builtin:
-		default:
+		if !IsCallable(args[1]) {
 			return typeError(fmt.Sprintf("parallelArrayForEach: second argument must be a function, got %s", args[1].Type()), ast.Pos{})
 		}
 
@@ -300,6 +298,9 @@ func init() {
 		if n == 0 {
 			return NULL
 		}
+
+		// M5 lazy mutex: workers read arr.Elements concurrently.
+		MarkSharedRecursive(arr)
 
 		numWorkers, chunkSize := parallelChunks(n)
 		snapshotEnv := snapshotForFn(args[1])

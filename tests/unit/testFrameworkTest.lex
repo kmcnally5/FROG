@@ -77,11 +77,11 @@ t.describe("Comparisons", fn() {
 
 t.describe("Error handling", fn() {
     t.it("runtime error in test = fail not crash (this ✗ is expected)", fn() {
-        arr = [1, 2, 3]
-        x = arr[99]
+        let arr = [1, 2, 3]
+        let x = arr[99]
     })
     t.it("assertError on two-path errors", fn() {
-        _, err = dbOpen("mssql", "bad dsn")
+        let _, err = dbOpen("mssql", "bad dsn")
         t.assertError(err)
     })
 })

@@ -2,7 +2,7 @@
 
 println("=== ConcurrentHash basics ===")
 
-ch = concurrentHash()
+let ch = concurrentHash()
 assert(len(ch) == 0, "new ConcurrentHash should have length 0")
 
 ch["alpha"] = 1
@@ -24,7 +24,7 @@ println("  ✓ Basic [] read/write works, len() correct")
 
 println("\n=== Mixed key types ===")
 
-ch2 = concurrentHash()
+let ch2 = concurrentHash()
 ch2["str_key"] = "value"
 ch2[42] = "int_key_value"
 ch2[true] = "bool_key_value"
@@ -38,7 +38,7 @@ println("  ✓ Mixed string/int/bool keys work")
 
 println("\n=== delete() ===")
 
-ch3 = concurrentHash()
+let ch3 = concurrentHash()
 ch3["x"] = 1
 ch3["y"] = 2
 delete(ch3, "x")
@@ -55,18 +55,18 @@ println("  ✓ delete() works correctly")
 
 println("\n=== keys() ===")
 
-ch4 = concurrentHash()
+let ch4 = concurrentHash()
 ch4["a"] = 1
 ch4["b"] = 2
 ch4["c"] = 3
 
-ks = keys(ch4)
+let ks = keys(ch4)
 assert(len(ks) == 3, "keys() should return 3 keys")
 
 // Keys can be in any order; check all three are present
-found_a = false
-found_b = false
-found_c = false
+let found_a = false
+let found_b = false
+let found_c = false
 for i in range(0, len(ks)) {
   if ks[i] == "a" { found_a = true }
   if ks[i] == "b" { found_b = true }
@@ -76,17 +76,49 @@ assert(found_a == true && found_b == true && found_c == true, "keys() missing en
 
 println("  ✓ keys() returns all keys")
 
+println("\n=== values() ===")
+
+// Regression guard: values() used to reject *ConcurrentHash with a
+// TypeError while keys() and delete() accepted it. The fix added a
+// *ConcurrentHash arm to values()'s type switch, mirroring keys().
+let ch4v = concurrentHash()
+ch4v["a"] = 1
+ch4v["b"] = 2
+ch4v["c"] = 3
+
+let vs = values(ch4v)
+assert(len(vs) == 3, "values() should return 3 values")
+
+// Values can be in any order (sync.Map.Range is non-deterministic);
+// check all three are present.
+let found_1 = false
+let found_2 = false
+let found_3 = false
+for i in range(0, len(vs)) {
+  if vs[i] == 1 { found_1 = true }
+  if vs[i] == 2 { found_2 = true }
+  if vs[i] == 3 { found_3 = true }
+}
+assert(found_1 == true && found_2 == true && found_3 == true, "values() missing entries")
+
+// Empty ConcurrentHash returns empty array
+let ch4v_empty = concurrentHash()
+let vs_empty = values(ch4v_empty)
+assert(len(vs_empty) == 0, "values() on empty ConcurrentHash should return empty array")
+
+println("  ✓ values() returns all values (matches keys() symmetry)")
+
 println("\n=== atomicHashIncr ===")
 
-ch5 = concurrentHash()
+let ch5 = concurrentHash()
 
 // Increment from missing key (treated as 0)
-new_val = atomicHashIncr(ch5, "counter", 5)
+let new_val = atomicHashIncr(ch5, "counter", 5)
 assert(new_val == 5, "atomicHashIncr from missing should be delta")
 assert(ch5["counter"] == 5, "atomicHashIncr didn't store")
 
 // Increment existing
-new_val2 = atomicHashIncr(ch5, "counter", 3)
+let new_val2 = atomicHashIncr(ch5, "counter", 3)
 assert(new_val2 == 8, "atomicHashIncr accumulator wrong: " + str(new_val2))
 
 // Negative delta
@@ -97,31 +129,31 @@ println("  ✓ atomicHashIncr works (single-threaded)")
 
 println("\n=== atomicHashAdd (float) ===")
 
-ch6 = concurrentHash()
+let ch6 = concurrentHash()
 atomicHashAdd(ch6, "balance", 100.5)
 atomicHashAdd(ch6, "balance", 25.25)
-val = ch6["balance"]
+let val = ch6["balance"]
 assert(val == 125.75, "float accumulator wrong: " + str(val))
 
 println("  ✓ atomicHashAdd works")
 
 println("\n=== atomicHashCAS ===")
 
-ch7 = concurrentHash()
+let ch7 = concurrentHash()
 ch7["status"] = "pending"
 
 // Successful CAS
-swapped = atomicHashCAS(ch7, "status", "pending", "active")
+let swapped = atomicHashCAS(ch7, "status", "pending", "active")
 assert(swapped == true, "CAS should succeed when value matches")
 assert(ch7["status"] == "active", "CAS didn't update")
 
 // Failed CAS (current value doesn't match)
-swapped2 = atomicHashCAS(ch7, "status", "pending", "done")
+let swapped2 = atomicHashCAS(ch7, "status", "pending", "done")
 assert(swapped2 == false, "CAS should fail when value doesn't match")
 assert(ch7["status"] == "active", "failed CAS shouldn't change value")
 
 // CAS on missing key
-swapped3 = atomicHashCAS(ch7, "missing", null, "new")
+let swapped3 = atomicHashCAS(ch7, "missing", null, "new")
 assert(swapped3 == false, "CAS on missing key should return false")
 
 println("  ✓ atomicHashCAS works correctly")
@@ -130,9 +162,9 @@ println("\n=== Concurrent atomicHashIncr (the real test) ===")
 
 // 10 goroutines × 5000 increments each on the same dynamic key.
 // Result MUST be exactly 50000 - any race would lose updates.
-counter_hash = concurrentHash()
+let counter_hash = concurrentHash()
 
-tasks = makeArray(10, null)
+let tasks = makeArray(10, null)
 for w in range(0, 10) {
   let h = counter_hash
   tasks[w] = async(fn() {
@@ -146,7 +178,7 @@ for w in range(0, 10) {
   await(tasks[w])
 }
 
-final = counter_hash["shared"]
+let final = counter_hash["shared"]
 assert(final == 50000, "Concurrent atomicHashIncr lost updates: expected 50000, got " + str(final))
 println("  ✓ 10 workers × 5,000 hash increments = " + str(final) + " (no lost updates)")
 
@@ -154,15 +186,15 @@ println("\n=== Concurrent inserts of distinct keys ===")
 
 // Each worker inserts to a different key - no contention, just want to verify
 // the count tracking and concurrent inserts work correctly.
-multi_hash = concurrentHash()
-itasks = makeArray(20, null)
+let multi_hash = concurrentHash()
+let itasks = makeArray(20, null)
 
 for w in range(0, 20) {
   let h = multi_hash
   let worker_id = w
   itasks[w] = async(fn() {
     for i in range(0, 100) {
-      key = "worker_" + str(worker_id) + "_item_" + str(i)
+      let key = "worker_" + str(worker_id) + "_item_" + str(i)
       h[key] = worker_id * 1000 + i
     }
   })
@@ -179,18 +211,18 @@ println("\n=== Concurrent dynamic event counter (the realistic use case) ===")
 
 // Simulate event aggregation: workers see random event types,
 // atomicHashIncr the counter for each. Final result should be exact.
-events = concurrentHash()
+let events = concurrentHash()
 
-event_types = ["login", "logout", "view", "click", "purchase", "error"]
+let event_types = ["login", "logout", "view", "click", "purchase", "error"]
 
-etasks = makeArray(10, null)
+let etasks = makeArray(10, null)
 for w in range(0, 10) {
   let evs = events
   let types = event_types
   etasks[w] = async(fn() {
     for i in range(0, 1000) {
       // Pick a "random" event type using i % 6
-      etype = types[i % 6]
+      let etype = types[i % 6]
       atomicHashIncr(evs, etype, 1)
     }
   })
@@ -200,9 +232,9 @@ for w in range(0, 10) {
   await(etasks[w])
 }
 
-total = 0
+let total = 0
 for i in range(0, len(event_types)) {
-  c = events[event_types[i]]
+  let c = events[event_types[i]]
   if c != null {
     total = total + c
   }
@@ -212,7 +244,7 @@ println("  ✓ 10 workers logged 10,000 events across 6 dynamic types: total=" +
 
 // Each event type should have ~1666 occurrences (10 workers * 1000 events / 6 types ≈ 1666)
 for i in range(0, len(event_types)) {
-  c = events[event_types[i]]
+  let c = events[event_types[i]]
   println("    " + event_types[i] + ": " + str(c))
 }
 

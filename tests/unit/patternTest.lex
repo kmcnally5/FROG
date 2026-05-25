@@ -26,7 +26,7 @@ println(describe(Shape.Rect(10, 3)))
 println(describe(Shape.Point))
 
 // bindings are local to the arm
-r = "outer"
+let r = "outer"
 switch Shape.Circle(99) {
     case Shape.Circle(r) {
         println("inner r = " + str(r))
@@ -45,7 +45,7 @@ fn badBindingCount() {
         }
     }
 }
-val, err = safe(badBindingCount)
+let val, err = safe(badBindingCount)
 if err == null {
     println("ERROR: expected runtime error for wrong binding count, got none")
 } else {

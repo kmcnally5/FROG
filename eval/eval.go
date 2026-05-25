@@ -25,6 +25,7 @@ package eval
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"klex/ast"
@@ -38,6 +39,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -46,9 +48,55 @@ import (
 // stdinReader is shared across all input() calls so buffered bytes are not lost.
 var stdinReader = bufio.NewReader(os.Stdin)
 
-// importingFiles tracks which files are currently mid-import to detect cycles.
-// It is package-level because import evaluation recurses through Eval itself.
-var importingFiles = map[string]bool{}
+// Module import state.
+//
+//   moduleCache    — absolute path → evaluated *Environment. Populated
+//                    on successful import; subsequent imports of the
+//                    same path hand back a Module wrapping the cached
+//                    Env (under whatever alias the new importer used).
+//                    This makes module-level mutable state (cost
+//                    ledgers, registries, pools) act as process-global
+//                    — which is how a sane scripting language reads
+//                    "two files importing the same library see the same
+//                    variables." The previous fresh-env-per-import
+//                    behaviour silently broke cross-module coordination.
+//
+//   importingFiles — set of paths currently mid-import. Used for cycle
+//                    detection; an entry is added before Eval runs the
+//                    module's top-level code and removed on completion.
+//
+//   moduleCacheMu  — guards BOTH maps. import evaluation recurses
+//                    through Eval, and async() goroutines can do their
+//                    own imports, so concurrent access is possible.
+//                    The lock is released across the Eval call itself
+//                    to avoid reentrant-deadlock when an imported file
+//                    imports another file.
+//
+// Failures are never cached: if Eval returns an error, the path is left
+// out so a subsequent retry will re-attempt the import.
+//
+// Lifetime: process. There is no mtime check or invalidation — kLex
+// programs are short-lived enough that file-during-run edits are not a
+// real use case. Restart the process to pick up source changes.
+var (
+	moduleCacheMu  sync.RWMutex
+	moduleCache    = map[string]*Environment{}
+	importingFiles = map[string]bool{}
+)
+
+// ResetModuleCache clears every cached module env and any in-flight
+// import marker. Used by differential test runners (vmdiff) that need
+// the eval and vm passes to start from identical module state — the
+// alternative is for module-level mutable counters (e.g.
+// stdlib/test.lex's _passed) to carry leftover state from the eval
+// pass into the vm pass and produce spurious diffs. Safe to call from
+// any goroutine; takes the cache write lock.
+func ResetModuleCache() {
+	moduleCacheMu.Lock()
+	moduleCache = map[string]*Environment{}
+	importingFiles = map[string]bool{}
+	moduleCacheMu.Unlock()
+}
 
 // resolveImportPath finds the file backing an `import "path"` statement.
 // It tries five locations in order; the first existing file wins. Returns
@@ -64,6 +112,19 @@ var importingFiles = map[string]bool{}
 // Duplicates in the list are dropped (e.g. when CWD happens to equal the
 // script directory) so the error message stays clean.
 func resolveImportPath(path string, env *Environment) (resolved string, tried []string, ok bool) {
+	scriptDir := ""
+	if env != nil {
+		scriptDir = env.ScriptDir()
+	}
+	return resolveImportPathFromDir(path, scriptDir)
+}
+
+// resolveImportPathFromDir is the env-less core of resolveImportPath.
+// H4 (audit fix, 2026-05-22): the LookupOrLoadModule fast path uses
+// this so cache-hit imports skip the throwaway NewEnv() allocation.
+// scriptDir == "" disables step 2 (script-relative resolution); the
+// remaining steps (KLEX_PATH, binary-dir, binary-parent) still fire.
+func resolveImportPathFromDir(path, scriptDir string) (resolved string, tried []string, ok bool) {
 	seen := map[string]bool{}
 	add := func(p string) {
 		if p == "" || seen[p] {
@@ -77,7 +138,7 @@ func resolveImportPath(path string, env *Environment) (resolved string, tried []
 	add(path)
 
 	// 2. Next to the importing script.
-	if scriptDir := env.ScriptDir(); scriptDir != "" {
+	if scriptDir != "" {
 		add(filepath.Join(scriptDir, path))
 	}
 
@@ -123,6 +184,14 @@ var KLexVersion = "unknown"
 // Override this to redirect output (e.g. in WASM builds).
 var Output io.Writer = os.Stdout
 
+// DeepFreeze is the exported entry point for other packages (the
+// bytecode VM) to recursively freeze a const value the same way the
+// tree-walker does. Tree-walker callers continue to use the lowercase
+// alias inside this package.
+func DeepFreeze(obj Object) {
+	deepFreeze(obj, map[Object]bool{})
+}
+
 // deepFreeze recursively freezes an object and all mutable objects it contains.
 // Visited tracks pointer identity to handle cycles. Call with an empty map on entry.
 func deepFreeze(obj Object, visited map[Object]bool) {
@@ -151,6 +220,19 @@ func deepFreeze(obj Object, visited map[Object]bool) {
 
 // Builtins are the built-in functions available in every kLex program.
 // They live outside the environment chain so they are always accessible.
+// asyncBuiltin caches the pointer to Builtins["async"]. evalCall compares
+// against this pointer to detect the async call site, instead of string-
+// comparing the identifier name on every builtin invocation. Assigned in
+// the init() that registers async, so it's set before any kLex code runs.
+var asyncBuiltin *Builtin
+
+// scriptDirBuiltin caches the pointer to Builtins["_scriptDir"]. Same
+// trick as asyncBuiltin — evalCall identity-compares to intercept calls
+// and supply env.ScriptDir() since builtin Fns don't otherwise have env
+// access. Lets kLex scripts find sibling files (Python bridges, fonts,
+// assets) regardless of the caller's CWD.
+var scriptDirBuiltin *Builtin
+
 // When you call println("hello"), the evaluator looks up "println" in the
 // environment, finds this Builtin object, and calls its Fn.
 var Builtins = map[string]*Builtin{
@@ -173,10 +255,15 @@ var Builtins = map[string]*Builtin{
 			return intObj(len(arg.Elements))
 		case *String:
 			// Count Unicode code points, not bytes, so len("café") == 4.
-			// Use utf8.RuneCountInString to avoid allocating a rune array.
-			return intObj(utf8.RuneCountInString(arg.Value))
+			// RuneLen() caches the count on the *String so repeated len(s) calls
+			// (e.g. json.parse's per-char `i < len(s.s)` bound check) are O(1).
+			return intObj(arg.RuneLen())
+		case *Bytes:
+			// len() on bytes is the raw byte count — same as the wire size,
+			// unlike strings where len() is rune count.
+			return intObj(len(arg.Value))
 		case *Hash:
-			return intObj(len(arg.Pairs))
+			return intObj(arg.LenSafe()) // OFI #3 — locked read
 		case *AtomicIntArray:
 			return intObj(len(arg.Data))
 		case *AtomicFloatArray:
@@ -195,8 +282,9 @@ var Builtins = map[string]*Builtin{
 		}
 		switch h := args[0].(type) {
 		case *Hash:
-			out := make([]Object, 0, len(h.Pairs))
-			for _, pair := range h.Pairs {
+			pairs := h.Snapshot() // OFI #3 — safe under concurrent writers
+			out := make([]Object, 0, len(pairs))
+			for _, pair := range pairs {
 				out = append(out, pair.Key)
 			}
 			return &Array{Elements: out}
@@ -216,21 +304,36 @@ var Builtins = map[string]*Builtin{
 		}
 	}},
 	// values returns an array of all values in a hash.
-	// Order matches keys() — both iterate the same underlying map in the same pass,
-	// but Go map iteration is non-deterministic so do not rely on order across calls.
+	// Mirrors keys() — accepts both *Hash and *ConcurrentHash so the two
+	// builtins stay symmetric (calling code can iterate values(ch) the same
+	// way it iterates keys(ch)). Go map iteration is non-deterministic so
+	// do not rely on order across calls; ConcurrentHash uses sync.Map.Range
+	// whose ordering is also non-deterministic and may briefly include or
+	// exclude entries added/removed during iteration.
 	"values": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("values expects 1 argument", ast.Pos{})
 		}
-		hash, ok := args[0].(*Hash)
-		if !ok {
+		switch h := args[0].(type) {
+		case *Hash:
+			pairs := h.Snapshot() // OFI #3 — safe under concurrent writers
+			out := make([]Object, 0, len(pairs))
+			for _, pair := range pairs {
+				out = append(out, pair.Value)
+			}
+			return &Array{Elements: out}
+		case *ConcurrentHash:
+			out := make([]Object, 0, atomic.LoadInt64(&h.Cnt))
+			h.M.Range(func(_, val any) bool {
+				if pair, ok := val.(HashPair); ok {
+					out = append(out, pair.Value)
+				}
+				return true
+			})
+			return &Array{Elements: out}
+		default:
 			return typeError(fmt.Sprintf("values expects hash, got %s", args[0].Type()), ast.Pos{})
 		}
-		out := make([]Object, 0, len(hash.Pairs))
-		for _, pair := range hash.Pairs {
-			out = append(out, pair.Value)
-		}
-		return &Array{Elements: out}
 	}},
 	// hasKey returns true if the hash contains the given key, false otherwise.
 	// hasKey(h, "name") — avoids the null-check pattern of h["name"] == null.
@@ -246,7 +349,7 @@ var Builtins = map[string]*Builtin{
 		if err != nil {
 			return err
 		}
-		_, exists := hash.Pairs[hk]
+		_, exists := hash.Get(hk) // OFI #3 — locked read
 		return &Boolean{Value: exists}
 	}},
 	// delete removes a key from a hash in place (mutates the hash).
@@ -263,7 +366,7 @@ var Builtins = map[string]*Builtin{
 			if err != nil {
 				return err
 			}
-			delete(h.Pairs, hk)
+			h.Del(hk) // OFI #3 — locked delete
 			return NULL
 		case *ConcurrentHash:
 			hk, err := toHashKey(args[1], ast.Pos{})
@@ -436,6 +539,11 @@ var Builtins = map[string]*Builtin{
 	// concat merges two arrays into a new array in a single allocation.
 	// Faster than looping push when combining two existing arrays.
 	// Usage: concat(arr1, arr2) -> new array containing all elements of arr1 followed by arr2.
+	//
+	// ANTIPATTERN ALERT (OFI #10): `acc = concat(acc, batch)` in a loop
+	// is O(n²) — each call copies the growing accumulator. If you're
+	// merging more than two arrays, collect them into a single outer
+	// array first and call concatAll() — that's O(total) in one pass.
 	"concat": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError(fmt.Sprintf("concat expects 2 arguments, got %d", len(args)), ast.Pos{})
@@ -449,6 +557,45 @@ var Builtins = map[string]*Builtin{
 		copy(newElements, arr1.Elements)
 		copy(newElements[len(arr1.Elements):], arr2.Elements)
 		return &Array{Elements: newElements}
+	}},
+	// concatAll(arrs) — single-allocation flatten of an array of
+	// arrays. Replaces the O(n²) loop antipattern:
+	//
+	//   // BAD — O(n²)
+	//   acc = []
+	//   for batch in batches { acc = concat(acc, batch) }
+	//
+	//   // GOOD — O(total)
+	//   acc = concatAll(batches)
+	//
+	// Computes total length first so the result is one allocation, then
+	// copies each sub-array into place. Empty input → empty array.
+	// Non-array elements at any depth fail with a typed error naming
+	// the offending index.
+	"concatAll": {Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError(fmt.Sprintf("concatAll expects 1 argument (array of arrays), got %d", len(args)), ast.Pos{})
+		}
+		outer, ok := args[0].(*Array)
+		if !ok {
+			return typeError(fmt.Sprintf("concatAll: argument must be array, got %s", args[0].Type()), ast.Pos{})
+		}
+		total := 0
+		for i, el := range outer.Elements {
+			a, ok := el.(*Array)
+			if !ok {
+				return typeError(fmt.Sprintf("concatAll: element %d must be array, got %s", i, el.Type()), ast.Pos{})
+			}
+			total += len(a.Elements)
+		}
+		out := make([]Object, total)
+		pos := 0
+		for _, el := range outer.Elements {
+			a := el.(*Array) // type-checked above
+			copy(out[pos:], a.Elements)
+			pos += len(a.Elements)
+		}
+		return &Array{Elements: out}
 	}},
 	// upper returns a copy of a string with all letters converted to uppercase.
 	"upper": {Fn: func(args []Object) Object {
@@ -577,6 +724,9 @@ var Builtins = map[string]*Builtin{
 	}},
 	// replace returns a copy of str with all occurrences of old replaced by new.
 	// replace("hello world", "world", "kLex") → "hello kLex"
+	// Replaces EVERY occurrence (it's a thin wrapper over Go's
+	// strings.ReplaceAll). `replaceAll` is a JS/Python-friendly alias
+	// for discoverability — same behaviour either way.
 	"replace": {Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return runtimeError("replace expects 3 arguments", ast.Pos{})
@@ -592,6 +742,28 @@ var Builtins = map[string]*Builtin{
 		new, ok := args[2].(*String)
 		if !ok {
 			return typeError(fmt.Sprintf("replace: third argument must be string, got %s", args[2].Type()), ast.Pos{})
+		}
+		return &String{Value: strings.ReplaceAll(s.Value, old.Value, new.Value)}
+	}},
+	// replaceAll(s, old, new) — alias of replace. Lives under both
+	// names so people coming from JS / Python (where replace() is
+	// single-replace and replaceAll() is all-occurrences) find what
+	// they expect. Both call strings.ReplaceAll under the hood.
+	"replaceAll": {Fn: func(args []Object) Object {
+		if len(args) != 3 {
+			return runtimeError("replaceAll expects 3 arguments", ast.Pos{})
+		}
+		s, ok := args[0].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("replaceAll: first argument must be string, got %s", args[0].Type()), ast.Pos{})
+		}
+		old, ok := args[1].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("replaceAll: second argument must be string, got %s", args[1].Type()), ast.Pos{})
+		}
+		new, ok := args[2].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("replaceAll: third argument must be string, got %s", args[2].Type()), ast.Pos{})
 		}
 		return &String{Value: strings.ReplaceAll(s.Value, old.Value, new.Value)}
 	}},
@@ -618,8 +790,9 @@ var Builtins = map[string]*Builtin{
 		if byteIdx == -1 {
 			return &Integer{Value: -1}
 		}
-		// Convert byte index to rune index by counting runes up to that position
-		runeIdx := len([]rune(s.Value[:byteIdx]))
+		// Convert byte index to rune index. RuneCountInString avoids the
+		// rune-slice allocation that the []rune conversion would do.
+		runeIdx := utf8.RuneCountInString(s.Value[:byteIdx])
 		return &Integer{Value: runeIdx}
 	}},
 	// startsWith returns true if str begins with the given prefix.
@@ -817,6 +990,14 @@ var Builtins = map[string]*Builtin{
 		if !ok {
 			return typeError(fmt.Sprintf("send: first argument must be a channel, got %s", args[0].Type()), ast.Pos{})
 		}
+		// M5 lazy mutex (audit follow-up 2026-05-22): the value being
+		// sent will be read by another goroutine on the receiver
+		// side. Mark every reachable mutable container (Hash, and
+		// hashes nested inside Arrays/Tuples/Structs) so subsequent
+		// reads/writes on either side serialise via Hash.mu. The
+		// atomic.Store inside Hash.MarkShared establishes the
+		// happens-before edge with the channel send below.
+		MarkSharedRecursive(args[1])
 		var result Object = NULL
 		func() {
 			defer func() {
@@ -976,6 +1157,38 @@ var Builtins = map[string]*Builtin{
 // cycle checker sees: Builtins → closure → Eval → (indirectly) Builtins.
 // init() runs after all functions are fully defined, so no cycle exists.
 func init() {
+	// apply(fn, args) — call fn with the elements of args as positional arguments.
+	//
+	// This is the spread/variadic-call operator: where `fn(a, b, c)` is fixed at
+	// parse time, `apply(fn, [a, b, c])` lets you build the argument list at
+	// runtime. Indispensable for higher-order utilities like partial, flip,
+	// curry, and pipelines that hand off an arbitrary-arity call.
+	//
+	//   apply(fn(a, b) { a + b }, [3, 4])   → 7
+	//   apply(println, ["hello", "world"])  → prints "hello world"
+	//
+	// Errors:
+	//   - fn must be a *Function or *Builtin
+	//   - args must be an *Array
+	//   - any error raised by fn itself is returned unchanged
+	Builtins["apply"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("apply expects 2 arguments (fn, args)", ast.Pos{})
+		}
+		if !IsCallable(args[0]) {
+			return typeError(fmt.Sprintf("apply: first argument must be function, got %s", args[0].Type()), ast.Pos{})
+		}
+		argArr, ok := args[1].(*Array)
+		if !ok {
+			return typeError(fmt.Sprintf("apply: second argument must be array, got %s", args[1].Type()), ast.Pos{})
+		}
+		result, errObj := callCallable(args[0], argArr.Elements)
+		if errObj != nil {
+			return errObj
+		}
+		return result
+	}}
+
 	// filter returns a new array containing only the elements for which
 	// the function returns true. Example: filter([1,2,3,4], fn(x) { x > 2 }) → [3, 4]
 	Builtins["filter"] = &Builtin{Fn: func(args []Object) Object {
@@ -988,13 +1201,15 @@ func init() {
 		}
 		switch fn := args[1].(type) {
 		case *Function:
-			if numRequired(fn) != 1 {
-				return runtimeError(fmt.Sprintf("filter: function must take 1 argument, got %d required", numRequired(fn)), ast.Pos{})
+			if fn.NumRequired != 1 {
+				return runtimeError(fmt.Sprintf("filter: function must take 1 argument, got %d required", fn.NumRequired), ast.Pos{})
 			}
 		case *Builtin:
 			// arity cannot be checked ahead of time; the builtin will error if called wrong
 		default:
-			return typeError(fmt.Sprintf("filter: second argument must be function, got %s", args[1].Type()), ast.Pos{})
+			if !IsCallable(args[1]) {
+				return typeError(fmt.Sprintf("filter: second argument must be function, got %s", args[1].Type()), ast.Pos{})
+			}
 		}
 		out := make([]Object, 0, len(arr.Elements))
 		for _, el := range arr.Elements {
@@ -1026,13 +1241,15 @@ func init() {
 		}
 		switch fn := args[1].(type) {
 		case *Function:
-			if numRequired(fn) != 2 {
-				return runtimeError(fmt.Sprintf("reduce: function must take 2 arguments, got %d required", numRequired(fn)), ast.Pos{})
+			if fn.NumRequired != 2 {
+				return runtimeError(fmt.Sprintf("reduce: function must take 2 arguments, got %d required", fn.NumRequired), ast.Pos{})
 			}
 		case *Builtin:
 			// arity cannot be checked ahead of time; the builtin will error if called wrong
 		default:
-			return typeError(fmt.Sprintf("reduce: second argument must be function, got %s", args[1].Type()), ast.Pos{})
+			if !IsCallable(args[1]) {
+				return typeError(fmt.Sprintf("reduce: second argument must be function, got %s", args[1].Type()), ast.Pos{})
+			}
 		}
 		accumulator := args[2] // start with the initial value
 		for _, el := range arr.Elements {
@@ -1055,13 +1272,15 @@ func init() {
 		}
 		switch fn := args[1].(type) {
 		case *Function:
-			if numRequired(fn) != 1 {
-				return runtimeError(fmt.Sprintf("map: function must take 1 argument, got %d required", numRequired(fn)), ast.Pos{})
+			if fn.NumRequired != 1 {
+				return runtimeError(fmt.Sprintf("map: function must take 1 argument, got %d required", fn.NumRequired), ast.Pos{})
 			}
 		case *Builtin:
 			// arity cannot be checked ahead of time; the builtin will error if called wrong
 		default:
-			return typeError(fmt.Sprintf("map: second argument must be function, got %s", args[1].Type()), ast.Pos{})
+			if !IsCallable(args[1]) {
+				return typeError(fmt.Sprintf("map: second argument must be function, got %s", args[1].Type()), ast.Pos{})
+			}
 		}
 		out := make([]Object, len(arr.Elements))
 		for i, el := range arr.Elements {
@@ -1105,31 +1324,32 @@ func init() {
 			return runtimeError("safe expects at least 1 argument", ast.Pos{})
 		}
 		callArgs := args[1:]
-		var result Object
-		switch fn := args[0].(type) {
-		case *Function:
-			var err Object
-			result, err = applyFunction(fn, callArgs)
-			if err != nil {
-				e := err.(*Error)
+		// Delegate to callCallable so VM-compiled functions
+		// (*CompiledFunction registered via ExternalCallable) work
+		// here too — without this, `safe(fn() { ... })` would
+		// reject the closure with "not callable" because safe only
+		// recognised *Function / *Builtin directly.
+		result, errObj := callCallable(args[0], callArgs)
+		if errObj != nil {
+			// The callee errored. Wrap into a (null, ERR) tuple.
+			// The error may not be a *Error if the dispatch hook
+			// returned something unusual; guard the type assertion.
+			if e, ok := errObj.(*Error); ok {
 				code := "RUNTIME_ERROR"
 				if e.Kind == TypeError {
 					code = "TYPE_ERROR"
 				}
 				return &Tuple{Elements: []Object{NULL, &Error{IsUserError: true, Code: code, Message: e.Message}}}
 			}
-		case *Builtin:
-			result = fn.Fn(callArgs)
-			if isError(result) {
-				e := result.(*Error)
-				code := "RUNTIME_ERROR"
-				if e.Kind == TypeError {
-					code = "TYPE_ERROR"
-				}
-				return &Tuple{Elements: []Object{NULL, &Error{IsUserError: true, Code: code, Message: e.Message}}}
-			}
-		default:
-			return typeError(fmt.Sprintf("safe: first argument must be function, got %s", args[0].Type()), ast.Pos{})
+			return &Tuple{Elements: []Object{NULL, errObj}}
+		}
+		// If the function returned an Error VALUE (via `return error(...)`)
+		// rather than propagating one, route it into the err slot of the
+		// tuple. This matches the mental model that `_, err = safe(fn)` is
+		// always the way to ask "did this fail?" — regardless of whether the
+		// callee bailed by raising a runtime error or by returning error().
+		if e, ok := result.(*Error); ok {
+			return &Tuple{Elements: []Object{NULL, e}}
 		}
 		if t, ok := result.(*Tuple); ok {
 			return t
@@ -1144,34 +1364,141 @@ func init() {
 	// time the task was launched, but mutations are task-local and not visible to
 	// the caller. This eliminates mutex contention and prevents shared mutable state bugs.
 	// Note: do not call input() from async — it shares a global stdin reader.
-	Builtins["async"] = &Builtin{Fn: func(args []Object) Object {
+	// M4 (audit fix, 2026-05-22): async retains args[1:] as fnArgs
+	// inside the spawned goroutine that runs AFTER Fn returns. Mark
+	// so the VM's OpCallBuiltin allocates a fresh args slice rather
+	// than reusing a pooled buffer — otherwise the next caller's
+	// args would clobber what the goroutine still reads.
+	Builtins["async"] = &Builtin{RetainsArgs: true, Fn: func(args []Object) Object {
 		if len(args) < 1 {
 			return runtimeError("async expects at least 1 argument", ast.Pos{})
 		}
 		fnArgs := args[1:]
+		// M5 lazy mutex: the goroutine spawned below reads the args
+		// concurrently with the caller. Mark every reachable mutable
+		// container so Hash accesses on either side acquire mu. Done
+		// BEFORE `go func()` so the atomic.Store happens-before the
+		// goroutine start; the new goroutine sees shared=true and
+		// uses the lock.
+		for _, a := range fnArgs {
+			MarkSharedRecursive(a)
+		}
+		// Agentic hook (Phase 2, 2026-05-23): validate callability
+		// UPFRONT so we don't fire an on_async_spawn event for a task
+		// that was never going to run. IsCallable covers *Function,
+		// *Builtin, and *vm.CompiledFunction (via the type-tag check).
+		if !IsCallable(args[0]) {
+			return typeError(fmt.Sprintf("async: first argument must be a function, got %s", args[0].Type()), ast.Pos{})
+		}
 		task := getTask()
+
+		// Fire on_async_spawn before launching. The agent sees the
+		// spawn synchronously here; the matching on_async_done fires
+		// from inside the goroutine when the task body returns,
+		// carrying the same task_id so events can be paired.
+		//
+		// spawnEventID is also captured: the child goroutine pushes
+		// this onto its own causal stack so any events fired by the
+		// task body inherit the spawn as their caused_by parent.
+		taskID := NextAsyncTaskID()
+		spawnedAt := time.Now().UnixNano()
+		spawnEventID := FireAsyncSpawnHook(taskID, AsyncCalleeName(args[0]), len(fnArgs), spawnedAt)
+
 		switch fn := args[0].(type) {
 		case *Function:
+			// H1 (2026-05-22): match tree-walker's env-snapshot
+			// semantic when this Fn is reached without going through
+			// evalCall's intercept (i.e. when async() is dispatched
+			// from VM code, or via eval-side higher-order
+			// indirection like `tasks = map(workers, async)`). The
+			// intercept path in evalCall snapshots the CALLER's env;
+			// here we have no caller env, so we snapshot the
+			// function's own lexical env. For module-level functions
+			// fn.Env IS the module env (same data the tree-walker
+			// would snapshot when async is called from that module);
+			// for closures fn.Env is the lexical env at definition
+			// time (arguably MORE correct than the tree-walker's
+			// dynamic-scope-leaning behaviour). Either way the task
+			// body now has its own isolated view of globals instead
+			// of racing with the caller on fn.Env directly under
+			// the env mutex.
+			taskEnv := fn.Env.Snapshot()
 			go func() {
-				result, err := applyFunction(fn, fnArgs)
+				if spawnEventID != 0 {
+					pushEvent(spawnEventID)
+					defer popEvent()
+				}
+				startNs := time.Now().UnixNano()
+				result, err := applyFunctionInEnv(fn, fnArgs, taskEnv)
 				if err != nil {
 					task.result = err
 				} else {
 					task.result = result
 				}
 				task.done.Store(true)
+				FireAsyncDoneHook(taskID, task.result, time.Now().UnixNano()-startNs)
 			}()
 		case *Builtin:
 			go func() {
+				if spawnEventID != 0 {
+					pushEvent(spawnEventID)
+					defer popEvent()
+				}
+				startNs := time.Now().UnixNano()
 				task.result = fn.Fn(fnArgs)
 				task.done.Store(true)
+				FireAsyncDoneHook(taskID, task.result, time.Now().UnixNano()-startNs)
 			}()
 		default:
-			returnTask(task)
-			return typeError(fmt.Sprintf("async: first argument must be a function, got %s", args[0].Type()), ast.Pos{})
+			// VM closures (and any future external callable) dispatch
+			// through ExternalCallableAsync (preferred — snapshots
+			// primitive upvalues so the task is isolated) or fall
+			// back to ExternalCallable. IsCallable already returned
+			// true above, so a sane callable is guaranteed; the
+			// dispatched=false path remains as belt-and-braces for
+			// unusual external-callable shapes.
+			callee := args[0]
+			// M5 lazy mutex (audit follow-up 2026-05-22): MUST
+			// mark the closure's reachable upvalue state BEFORE
+			// the goroutine starts, otherwise concurrent sibling
+			// async-spawners would race on the same MarkShared
+			// walk inside the new goroutines. Runs in the
+			// SPAWNER's context so it's serialised against any
+			// other spawn the spawner initiates. M2: hook has a
+			// default no-op stub — no nil-check needed.
+			MarkExternalUpvaluesShared(callee)
+			// M2: both hooks have default no-op stubs. Prefer
+			// async dispatch for VM closures (it snapshots
+			// primitive upvalues); fall back to ExternalCallable
+			// when the async hook reports dispatched=false.
+			go func() {
+				if spawnEventID != 0 {
+					pushEvent(spawnEventID)
+					defer popEvent()
+				}
+				startNs := time.Now().UnixNano()
+				result, dispatched := ExternalCallableAsync(callee, fnArgs)
+				if !dispatched {
+					result, dispatched = ExternalCallable(callee, fnArgs)
+				}
+				if !dispatched {
+					task.result = typeError(fmt.Sprintf("async: dispatch lost callable %s", callee.Type()), ast.Pos{})
+				} else if result == nil {
+					task.result = NULL
+				} else {
+					task.result = result
+				}
+				task.done.Store(true)
+				FireAsyncDoneHook(taskID, task.result, time.Now().UnixNano()-startNs)
+			}()
 		}
 		return task
 	}}
+
+	// Cache the pointer so evalCall can detect the async call site by
+	// identity rather than by string-comparing the identifier name on
+	// every builtin invocation.
+	asyncBuiltin = Builtins["async"]
 }
 
 // evalAsync handles the async builtin with environment snapshots.
@@ -1182,15 +1509,41 @@ func evalAsync(args []Object, env *Environment) Object {
 		return runtimeError("async expects at least 1 argument", ast.Pos{})
 	}
 	fnArgs := args[1:]
+	// M5 lazy mutex: mark every reachable container in the args
+	// before the goroutine starts, so Hash accesses on either side
+	// serialise via mu. See the Builtins["async"].Fn variant for
+	// the same instrumentation.
+	for _, a := range fnArgs {
+		MarkSharedRecursive(a)
+	}
+	// Agentic hook (Phase 2): validate callability up-front so we
+	// don't emit on_async_spawn for a task we'd reject below.
+	if _, isFn := args[0].(*Function); !isFn {
+		if _, isBI := args[0].(*Builtin); !isBI {
+			return typeError(fmt.Sprintf("async: first argument must be a function, got %s", args[0].Type()), ast.Pos{})
+		}
+	}
 	task := getTask()
 
 	// Snapshot the current environment for this task.
 	// The task will run in this snapshot: it can read globals but mutations are local.
 	taskEnv := env.Snapshot()
 
+	// Fire on_async_spawn (Phase 2 hook). See the Builtins["async"]
+	// variant for the rationale — this path runs when the tree-walker
+	// dispatches async() via evalCall's intercept, so both paths must
+	// emit the same lifecycle events for the agent to see all tasks.
+	taskID := NextAsyncTaskID()
+	spawnEventID := FireAsyncSpawnHook(taskID, AsyncCalleeName(args[0]), len(fnArgs), time.Now().UnixNano())
+
 	switch fn := args[0].(type) {
 	case *Function:
 		go func() {
+			if spawnEventID != 0 {
+				pushEvent(spawnEventID)
+				defer popEvent()
+			}
+			startNs := time.Now().UnixNano()
 			result, err := applyFunctionInEnv(fn, fnArgs, taskEnv)
 			if err != nil {
 				task.result = err
@@ -1198,15 +1551,19 @@ func evalAsync(args []Object, env *Environment) Object {
 				task.result = result
 			}
 			task.done.Store(true)
+			FireAsyncDoneHook(taskID, task.result, time.Now().UnixNano()-startNs)
 		}()
 	case *Builtin:
 		go func() {
+			if spawnEventID != 0 {
+				pushEvent(spawnEventID)
+				defer popEvent()
+			}
+			startNs := time.Now().UnixNano()
 			task.result = fn.Fn(fnArgs)
 			task.done.Store(true)
+			FireAsyncDoneHook(taskID, task.result, time.Now().UnixNano()-startNs)
 		}()
-	default:
-		returnTask(task)
-		return typeError(fmt.Sprintf("async: first argument must be a function, got %s", args[0].Type()), ast.Pos{})
 	}
 	return task
 }
@@ -1266,17 +1623,11 @@ func init() {
 	}}
 }
 
-// numRequired returns the count of parameters that have no default value.
-// The result is computed once at Function construction time and cached on
-// the struct; this getter is on the hot path of every function call.
-func numRequired(fn *Function) int {
-	return fn.NumRequired
-}
-
 // computeNumRequired walks the defaults slice to find the first non-nil
 // entry, which (since the parser enforces defaults-must-come-last) is the
 // boundary between required and optional params. Called exactly once per
-// Function — at construction — so numRequired() can be O(1).
+// Function — at construction — so the cached fn.NumRequired field is O(1)
+// for every subsequent read.
 func computeNumRequired(defaults []ast.Node, paramCount int) int {
 	for i, d := range defaults {
 		if d != nil {
@@ -1289,7 +1640,7 @@ func computeNumRequired(defaults []ast.Node, paramCount int) int {
 // arityError builds a clear argument-count error message that accounts for
 // optional (defaulted) parameters.
 func arityError(name string, fn *Function, got int, pos ast.Pos) *Error {
-	req := numRequired(fn)
+	req := fn.NumRequired
 	total := len(fn.Params)
 	var msg string
 	if req == total {
@@ -1342,7 +1693,7 @@ func applyFunction(fn *Function, args []Object) (Object, Object) {
 		}
 		env.Set(fn.Params[required], &Array{Elements: args[required:]})
 	} else {
-		req := numRequired(fn)
+		req := fn.NumRequired
 		if len(args) < req || len(args) > len(fn.Params) {
 			return nil, arityError("function", fn, len(args), ast.Pos{})
 		}
@@ -1384,7 +1735,7 @@ func applyFunctionInEnv(fn *Function, args []Object, taskEnv *Environment) (Obje
 		}
 		env.Set(fn.Params[required], &Array{Elements: args[required:]})
 	} else {
-		req := numRequired(fn)
+		req := fn.NumRequired
 		if len(args) < req || len(args) > len(fn.Params) {
 			return nil, arityError("function", fn, len(args), ast.Pos{})
 		}
@@ -1409,6 +1760,19 @@ func applyFunctionInEnv(fn *Function, args []Object, taskEnv *Environment) (Obje
 // given arguments. Returns (result, nil) on success, (nil, *Error) on failure.
 // Used by map/filter/reduce so they accept both function types uniformly.
 func callCallable(fn Object, args []Object) (Object, Object) {
+	// M1+M2 (audit fix, 2026-05-22): VM closures
+	// (*CompiledFunction) are the most common callable now that
+	// --vm is the default. Check by type-tag directly — no hook
+	// indirection, no nil-check (ExternalCallable defaults to a
+	// no-op stub when vm isn't linked).
+	if fn != nil && fn.Type() == COMPILED_FUNCTION_OBJ {
+		if result, dispatched := ExternalCallable(fn, args); dispatched {
+			if isError(result) {
+				return nil, result
+			}
+			return result, nil
+		}
+	}
 	switch f := fn.(type) {
 	case *Function:
 		return applyFunction(f, args)
@@ -1418,9 +1782,8 @@ func callCallable(fn Object, args []Object) (Object, Object) {
 			return nil, result
 		}
 		return result, nil
-	default:
-		return nil, typeError(fmt.Sprintf("not callable: %s", fn.Type()), ast.Pos{})
 	}
+	return nil, typeError(fmt.Sprintf("not callable: %s — only functions and builtins can be invoked with f(args). Did you forget `fn` or accidentally shadow the name?", fn.Type()), ast.Pos{})
 }
 
 // toFloat64 extracts the numeric value from an Integer or Float as float64.
@@ -1458,7 +1821,7 @@ func toHashKey(obj Object, pos ast.Pos) (HashKey, Object) {
 		}
 		return HashKey{Type: BOOLEAN_OBJ, Value: v}, nil
 	default:
-		return HashKey{}, typeError(fmt.Sprintf("unhashable type: %s", obj.Type()), pos)
+		return HashKey{}, typeError(fmt.Sprintf("unhashable type: %s — hash keys must be string, integer, float, or boolean", obj.Type()), pos)
 	}
 }
 
@@ -1495,6 +1858,45 @@ func toBool(obj Object) (bool, bool) {
 		return false, false
 	}
 	return b.Value, true
+}
+
+// primitiveEqual is the canonical value-equality check for the primitive
+// types (Integer, Float, String, Bytes, Boolean, Null). It is the shared
+// source of truth used by both evalEquals (for the kLex `==` operator) and
+// valuesEqual (for atomicHashCAS).
+//
+// Returns (handled, equal):
+//   - handled=true  → both args are primitives of the same type and
+//                     `equal` is the result of the value comparison.
+//   - handled=false → at least one arg is nil, the types differ, or the
+//                     type isn't a primitive (e.g. *Array, *Function,
+//                     *EnumInstance). Callers dispatch their own rules
+//                     (reference-equality, recursive enum compare, etc.).
+//
+// Keeping this in one place means a future numeric coercion rule or new
+// primitive type lands once and both `==` and CAS pick it up automatically.
+func primitiveEqual(a, b Object) (handled bool, equal bool) {
+	if a == nil || b == nil {
+		return false, false
+	}
+	if a.Type() != b.Type() {
+		return false, false
+	}
+	switch av := a.(type) {
+	case *Integer:
+		return true, av.Value == b.(*Integer).Value
+	case *Float:
+		return true, av.Value == b.(*Float).Value
+	case *String:
+		return true, av.Value == b.(*String).Value
+	case *Bytes:
+		return true, bytes.Equal(av.Value, b.(*Bytes).Value)
+	case *Boolean:
+		return true, av.Value == b.(*Boolean).Value
+	case *Null:
+		return true, true
+	}
+	return false, false
 }
 
 // evalEquals handles == comparisons.
@@ -1536,19 +1938,15 @@ func evalEquals(left, right Object, pos ast.Pos) Object {
 		return typeError(fmt.Sprintf("cannot compare %s and %s", left.Type(), right.Type()), pos)
 	}
 
-	switch l := left.(type) {
-	case *Integer:
-		return boolObj(l.Value == right.(*Integer).Value)
-	case *Float:
-		return boolObj(l.Value == right.(*Float).Value)
-	case *Boolean:
-		return boolObj(l.Value == right.(*Boolean).Value)
-	case *String:
-		return boolObj(l.Value == right.(*String).Value)
-	case *Array, *Hash, *Function:
-		// Reference types compare by identity (pointer equality), not by contents.
-		return boolObj(left == right)
-	case *EnumInstance:
+	// Primitive value comparison (Integer, Float, String, Bytes, Boolean).
+	// Shared with valuesEqual via primitiveEqual so both `==` and atomicHashCAS
+	// follow exactly the same rules — no "KEEP IN SYNC" landmine.
+	if handled, eq := primitiveEqual(left, right); handled {
+		return boolObj(eq)
+	}
+
+	// Structural-equality types: walk fields.
+	if l, ok := left.(*EnumInstance); ok {
 		r := right.(*EnumInstance)
 		if l.TypeName != r.TypeName || l.VariantName != r.VariantName {
 			return FALSE
@@ -1569,7 +1967,15 @@ func evalEquals(left, right Object, pos ast.Pos) Object {
 		return TRUE
 	}
 
-	return FALSE
+	// Reference-equality default — covers *Array, *Hash, *Function,
+	// *Builtin, *Channel, *vm.CompiledFunction, and any other reference
+	// type that other packages register as Objects. Two reference
+	// values are == iff they're the same pointer. This is the rule the
+	// tree-walker has always applied to callables, and it's the only
+	// sensible default for "identical type, primitiveEqual didn't
+	// match" — content-equality on mutable containers would need a
+	// deep walk that kLex doesn't expose via `==`.
+	return boolObj(left == right)
 }
 
 // evalOrderCompare handles <, >, <=, >= for integers, floats, and strings.
@@ -1674,20 +2080,29 @@ func evalCall(c *ast.CallExpr, env *Environment) Object {
 	}
 
 	// Special handling for async: it needs access to the environment to snapshot it.
-	if _, ok := fnObj.(*Builtin); ok {
-		if ident, ok := c.Function.(*ast.Ident); ok && ident.Value == "async" {
-			// Evaluate all arguments before calling.
-			args := make([]Object, 0, len(c.Args))
-			for _, argNode := range c.Args {
-				val := Eval(argNode, env)
-				if isError(val) {
-					return val
-				}
-				args = append(args, val)
+	// Identity-compare against the cached async pointer so this check is one
+	// branch instead of a type-assert + string-compare on every builtin call.
+	if fnObj == asyncBuiltin {
+		args := make([]Object, 0, len(c.Args))
+		for _, argNode := range c.Args {
+			val := Eval(argNode, env)
+			if isError(val) {
+				return val
 			}
-			// Handle async with environment snapshot.
-			return evalAsync(args, env)
+			args = append(args, val)
 		}
+		return evalAsync(args, env)
+	}
+
+	// Same env-special-casing for _scriptDir(). Walks the env's outer
+	// chain via env.ScriptDir() — so inside an imported module it returns
+	// the module's own dir, not the entry script's. Lets scripts find
+	// their sibling files (Python bridges, fonts, etc.) regardless of CWD.
+	if fnObj == scriptDirBuiltin {
+		if len(c.Args) != 0 {
+			return runtimeError("_scriptDir expects no arguments", c.Pos)
+		}
+		return &String{Value: env.ScriptDir()}
 	}
 
 	// Evaluate all arguments before calling — arguments are eager, not lazy.
@@ -1698,6 +2113,22 @@ func evalCall(c *ast.CallExpr, env *Environment) Object {
 			return val
 		}
 		args = append(args, val)
+	}
+
+	// M1+M2 (audit fix, 2026-05-22): once --vm is the default, the
+	// most common callee here is a *vm.CompiledFunction reached
+	// via the env (e.g. main script's tree-walker eval calling a
+	// VM-compiled imported fn). Direct type-tag check on the hot
+	// path — no hook nil-check, no extra function-pointer indirect.
+	if fnObj != nil && fnObj.Type() == COMPILED_FUNCTION_OBJ {
+		if result, dispatched := ExternalCallable(fnObj, args); dispatched {
+			if isError(result) {
+				err := result.(*Error)
+				err.Stack = append(err.Stack, Frame{CallPos: c.Pos})
+				return err
+			}
+			return result
+		}
 	}
 
 	switch fn := fnObj.(type) {
@@ -1731,7 +2162,7 @@ func evalCall(c *ast.CallExpr, env *Environment) Object {
 			rest := args[required:]
 			newEnv.Set(fn.Params[required], &Array{Elements: rest})
 		} else {
-			req := numRequired(fn)
+			req := fn.NumRequired
 			if len(args) < req || len(args) > len(fn.Params) {
 				return arityError(name, fn, len(args), c.Pos)
 			}
@@ -1771,6 +2202,18 @@ func evalCall(c *ast.CallExpr, env *Environment) Object {
 		}
 
 	default:
+		// External-callable fallback (e.g. a future external callable
+		// type that isn't *CompiledFunction — the fast-path above
+		// already handles those). M2: ExternalCallable has a default
+		// no-op stub, no nil-check needed.
+		if result, dispatched := ExternalCallable(fnObj, args); dispatched {
+			if isError(result) {
+				err := result.(*Error)
+				err.Stack = append(err.Stack, Frame{CallPos: c.Pos})
+				return err
+			}
+			return result
+		}
 		return typeError(fmt.Sprintf("not a function, got %s", fnObj.Type()), c.Pos)
 	}
 }
@@ -1955,7 +2398,7 @@ func Eval(node ast.Node, env *Environment) Object {
 		}
 		val, ok := env.Get(n.Value)
 		if !ok {
-			return runtimeError("undefined variable: "+n.Value, n.Pos)
+			return runtimeError(undefinedIdentifierMessage(n.Value), n.Pos)
 		}
 		return val
 
@@ -2125,7 +2568,7 @@ func Eval(node ast.Node, env *Environment) Object {
 				}
 				ch, ok := chObj.(*Channel)
 				if !ok {
-					return typeError(fmt.Sprintf("select recv: expected channel, got %s", chObj.Type()), sc.Pos)
+					return typeError(fmt.Sprintf("select recv: expected channel as recv() argument, got %s — e.g. `case x = recv(ch) { ... }` where ch was created by channel(n)", chObj.Type()), sc.Pos)
 				}
 				reflCases = append(reflCases, reflect.SelectCase{
 					Dir:  reflect.SelectRecv,
@@ -2138,7 +2581,7 @@ func Eval(node ast.Node, env *Environment) Object {
 				}
 				ch, ok := chObj.(*Channel)
 				if !ok {
-					return typeError(fmt.Sprintf("select send: expected channel, got %s", chObj.Type()), sc.Pos)
+					return typeError(fmt.Sprintf("select send: expected channel as first send() argument, got %s — e.g. `case send(ch, value) { ... }` where ch was created by channel(n)", chObj.Type()), sc.Pos)
 				}
 				val := Eval(sc.SendVal, env)
 				if isError(val) {
@@ -2220,7 +2663,13 @@ func Eval(node ast.Node, env *Environment) Object {
 					return result
 				}
 				if isBreak(result) {
-					return NULL
+					// Propagate the break sentinel up so the per-collection
+					// loop below can do something only the outer code knows
+					// to do — e.g. close(coll.done) on a channel for-in so
+					// the producer learns the consumer abandoned the stream.
+					// Replacing this with NULL silently disabled bridgeStream
+					// cancel signalling, so keep it as the actual break.
+					return result
 				}
 				if isContinue(result) {
 					break
@@ -2263,7 +2712,12 @@ func Eval(node ast.Node, env *Environment) Object {
 			if n.ValueVar == "" {
 				return typeError("for-in over a hash requires two variables: for k, v in hash", n.Pos)
 			}
-			for _, pair := range coll.Pairs {
+			// Snapshot under the lock so the loop body — which may
+			// itself touch this or other hashes, possibly across
+			// goroutines — never iterates a Go map that another
+			// goroutine is mutating. OFI #3.
+			pairs := coll.Snapshot()
+			for _, pair := range pairs {
 				bindings := make(map[string]Object, 2)
 				addBinding(bindings, n.Variable, pair.Key)
 				addBinding(bindings, n.ValueVar, pair.Value)
@@ -2344,6 +2798,12 @@ func Eval(node ast.Node, env *Environment) Object {
 					return NULL
 				}
 				if isContinue(result) {
+					// Consume the signal here — it belongs to THIS loop. Leaving
+					// it in `result` would leak out via `return result` below if
+					// the next condition check is false (e.g. the final inner
+					// iteration ended on continue), causing any enclosing loop
+					// to read it as its own continue and skip its counter-bump.
+					result = NULL
 					break // skip remaining stmts, outer for{} re-evaluates condition
 				}
 			}
@@ -2455,6 +2915,39 @@ func Eval(node ast.Node, env *Environment) Object {
 		}
 		return tuple
 
+	// ---------------- MULTI LET ----------------
+	// Declares multiple variables from a Tuple RHS: let a, b = divide(10, 2)
+	// Like LetStmt, every name is bound in the CURRENT scope via Set — never
+	// walks the chain. Names already present in an outer scope are shadowed.
+	case *ast.MultiLetStmt:
+		val := Eval(n.Value, env)
+		if isError(val) {
+			return val
+		}
+		tuple, ok := val.(*Tuple)
+		if !ok {
+			return runtimeError(
+				fmt.Sprintf("cannot unpack %s into %d variables — right side must return multiple values", val.Type(), len(n.Names)),
+				n.Pos,
+			)
+		}
+		if len(tuple.Elements) != len(n.Names) {
+			return runtimeError(
+				fmt.Sprintf("cannot unpack %d values into %d variables", len(tuple.Elements), len(n.Names)),
+				n.Pos,
+			)
+		}
+		for i, name := range n.Names {
+			if name == "_" {
+				continue
+			}
+			if env.consts != nil && env.consts[name] {
+				return runtimeError("cannot reassign constant "+name, n.Pos)
+			}
+			env.Set(name, tuple.Elements[i])
+		}
+		return tuple
+
 	// ---------------- ARRAY LITERAL ----------------
 	// Evaluate each element expression and collect the results into an Array.
 	case *ast.ArrayLiteral:
@@ -2516,7 +3009,8 @@ func Eval(node ast.Node, env *Environment) Object {
 			if err != nil {
 				return err
 			}
-			pair, ok := l.Pairs[hk]
+			// Locked read — see Hash's CONCURRENCY note. OFI #3.
+			pair, ok := l.Get(hk)
 			if !ok {
 				// Missing key returns null, not an error — enables `m["k"] == null` checks.
 				return NULL
@@ -2541,11 +3035,23 @@ func Eval(node ast.Node, env *Environment) Object {
 			if !ok {
 				return typeError(fmt.Sprintf("string index must be integer, got %s", index.Type()), n.Pos)
 			}
-			runes := []rune(l.Value)
-			if idx.Value < 0 || idx.Value >= len(runes) {
-				return runtimeError(fmt.Sprintf("index %d out of bounds (string length %d)", idx.Value, len(runes)), n.Pos)
+			r, inBounds := l.RuneAt(idx.Value)
+			if !inBounds {
+				return runtimeError(fmt.Sprintf("index %d out of bounds (string length %d)", idx.Value, l.RuneLen()), n.Pos)
 			}
-			return &String{Value: string(runes[idx.Value])}
+			return &String{Value: string(r)}
+		case *Bytes:
+			// Indexing returns an integer in [0, 255] — same as Python and Go.
+			// This is deliberately different from string indexing (which returns
+			// a single-character string) because bytes are fundamentally numeric.
+			idx, ok := index.(*Integer)
+			if !ok {
+				return typeError(fmt.Sprintf("bytes index must be integer, got %s", index.Type()), n.Pos)
+			}
+			if idx.Value < 0 || idx.Value >= len(l.Value) {
+				return runtimeError(fmt.Sprintf("index %d out of bounds (bytes length %d)", idx.Value, len(l.Value)), n.Pos)
+			}
+			return intObj(int(l.Value[idx.Value]))
 		case *StructInstance:
 			return typeError(fmt.Sprintf("cannot use bracket access on struct %s — use dot notation: struct.field", l.Def.Name), n.Pos)
 		default:
@@ -2578,7 +3084,10 @@ func Eval(node ast.Node, env *Environment) Object {
 			if err != nil {
 				return err
 			}
-			o.Pairs[hk] = HashPair{Key: index, Value: val}
+			// Locked write — kLex async semantics share *Hash by
+			// pointer across goroutines (OFI #3, see Hash struct doc).
+			// Concurrent map writes panic without this guard.
+			o.Set(hk, HashPair{Key: index, Value: val})
 			return val
 		case *ConcurrentHash:
 			hk, err := toHashKey(index, n.Pos)
@@ -2629,37 +3138,107 @@ func Eval(node ast.Node, env *Environment) Object {
 					n.Path, strings.Join(tried, "\n  ")),
 				n.Pos)
 		}
-		src, readErr := os.ReadFile(resolvedPath)
-		if readErr != nil {
-			return runtimeError(fmt.Sprintf("cannot import %q: %s", n.Path, readErr.Error()), n.Pos)
-		}
 
 		absPath, err := filepath.Abs(resolvedPath)
 		if err != nil {
 			absPath = resolvedPath
 		}
+
+		// Read-locked fast path. The vast majority of imports after the
+		// first one for any given file land here.
+		moduleCacheMu.RLock()
+		cachedEnv, hit := moduleCache[absPath]
+		moduleCacheMu.RUnlock()
+		if hit {
+			mod := &Module{Name: n.Alias, Env: cachedEnv}
+			env.Assign(n.Alias, mod)
+			return mod
+		}
+
+		src, readErr := os.ReadFile(resolvedPath)
+		if readErr != nil {
+			return runtimeError(fmt.Sprintf("cannot import %q: %s", n.Path, readErr.Error()), n.Pos)
+		}
+
+		// Reserve the in-flight slot under the write lock. Re-check the
+		// cache here in case another goroutine finished the same import
+		// between our RLock above and this point. The check + reserve
+		// pair must be atomic — otherwise two goroutines could both pass
+		// the importingFiles test and both proceed to Eval.
+		moduleCacheMu.Lock()
+		if cachedEnv, hit := moduleCache[absPath]; hit {
+			moduleCacheMu.Unlock()
+			mod := &Module{Name: n.Alias, Env: cachedEnv}
+			env.Assign(n.Alias, mod)
+			return mod
+		}
 		if importingFiles[absPath] {
+			moduleCacheMu.Unlock()
 			return runtimeError(fmt.Sprintf("import cycle detected: %q is already being imported", n.Path), n.Pos)
 		}
 		importingFiles[absPath] = true
+		moduleCacheMu.Unlock()
 
 		l := lexer.New(string(src))
 		p := parser.New(l)
 		program := p.ParseProgram()
 		if len(program.Errors) > 0 {
+			moduleCacheMu.Lock()
 			delete(importingFiles, absPath)
+			moduleCacheMu.Unlock()
 			return runtimeError(fmt.Sprintf("parse error in %q: %s", n.Path, program.Errors[0]), n.Pos)
 		}
-		modEnv := NewEnv()
-		// Record where this module lives so its own imports resolve relative
-		// to it — chained "import" calls in the module use its own dir, not
-		// the importer's.
-		modEnv.SetScriptDir(filepath.Dir(absPath))
-		result := Eval(program, modEnv)
-		delete(importingFiles, absPath) // clear before checking error so re-import after failure works
+		// M6 (audit follow-up, 2026-05-22): if the VM-compile hook
+		// is installed (set by main.go / vmdiff for --vm mode),
+		// try compiling the module to bytecode first. Live getters
+		// on the returned env give external readers (DotExpr on
+		// the *Module) the same live-value semantics the
+		// tree-walker provides via shared modEnv.store. Falls back
+		// to tree-walker Eval if vm.Compile errors (e.g.
+		// InterpolatedString with embedded expressions); a genuine
+		// runtime error in the module's top-level propagates as a
+		// kLex *Error.
+		var modEnv *Environment
+		var result Object
+		if VMCompileAndRunModule != nil {
+			vmModEnv, vmErr := VMCompileAndRunModule(program, filepath.Dir(absPath))
+			if vmErr != nil {
+				moduleCacheMu.Lock()
+				delete(importingFiles, absPath)
+				moduleCacheMu.Unlock()
+				return vmErr
+			}
+			if vmModEnv != nil {
+				modEnv = vmModEnv
+				// Defer the result-capture to mimic the
+				// Eval-returns-NULL-or-last-value shape; modules
+				// generally don't care about the program-level
+				// return value, the cache only stores the env.
+				result = NULL
+			}
+		}
+		if modEnv == nil {
+			modEnv = NewEnv()
+			// Record where this module lives so its own imports resolve relative
+			// to it — chained "import" calls in the module use its own dir, not
+			// the importer's. The Eval call below runs WITHOUT the lock held,
+			// so recursive imports can take the lock themselves without
+			// deadlocking.
+			modEnv.SetScriptDir(filepath.Dir(absPath))
+			result = Eval(program, modEnv)
+		}
+
+		moduleCacheMu.Lock()
+		delete(importingFiles, absPath)
 		if isError(result) {
+			moduleCacheMu.Unlock()
 			return result
 		}
+		// Cache only on successful evaluation — a failed import (parse OK,
+		// runtime error during top-level code) should be retryable.
+		moduleCache[absPath] = modEnv
+		moduleCacheMu.Unlock()
+
 		mod := &Module{Name: n.Alias, Env: modEnv}
 		env.Assign(n.Alias, mod)
 		return mod
@@ -2681,8 +3260,8 @@ func Eval(node ast.Node, env *Environment) Object {
 			}
 			return val
 		case *StructInstance:
-			// Field access.
-			if val, ok := obj.Fields[n.Property]; ok {
+			// Field access — locked read.
+			if val, ok := obj.GetField(n.Property); ok {
 				return val
 			}
 			// Method access — return the function itself (self injected at call time).
@@ -2722,6 +3301,15 @@ func Eval(node ast.Node, env *Environment) Object {
 				return &String{Value: obj.Code}
 			case "message":
 				return &String{Value: obj.Message}
+			case "errorType":
+				// Originating exception class name for bridge errors
+				// (e.g. "ValueError", "FileNotFoundError"). Empty string
+				// for kLex-native errors that don't cross a bridge.
+				return &String{Value: obj.ErrorType}
+			case "traceback":
+				// Full Python traceback for bridge errors. Empty string
+				// for non-bridge errors.
+				return &String{Value: obj.Traceback}
 			case "is":
 				captured := obj
 				return &Builtin{Fn: func(args []Object) Object {
@@ -2732,7 +3320,7 @@ func Eval(node ast.Node, env *Environment) Object {
 					if !ok {
 						return typeError("is() argument must be a string", n.Pos)
 					}
-					return &Boolean{Value: captured.Code == s.Value}
+					return boolObj(captured.Code == s.Value)
 				}}
 			default:
 				return runtimeError(fmt.Sprintf("error has no property %q", n.Property), n.Pos)
@@ -2759,10 +3347,10 @@ func Eval(node ast.Node, env *Environment) Object {
 			if target.frozen {
 				return runtimeError("cannot mutate frozen struct", n.Pos)
 			}
-			if _, ok := target.Fields[n.Left.Property]; !ok {
+			if _, ok := target.GetField(n.Left.Property); !ok {
 				return runtimeError(fmt.Sprintf("struct %s has no field %q", target.Def.Name, n.Left.Property), n.Pos)
 			}
-			target.Fields[n.Left.Property] = val
+			target.SetField(n.Left.Property, val)
 		default:
 			return typeError(fmt.Sprintf("dot assignment not supported on %s", obj.Type()), n.Pos)
 		}
@@ -2784,6 +3372,14 @@ func Eval(node ast.Node, env *Environment) Object {
 
 	case *ast.StringLiteral:
 		return &String{Value: n.Value}
+
+	case *ast.BytesLiteral:
+		// Copy the slice so future runtime mutations of one literal's bytes
+		// can't leak into another evaluation of the same source-level literal.
+		// (Today nothing mutates Bytes in place, but future builtins might.)
+		buf := make([]byte, len(n.Value))
+		copy(buf, n.Value)
+		return &Bytes{Value: buf}
 
 	case *ast.InterpolatedString:
 		var buf strings.Builder
@@ -2819,7 +3415,7 @@ func Eval(node ast.Node, env *Environment) Object {
 			return typeError(fmt.Sprintf("?: operand must be a (value, err) tuple, got %s", val.Type()), n.Pos)
 		}
 		if len(tup.Elements) != 2 {
-			return typeError(fmt.Sprintf("?: expected a 2-element tuple, got %d elements", len(tup.Elements)), n.Pos)
+			return typeError(fmt.Sprintf("?: expected a 2-element (value, err) tuple, got %d elements — e.g. `data = readFile(path)?` requires the function to `return value, err`", len(tup.Elements)), n.Pos)
 		}
 		if tup.Elements[1] != NULL {
 			return &ReturnValue{Value: tup.Elements[1]}
@@ -2857,6 +3453,25 @@ func Eval(node ast.Node, env *Environment) Object {
 		if n.Operator == "&&" || n.Operator == "||" {
 			return evalLogical(n, env)
 		}
+		// ── Fast path: pure-integer arithmetic & comparison ─────────────
+		// Walks integer-shaped expression trees without boxing any
+		// intermediate *Integer. Boxes once (via intObj) at the
+		// final result, or returns the TRUE/FALSE singleton for
+		// comparisons. Falls back to the general path the moment a
+		// non-integer operand appears, so semantics (string + string,
+		// float promotion, type-mismatch errors) are unchanged.
+		switch n.Operator {
+		case "+", "-", "*", "/", "%":
+			if v, ok, err := evalIntFast(n, env); err != nil {
+				return err
+			} else if ok {
+				return intObj(v)
+			}
+		case "==", "!=", "<", ">", "<=", ">=":
+			if res, ok := evalIntCompareFast(n, env); ok {
+				return res
+			}
+		}
 		left := Eval(n.Left, env)
 		if isError(left) {
 			return left
@@ -2870,6 +3485,14 @@ func Eval(node ast.Node, env *Environment) Object {
 		case "+":
 			if left.Type() == STRING_OBJ && right.Type() == STRING_OBJ {
 				return &String{Value: left.(*String).Value + right.(*String).Value}
+			}
+			if left.Type() == BYTES_OBJ && right.Type() == BYTES_OBJ {
+				lb := left.(*Bytes).Value
+				rb := right.(*Bytes).Value
+				out := make([]byte, len(lb)+len(rb))
+				copy(out, lb)
+				copy(out[len(lb):], rb)
+				return &Bytes{Value: out}
 			}
 			if !canArithmetic(left.Type()) || !canArithmetic(right.Type()) {
 				return typeMismatchError("+", left.Type(), right.Type(), n.Pos)
@@ -2886,35 +3509,41 @@ func Eval(node ast.Node, env *Environment) Object {
 					return typeMismatchError("%", left.Type(), right.Type(), n.Pos)
 				}
 				if right.(*Integer).Value == 0 {
-					return runtimeError("modulo by zero", n.Pos)
+					return runtimeError("modulo by zero — guard the right operand with `if y != 0` before using `%`", n.Pos)
 				}
 				return intObj(left.(*Integer).Value % right.(*Integer).Value)
 			}
 			if !canArithmetic(left.Type()) || !canArithmetic(right.Type()) {
 				return typeMismatchError(n.Operator, left.Type(), right.Type(), n.Pos)
 			}
-			bothInt := left.Type() == INTEGER_OBJ && right.Type() == INTEGER_OBJ
+			// Fast path: both operands are integers — skip the two unconditional
+			// toFloat64 conversions. The integer path is the common case in loop
+			// counters, indices, and identifier arithmetic.
+			if li, lok := left.(*Integer); lok {
+				if ri, rok := right.(*Integer); rok {
+					switch n.Operator {
+					case "-":
+						return intObj(li.Value - ri.Value)
+					case "*":
+						return intObj(li.Value * ri.Value)
+					case "/":
+						if ri.Value == 0 {
+							return runtimeError("division by zero — guard the right operand with `if y != 0` before using `/`", n.Pos)
+						}
+						return intObj(li.Value / ri.Value)
+					}
+				}
+			}
+			// Slow path: at least one float — promote both.
 			lf, rf := toFloat64(left), toFloat64(right)
 			switch n.Operator {
 			case "-":
-				if bothInt {
-					return intObj(left.(*Integer).Value - right.(*Integer).Value)
-				}
 				return &Float{Value: lf - rf}
 			case "*":
-				if bothInt {
-					return intObj(left.(*Integer).Value * right.(*Integer).Value)
-				}
 				return &Float{Value: lf * rf}
 			case "/":
-				if bothInt {
-					if right.(*Integer).Value == 0 {
-						return runtimeError("division by zero", n.Pos)
-					}
-					return intObj(left.(*Integer).Value / right.(*Integer).Value)
-				}
 				if rf == 0 {
-					return runtimeError("division by zero", n.Pos)
+					return runtimeError("division by zero — guard the right operand with `if y != 0` before using `/`", n.Pos)
 				}
 				return &Float{Value: lf / rf}
 			}
@@ -2943,7 +3572,7 @@ func Eval(node ast.Node, env *Environment) Object {
 
 		}
 
-		return runtimeError("unknown operator: "+n.Operator, n.Pos)
+		return runtimeError("internal error: unknown operator '"+n.Operator+"' in evaluator — this is a kLex bug, please report it with the source that triggered it", n.Pos)
 
 	// ---------------- PIPE ----------------
 	// left |> right — pipes left as the first argument of the right-hand callable.

@@ -27,6 +27,7 @@ import (
 	"klex/lexer"
 	"klex/parser"
 	"klex/repl"
+	"klex/vm"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -40,7 +41,7 @@ func init() {
 	runtime.LockOSThread()
 }
 
-const Version = "v0.3.35"
+const Version = "v0.3.36"
 
 // printUsage writes the kLex command-line help to stderr. Registered as
 // flag.Usage so it is also invoked when an unknown flag is encountered.
@@ -56,7 +57,10 @@ USAGE
 OPTIONS
   -h, --help            show this help and exit
   -v, --version         print version and exit
+  --vm                  compile to bytecode and run on the VM (experimental)
   --cpuprofile <file>   write a CPU profile to <file> (for go tool pprof)
+  --record-tape <file>  record every agentic-hook event to a .lextape file
+                        (errors, async, UI, bridge)
 
 ENVIRONMENT
   KLEX_PATH    Directory containing stdlib/ for import resolution.
@@ -103,6 +107,7 @@ func main() {
 	go func() {
 		<-sigCh
 		eval.CleanupAllBridges()
+		eval.CloseTape()
 		// Conventional exit code for SIGINT: 130 = 128 + SIGINT(2).
 		os.Exit(130)
 	}()
@@ -119,12 +124,14 @@ func main() {
 		}
 	}
 
-	var showHelp, showVersion bool
+	var showHelp, showVersion, useVM bool
 	flag.BoolVar(&showHelp, "help", false, "show this help and exit")
 	flag.BoolVar(&showHelp, "h", false, "show this help and exit (short)")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&showVersion, "v", false, "print version and exit (short)")
+	flag.BoolVar(&useVM, "vm", false, "compile to bytecode and run on the VM instead of the tree-walker")
 	cpuprofile := flag.String("cpuprofile", "", "write CPU profile to file")
+	recordTape := flag.String("record-tape", "", "write a .lextape of all agentic-hook events to this path")
 	flag.Usage = printUsage
 	flag.Parse()
 
@@ -171,6 +178,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Open the tape writer (if --record-tape was given). The writer
+	// captures every agentic-hook event for the duration of the run,
+	// then writes a footer on shutdown via eval.CleanupAllBridges'
+	// deferred companion below. Errors here are surfaced once but
+	// non-fatal — the program runs without recording.
+	if *recordTape != "" {
+		if err := eval.OpenTape(*recordTape, path, scriptArgs); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: --record-tape: %v (continuing without tape)\n", err)
+		} else {
+			defer eval.CloseTape()
+		}
+	}
+
 	// Phase 1 & 2: lex and parse the entire source file into an AST.
 	// The parser collects parse errors inside program.Errors rather than
 	// panicking immediately — this lets it report multiple errors at once.
@@ -207,6 +227,43 @@ func main() {
 		argsArray[i] = &eval.String{Value: arg}
 	}
 	env.Set("__args__", &eval.Array{Elements: argsArray})
+
+	// VM path: compile the program to bytecode and run on the
+	// bytecode VM. Falls back to the tree-walker on a compile error
+	// so the user still sees a clean diagnostic.
+	if useVM {
+		// M6 (audit follow-up, 2026-05-22): install the
+		// VMCompileAndRunModule hook so imported modules get
+		// compiled to bytecode too. Tree-walker fallback inside
+		// the hook handles modules that hit unimplemented
+		// compiler arms — keeps the upgrade incremental.
+		eval.VMCompileAndRunModule = vm.CompileAndRunModule
+		chunk, cerr := vm.Compile(program)
+		if cerr != nil {
+			fmt.Fprintf(os.Stderr, "vm/compile: %v\n", cerr)
+			eval.CleanupAllBridges()
+			os.Exit(1)
+		}
+		// Propagate the entry script's directory onto the chunk so
+		// the VM's `_scriptDir()` intercept can return it. M3 (audit
+		// fix, 2026-05-22): use PropagateScriptDir so every sub-
+		// chunk (closures, methods) inherits — previously only the
+		// top-level chunk got ScriptDir set, breaking _scriptDir
+		// for nested closures.
+		vm.PropagateScriptDir(chunk, env.ScriptDir())
+		result, rerr := vm.Run(chunk)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "vm/run: %v\n", rerr)
+			eval.CleanupAllBridges()
+			os.Exit(1)
+		}
+		if eval.IsError(result) {
+			fmt.Fprintln(os.Stderr, result.Inspect())
+			eval.CleanupAllBridges()
+			os.Exit(1)
+		}
+		return
+	}
 
 	result := eval.Eval(program, env)
 	if eval.IsError(result) {

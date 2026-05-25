@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
-	"sync"
 )
 
 // KeywordDocumentation provides hover information for language keywords
@@ -142,11 +141,8 @@ Equivalent to:
 }
 
 
-// fileCache stores content of imported files to avoid re-reading from disk
-var (
-	fileCache     = make(map[string]string)
-	fileCacheLock sync.RWMutex
-)
+// (Imported-file content is now served by parsed_cache.go — mtime-keyed LRU
+// over (content, AST, symbols). See getParsedFile.)
 
 // HoverAtPosition returns hover information for the identifier at the given position
 func HoverAtPosition(doc *DocumentState, pos Position) (result *Hover) {
@@ -224,6 +220,31 @@ func HoverAtPosition(doc *DocumentState, pos Position) (result *Hover) {
 					}
 				}
 				LogMessage("HOVER: Identifier '%s' NOT in MultiAssignStmt names %v", ident, multiAssign.Names)
+			}
+		}
+	}
+
+	// MultiLetStmt: same cursor-on-name lookup as MultiAssignStmt
+	if multiLet, ok := node.(*ast.MultiLetStmt); ok {
+		LogMessage("HOVER: Found MultiLetStmt at line %d, names: %v", multiLet.Pos.Line, multiLet.Names)
+		lines := strings.Split(doc.Text, "\n")
+		if pos.Line < len(lines) {
+			line := lines[pos.Line]
+			start := pos.Character
+			for start > 0 && isIdentifierChar(rune(line[start-1])) {
+				start--
+			}
+			end := pos.Character
+			for end < len(line) && isIdentifierChar(rune(line[end])) {
+				end++
+			}
+			if start < len(line) && end <= len(line) && start < end {
+				ident := line[start:end]
+				for _, name := range multiLet.Names {
+					if name == ident {
+						return hoverForIdentifier(doc, name)
+					}
+				}
 			}
 		}
 	}
@@ -482,15 +503,11 @@ func hoverForDotExpr(doc *DocumentState, dotExpr *ast.DotExpr, pos Position) *Ho
 	}
 	LogMessage("HOVER DotExpr: resolved to '%s'", libFile)
 
-	// Get or parse the imported file
-	libContent := getFileContent(libFile)
-	if libContent == "" {
-		return nil
-	}
-
-	// Parse the library and build symbols
-	libAST, libSymbols := ParseDocumentAndBuildSymbols(libFile, libContent)
-	if libAST == nil {
+	// Cache-keyed read + parse. parsed_cache.go returns the most recent
+	// (content, AST, symbols) for libFile, re-parsing only when the file's
+	// mtime changes. Bound by an LRU cap so this can't grow unbounded.
+	libContent, libAST, libSymbols := getParsedFile(libFile)
+	if libContent == "" || libAST == nil {
 		return nil
 	}
 
@@ -569,109 +586,221 @@ func extractCommentsAboveSymbol(source string, defLine int) string {
 	return result
 }
 
-// getFileContent reads a file from disk, using cache to avoid re-reading
-func getFileContent(filePath string) string {
-	fileCacheLock.RLock()
-	if content, ok := fileCache[filePath]; ok {
-		fileCacheLock.RUnlock()
-		return content
-	}
-	fileCacheLock.RUnlock()
-
-	// Read from disk
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return ""
-	}
-
-	content := string(data)
-
-	// Cache it
-	fileCacheLock.Lock()
-	fileCache[filePath] = content
-	fileCacheLock.Unlock()
-
-	return content
-}
-
+// renderBuiltinHover produces the visual structure for builtin hovers.
+// Layout:
+//   ─── Builtin · <Category> ───────────────────
+//
+//   ```klex
+//   <signature>
+//   ```
+//
+//   <one-liner summary>          (first sentence of doc)
+//
+//   **Parameters**               (table — only if params exist)
+//   | Name | Description |
+//
+//   <remaining documentation paragraphs, including any inline
+//    "Example:" blocks rendered as kLex code fences>
+//
+//   ───────────────────────────────────────────
+//   **See also** — `sibling1` · `sibling2` · `sibling3`
+//   **Source** — `eval/builtins_xxx.go`
 func renderBuiltinHover(name string, info BuiltinInfo) string {
-	return fmt.Sprintf("```klex\n%s\n```\n\n%s", info.Signature, info.Documentation)
+	cat := categoryFor(name)
+	var b strings.Builder
+
+	// Header: small caps-style classification line. Uses a leading
+	// horizontal rule so VS Code's hover renders a visible divider.
+	b.WriteString(fmt.Sprintf("**kLex builtin · %s**\n\n", cat.Display))
+
+	// Signature in a fenced code block with the kLex language tag so
+	// the editor's syntax highlighter colours it.
+	b.WriteString("```klex\n")
+	b.WriteString(prettySignature(info.Signature))
+	b.WriteString("\n```\n\n")
+
+	// Body: first sentence as the summary, rest of the doc text wrapped
+	// underneath. The doc text in builtinSignatures often contains
+	// inline "Example:" sections — we preserve them verbatim and let
+	// markdown render them.
+	summary, rest := splitFirstSentence(info.Documentation)
+	if summary != "" {
+		b.WriteString(summary)
+		b.WriteString("\n\n")
+	}
+
+	// Parameters table (skip if zero params or if there's only a single
+	// rest-param like `...vals` — table for one row is visual clutter).
+	if shouldRenderParamTable(info.Params) {
+		b.WriteString("**Parameters**\n\n")
+		b.WriteString("| Name | |\n|------|---|\n")
+		for _, p := range info.Params {
+			b.WriteString(fmt.Sprintf("| `%s` | |\n", p))
+		}
+		b.WriteString("\n")
+	}
+
+	// Remaining doc body — paragraphs, examples, error tables that the
+	// builtin author already wrote. We pass them through unchanged so
+	// they format the same as today.
+	if rest != "" {
+		b.WriteString(rest)
+		b.WriteString("\n\n")
+	}
+
+	// Cross-references — "See also" with up to 3 siblings from the
+	// same category. Skips when there are no siblings (e.g. for the
+	// only HTTP builtin in a thin category).
+	siblings := siblingsInCategory(name, 3)
+	if len(siblings) > 0 {
+		b.WriteString("---\n")
+		b.WriteString("**See also** — ")
+		for i, s := range siblings {
+			if i > 0 {
+				b.WriteString(" · ")
+			}
+			b.WriteString("`")
+			b.WriteString(s)
+			b.WriteString("`")
+		}
+		b.WriteString("\n\n")
+	}
+
+	// Source pointer for builtins — tells the curious reader which
+	// Go file to read if they want to understand the implementation.
+	if cat.Source != "" {
+		if len(siblings) == 0 {
+			b.WriteString("---\n")
+		}
+		b.WriteString("**Source** — `")
+		b.WriteString(cat.Source)
+		b.WriteString("`\n")
+	}
+
+	return b.String()
 }
 
+// prettySignature replaces ASCII `->` with `→` so the hover signature
+// reads more like a function-type annotation than a CLI flag. Left as
+// a one-line transformation rather than a regex so the cost is nil and
+// the input format stays identical to what's already in builtinSignatures.
+func prettySignature(sig string) string {
+	return strings.ReplaceAll(sig, " -> ", " → ")
+}
+
+// splitFirstSentence separates the leading summary sentence from the
+// remainder of a doc string. Used to put the one-line summary directly
+// under the signature and push the detail paragraphs below the
+// parameter table.
+//
+// Heuristic: find the first ". " (period + space) that isn't followed
+// by a lowercase letter (which would indicate an abbreviation like
+// "e.g."). If none, treat the whole text as summary.
+func splitFirstSentence(doc string) (summary, rest string) {
+	doc = strings.TrimSpace(doc)
+	if doc == "" {
+		return "", ""
+	}
+	// Look for the first sentence terminator that's followed by whitespace
+	// AND a capital letter or newline (i.e. start of a new sentence/block).
+	for i := 0; i < len(doc)-1; i++ {
+		if (doc[i] == '.' || doc[i] == '!' || doc[i] == '?') && i+1 < len(doc) {
+			next := doc[i+1]
+			if next == '\n' {
+				return strings.TrimSpace(doc[:i+1]), strings.TrimSpace(doc[i+2:])
+			}
+			if next == ' ' && i+2 < len(doc) {
+				ch := doc[i+2]
+				if ch >= 'A' && ch <= 'Z' {
+					return strings.TrimSpace(doc[:i+1]), strings.TrimSpace(doc[i+2:])
+				}
+			}
+		}
+	}
+	return doc, ""
+}
+
+// shouldRenderParamTable returns true when a parameter table adds value.
+// Skips for empty params and single rest-style params like `...vals`
+// where the table would be one row of clutter.
+func shouldRenderParamTable(params []string) bool {
+	if len(params) == 0 {
+		return false
+	}
+	if len(params) == 1 && strings.HasPrefix(params[0], "...") {
+		return false
+	}
+	return true
+}
+
+// renderSymbolHover formats a user-defined symbol (function, variable,
+// const, module, struct, enum, parameter) with the same multi-section
+// visual style as builtins. The header row classifies the symbol's
+// kLex kind; the body shows the canonical signature in a fenced code
+// block, followed by a fact table.
 func renderSymbolHover(sym *Symbol) string {
-	var content strings.Builder
+	var b strings.Builder
 
 	switch sym.Kind {
 	case KindFunction:
-		// Reconstruct function signature
-		sig := renderFunctionSignature(sym)
-		content.WriteString(fmt.Sprintf("```klex\nfn %s\n```\n", sig))
-		content.WriteString(fmt.Sprintf("\n**Function** \n\n"))
-		content.WriteString(fmt.Sprintf("| | |\n|---|---|\n"))
-		content.WriteString(fmt.Sprintf("| **Defined** | Line %d |\n", sym.DefPos.Line))
+		b.WriteString("**kLex function**\n\n")
+		b.WriteString("```klex\nfn ")
+		b.WriteString(renderFunctionSignature(sym))
+		b.WriteString("\n```\n\n")
+		b.WriteString("| | |\n|---|---|\n")
+		b.WriteString(fmt.Sprintf("| **Defined** | Line %d |\n", sym.DefPos.Line))
 		if sym.ReturnType != "" {
-			content.WriteString(fmt.Sprintf("| **Returns** | `%s` |\n", sym.ReturnType))
+			b.WriteString(fmt.Sprintf("| **Returns** | `%s` |\n", sym.ReturnType))
+		}
+		if len(sym.Params) > 0 {
+			b.WriteString(fmt.Sprintf("| **Arity** | %d |\n", len(sym.Params)))
 		}
 
 	case KindVariable:
-		// Show type if available
-		typeStr := ""
-		if sym.Type != "" && sym.Type != "unknown" {
-			typeStr = fmt.Sprintf("`%s`", sym.Type)
-		}
-		content.WriteString(fmt.Sprintf("```klex\n%s\n```\n", sym.Name))
-
-		// Determine if from tuple unpacking
-		varKind := "Variable"
+		varKind := "kLex variable"
 		if sym.FromTuple {
-			varKind = "Tuple element"
+			varKind = "kLex tuple element"
 		}
-		content.WriteString(fmt.Sprintf("\n**%s**\n\n", varKind))
-		content.WriteString(fmt.Sprintf("| | |\n|---|---|\n"))
-		if typeStr != "" {
-			content.WriteString(fmt.Sprintf("| **Type** | %s |\n", typeStr))
+		b.WriteString(fmt.Sprintf("**%s**\n\n", varKind))
+		b.WriteString(fmt.Sprintf("```klex\n%s\n```\n\n", sym.Name))
+		b.WriteString("| | |\n|---|---|\n")
+		if sym.Type != "" && sym.Type != "unknown" {
+			b.WriteString(fmt.Sprintf("| **Type** | `%s` |\n", sym.Type))
 		}
-		content.WriteString(fmt.Sprintf("| **Defined** | Line %d |\n", sym.DefPos.Line))
+		b.WriteString(fmt.Sprintf("| **Defined** | Line %d |\n", sym.DefPos.Line))
 
 	case KindConst:
-		// Show type if available
-		typeStr := ""
+		b.WriteString("**kLex constant**\n\n")
+		b.WriteString(fmt.Sprintf("```klex\nconst %s\n```\n\n", sym.Name))
+		b.WriteString("| | |\n|---|---|\n")
 		if sym.Type != "" && sym.Type != "unknown" {
-			typeStr = fmt.Sprintf("`%s`", sym.Type)
+			b.WriteString(fmt.Sprintf("| **Type** | `%s` |\n", sym.Type))
 		}
-		content.WriteString(fmt.Sprintf("```klex\nconst %s\n```\n", sym.Name))
-		content.WriteString(fmt.Sprintf("\n**Constant**\n\n"))
-		content.WriteString(fmt.Sprintf("| | |\n|---|---|\n"))
-		if typeStr != "" {
-			content.WriteString(fmt.Sprintf("| **Type** | %s |\n", typeStr))
-		}
-		content.WriteString(fmt.Sprintf("| **Defined** | Line %d |\n", sym.DefPos.Line))
+		b.WriteString(fmt.Sprintf("| **Defined** | Line %d |\n", sym.DefPos.Line))
 
 	case KindModule:
-		content.WriteString(fmt.Sprintf("```klex\nimport \"%s\"\n```\n", sym.Name))
-		content.WriteString(fmt.Sprintf("\n**Module**\n\n"))
-		content.WriteString(fmt.Sprintf("| | |\n|---|---|\n"))
-		content.WriteString(fmt.Sprintf("| **Imported** | Line %d |\n", sym.DefPos.Line))
+		b.WriteString("**kLex module**\n\n")
+		b.WriteString(fmt.Sprintf("```klex\nimport \"%s\"\n```\n\n", sym.Name))
+		b.WriteString("| | |\n|---|---|\n")
+		b.WriteString(fmt.Sprintf("| **Imported** | Line %d |\n", sym.DefPos.Line))
 
 	case KindBuiltin:
-		content.WriteString(fmt.Sprintf("```klex\n%s()\n```\n", sym.Name))
-		content.WriteString(fmt.Sprintf("\n**Built-in Function**\n"))
+		// Should rarely hit this branch — builtins flow through
+		// renderBuiltinHover via hoverForIdentifier's builtin lookup.
+		b.WriteString("**kLex builtin**\n\n")
+		b.WriteString(fmt.Sprintf("```klex\n%s()\n```\n", sym.Name))
 
 	case KindParameter:
-		content.WriteString(fmt.Sprintf("```klex\n%s\n```\n", sym.Name))
-		typeStr := ""
+		b.WriteString("**kLex parameter**\n\n")
+		b.WriteString(fmt.Sprintf("```klex\n%s\n```\n\n", sym.Name))
+		b.WriteString("| | |\n|---|---|\n")
 		if sym.Type != "" && sym.Type != "unknown" {
-			typeStr = fmt.Sprintf("`%s`", sym.Type)
+			b.WriteString(fmt.Sprintf("| **Type** | `%s` |\n", sym.Type))
 		}
-		content.WriteString(fmt.Sprintf("\n**Parameter**\n\n"))
-		content.WriteString(fmt.Sprintf("| | |\n|---|---|\n"))
-		if typeStr != "" {
-			content.WriteString(fmt.Sprintf("| **Type** | %s |\n", typeStr))
-		}
-		content.WriteString(fmt.Sprintf("| **Declared** | Line %d |\n", sym.DefPos.Line))
+		b.WriteString(fmt.Sprintf("| **Declared** | Line %d |\n", sym.DefPos.Line))
 	}
 
-	return content.String()
+	return b.String()
 }
 
 func renderFunctionSignature(sym *Symbol) string {
@@ -770,14 +899,24 @@ func buildParameterInfo(params []string) []ParameterInformation {
 	return result
 }
 
+// computeActiveParam returns the 0-based index of the argument the cursor
+// is currently on inside `call`. It counts every arg whose start position
+// is at or before the cursor — regardless of arg shape (literal, call,
+// infix, etc.). The prior version only matched *ast.Ident, so signature
+// help misreported the active param whenever earlier args weren't bare
+// identifiers (e.g. `foo(1, "two", bar(), |here|)` reported 0 instead of 3).
 func computeActiveParam(call *ast.CallExpr, pos Position) int {
-	// Count how many arguments are before the cursor position
+	// LSP positions are 0-based; AST positions are 1-based.
+	cursorLine := pos.Line + 1
+	cursorCol := pos.Character
 	count := 0
 	for _, arg := range call.Args {
-		if argPos, ok := arg.(*ast.Ident); ok {
-			if argPos.Pos.Line < pos.Line+1 || (argPos.Pos.Line == pos.Line+1 && argPos.Pos.Col <= pos.Character) {
-				count++
-			}
+		argPos, ok := getNodePos(arg)
+		if !ok {
+			continue
+		}
+		if argPos.Line < cursorLine || (argPos.Line == cursorLine && argPos.Col <= cursorCol) {
+			count++
 		}
 	}
 	if count > 0 {

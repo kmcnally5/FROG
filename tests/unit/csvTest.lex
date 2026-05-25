@@ -8,11 +8,11 @@
 import "stdlib/csv.lex" as csv
 
 // Test counters
-passed = 0
-failed = 0
+let passed = 0
+let failed = 0
 
 // Helper: assert condition
-assert = fn(name, condition) {
+let assert = fn(name, condition) {
     if condition {
         println("  ✓ " + name)
         passed = passed + 1
@@ -23,7 +23,7 @@ assert = fn(name, condition) {
 }
 
 // Helper: assert error is returned (simplified - can't access error fields from kLex)
-assertError = fn(name, err, expectedCode) {
+let assertError = fn(name, err, expectedCode) {
     if err != null && type(err) == "ERROR" {
         println("  ✓ " + name + " (ERROR returned)")
         passed = passed + 1
@@ -40,19 +40,19 @@ assertError = fn(name, err, expectedCode) {
 println("\n=== PARSING TESTS ===")
 
 // parse() - comma-delimited CSV
-rows, err = csv.parse("a,b,c\n1,2,3\n4,5,6")
+let rows, err = csv.parse("a,b,c\n1,2,3\n4,5,6")
 assert("parse: basic CSV", err == null && len(rows) == 3 && rows[0][0] == "a")
 assert("parse: row count", len(rows) == 3)
 assert("parse: first row", rows[0][0] == "a" && rows[0][1] == "b" && rows[0][2] == "c")
 assert("parse: second row", rows[1][0] == "1" && rows[1][1] == "2" && rows[1][2] == "3")
 
 // parse() - quoted fields with embedded commas
-quoted = "name,value\n\"Smith, John\",100\n\"Doe, Jane\",200"
+let quoted = "name,value\n\"Smith, John\",100\n\"Doe, Jane\",200"
 rows, err = csv.parse(quoted)
 assert("parse: quoted fields with comma", rows[1][0] == "Smith, John")
 
 // parse() - quoted fields with embedded newlines (RFC 4180)
-multiline = "a,b\n\"hello\nworld\",test"
+let multiline = "a,b\n\"hello\nworld\",test"
 rows, err = csv.parse(multiline)
 assert("parse: quoted fields with newline", rows[1][0] == "hello\nworld")
 
@@ -69,7 +69,7 @@ rows, err = csv.parse("a\nb\nc")
 assert("parse: single column", len(rows) == 3 && rows[0][0] == "a" && rows[2][0] == "c")
 
 // parse() - type validation
-result, err = csv.parse(123)
+let result, err = csv.parse(123)
 assertError("parse: type check (non-string)", err, "TYPE_ERROR")
 
 // ============================================================================
@@ -79,7 +79,7 @@ assertError("parse: type check (non-string)", err, "TYPE_ERROR")
 println("\n=== TSV PARSING TESTS ===")
 
 // parseTSV() - tab-delimited values
-tsv = "a\tb\tc\n1\t2\t3\n4\t5\t6"
+let tsv = "a\tb\tc\n1\t2\t3\n4\t5\t6"
 rows, err = csv.parseTSV(tsv)
 assert("parseTSV: basic TSV", err == null && len(rows) == 3 && rows[0][0] == "a")
 assert("parseTSV: row structure", rows[1][0] == "1" && rows[1][1] == "2")
@@ -95,12 +95,12 @@ assertError("parseTSV: type check (non-string)", err, "TYPE_ERROR")
 println("\n=== CUSTOM DELIMITER PARSING TESTS ===")
 
 // parseDelimited() - pipe-delimited
-pipe = "a|b|c\n1|2|3"
+let pipe = "a|b|c\n1|2|3"
 rows, err = csv.parseDelimited(pipe, "|")
 assert("parseDelimited: pipe delimiter", rows[0][0] == "a" && rows[1][0] == "1")
 
 // parseDelimited() - semicolon-delimited
-semi = "a;b;c\n1;2;3"
+let semi = "a;b;c\n1;2;3"
 rows, err = csv.parseDelimited(semi, ";")
 assert("parseDelimited: semicolon delimiter", rows[0][0] == "a")
 
@@ -127,14 +127,14 @@ println("\n=== FORMATTING TESTS ===")
 
 // format() - basic formatting
 rows = [["a", "b", "c"], ["1", "2", "3"]]
-csv_str, err = csv.format(rows)
+let csv_str, err = csv.format(rows)
 assert("format: basic formatting", err == null && type(csv_str) == "STRING")
 assert("format: contains CSV content", csv_str != null && len(csv_str) > 0)
 
 // format() - preserves data
 rows = [["name", "age"], ["Alice", "30"], ["Bob", "25"]]
 csv_str, err = csv.format(rows)
-parsed, _ = csv.parse(csv_str)
+let parsed, _ = csv.parse(csv_str)
 assert("format: round-trip parse", len(parsed) == 3 && parsed[1][0] == "Alice")
 
 // format() - empty rows
@@ -147,7 +147,7 @@ assertError("format: type check (non-array)", err, "TYPE_ERROR")
 
 // formatTSV() - tab-delimited formatting
 rows = [["a", "b"], ["1", "2"]]
-tsv_str, err = csv.formatTSV(rows)
+let tsv_str, err = csv.formatTSV(rows)
 assert("formatTSV: basic TSV formatting", err == null && type(tsv_str) == "STRING")
 
 // formatTSV() - type validation
@@ -156,7 +156,7 @@ assertError("formatTSV: type check", err, "TYPE_ERROR")
 
 // formatDelimited() - custom delimiter formatting
 rows = [["a", "b"], ["1", "2"]]
-pipe_str, err = csv.formatDelimited(rows, "|")
+let pipe_str, err = csv.formatDelimited(rows, "|")
 assert("formatDelimited: pipe formatting", err == null && type(pipe_str) == "STRING")
 
 // formatDelimited() - type validation
@@ -170,8 +170,8 @@ assertError("formatDelimited: delimiter type check", err, "TYPE_ERROR")
 println("\n=== HEADER-AWARE PARSING TESTS ===")
 
 // parseWithHeaders() - basic usage
-data = "name,age,city\nAlice,30,NYC\nBob,25,LA"
-records, err = csv.parseWithHeaders(data)
+let data = "name,age,city\nAlice,30,NYC\nBob,25,LA"
+let records, err = csv.parseWithHeaders(data)
 assert("parseWithHeaders: returns array", err == null && type(records) == "ARRAY")
 assert("parseWithHeaders: correct record count", len(records) == 2)
 assert("parseWithHeaders: first record is hash", type(records[0]) == "HASH")
@@ -184,7 +184,7 @@ assertError("parseWithHeaders: type check", err, "TYPE_ERROR")
 
 // headers() - extract header row
 data = "name,age,city\nAlice,30,NYC"
-cols, err = csv.headers(data)
+let cols, err = csv.headers(data)
 assert("headers: extract header", err == null && len(cols) == 3)
 assert("headers: correct values", cols[0] == "name" && cols[1] == "age" && cols[2] == "city")
 
@@ -234,7 +234,7 @@ assert("isEmpty: single row CSV", csv.isEmpty("a,b,c") == false)
 assert("isEmpty: type check returns true", csv.isEmpty(123) == true)
 
 // rowCount() - count all rows
-count, err = csv.rowCount("a,b\n1,2\n3,4")
+let count, err = csv.rowCount("a,b\n1,2\n3,4")
 assert("rowCount: correct count", err == null && count == 3)
 
 // rowCount() - empty CSV
@@ -267,7 +267,7 @@ assertError("columnCount: type check", err, "TYPE_ERROR")
 
 // column() - extract column by index
 rows = [["a", "b", "c"], ["1", "2", "3"], ["4", "5", "6"]]
-col, err = csv.column(rows, 1)
+let col, err = csv.column(rows, 1)
 assert("column: extract by index", col[0] == "b" && col[1] == "2" && col[2] == "5")
 
 // column() - out of bounds returns nulls
@@ -293,7 +293,7 @@ assertError("column: index type check", err, "TYPE_ERROR")
 println("\n=== STREAMING TESTS ===")
 
 // stream() - returns channel
-ch = csv.stream("a,b\n1,2\n3,4", ",")
+let ch = csv.stream("a,b\n1,2\n3,4", ",")
 assert("stream: returns channel", type(ch) == "CHANNEL")
 
 // stream() - type validation (returns error directly, not tuple)
@@ -338,7 +338,7 @@ rows, err = csv.parse(data)
 assert("consecutive newlines", len(rows) >= 2)
 
 // Large column count
-largeRow = "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z"
+let largeRow = "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z"
 rows, err = csv.parse(largeRow)
 assert("large column count", len(rows[0]) == 26)
 
@@ -363,7 +363,7 @@ assert("isEmpty optimization: empty string check", csv.isEmpty("") == true)
 
 // columnCount() optimization: should only parse first row (not entire CSV)
 largeRow = "1,2,3"
-i = 0
+let i = 0
 while i < 100 {
     largeRow = largeRow + "\n4,5,6"
     i = i + 1
@@ -375,15 +375,15 @@ assert("columnCount optimization: only parses first row", count == 3)
 // SUMMARY
 // ============================================================================
 
-separators = ""
+let separators = ""
 i = 0
 while i < 60 {
     separators = separators + "="
     i = i + 1
 }
 
-total = passed + failed
-percent = 0
+let total = passed + failed
+let percent = 0
 if total > 0 {
     percent = (passed * 100) / total
 }

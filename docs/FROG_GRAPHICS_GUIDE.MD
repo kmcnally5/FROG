@@ -10,15 +10,15 @@ The kLex graphics system is built in layers, each sitting cleanly on the one bel
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Your .lex program                                   │
+│  Your .lex program                                  │
 ├──────────────────────────┬──────────────────────────┤
 │  UI Widgets              │  Charts                  │
 │  (builtins_ui.go)        │  (builtins_charts.go)    │
 ├──────────────────────────┴──────────────────────────┤
-│  Graphics Primitives                                 │
-│  (builtins_graphics.go)                              │
+│  Graphics Primitives                                │
+│  (builtins_graphics.go)                             │
 ├─────────────────────────────────────────────────────┤
-│  OpenGL 4.1 core  +  GLFW 3.3                        │
+│  OpenGL 4.1 core  +  GLFW 3.3                       │
 └─────────────────────────────────────────────────────┘
 ```
 

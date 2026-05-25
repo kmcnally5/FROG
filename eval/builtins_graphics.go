@@ -3,15 +3,20 @@
 package eval
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
-	_ "image/jpeg"
-	_ "image/png"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
+	_ "golang.org/x/image/webp"
 	"klex/ast"
 	"math"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -101,7 +106,27 @@ void main() {
 }
 ` + "\x00"
 
-const sdfFragmentShaderSrc = `
+// SDF AA tightening scale. Apple's deprecated GL 4.1 (frozen since 2018)
+// returns slightly larger dFdx/dFdy values through the Metal compatibility
+// shim than Mesa does on Linux — that widens the smoothstep AA band and
+// softens edges. Multiplying the derivative by a sub-1.0 factor on macOS
+// recovers most of the crispness without affecting Linux/Windows where the
+// default (1.0) is already correct.
+//
+// 0.70 was chosen empirically as a starting point; a higher value (e.g.
+// 0.85) gives gentler AA, lower (0.55) gives crisper but slightly aliased
+// edges on near-axis-aligned strokes. Tweak here if visual results disagree.
+var sdfAAScale = float32(1.0)
+
+var sdfFragmentShaderSrc string
+var texFragmentShaderSrc string
+
+func init() {
+	if runtime.GOOS == "darwin" {
+		sdfAAScale = 0.70
+	}
+
+	sdfFragmentShaderSrc = fmt.Sprintf(`
 #version 410 core
 in vec2 vLocal;
 uniform vec2  uHalfSize;
@@ -118,8 +143,9 @@ float sdRoundedBox(vec2 p, vec2 b, float r) {
 
 void main() {
     float dist = sdRoundedBox(vLocal, uHalfSize, uRadius);
-    // Pixel-perfect AA width derived from screen-space derivative
-    float pxW  = length(vec2(dFdx(dist), dFdy(dist)));
+    // Pixel-perfect AA width derived from screen-space derivative.
+    // Scaled by sdfAAScale to tighten the band on macOS (see Go comment).
+    float pxW  = length(vec2(dFdx(dist), dFdy(dist))) * %f;
     float alpha;
     if (uMode == 1) {
         alpha = smoothstep(pxW, -pxW, abs(dist) - uStrokeW);
@@ -129,9 +155,9 @@ void main() {
     if (alpha < 0.004) discard;
     fragColor = uColor * alpha;
 }
-` + "\x00"
+`+"\x00", sdfAAScale)
 
-const texFragmentShaderSrc = `
+	texFragmentShaderSrc = fmt.Sprintf(`
 #version 410 core
 in vec2 vTexCoord;
 uniform sampler2D tex;
@@ -143,15 +169,17 @@ void main() {
     if (textMode == 1) {
         // SDF atlas: r channel stores normalised distance (0.5 = on edge).
         // fwidth gives the pixel size in SDF space — auto-sizes the AA fringe.
+        // Scaled by sdfAAScale to tighten the band on macOS (see Go comment).
         float sdf   = s.r;
-        float w     = length(vec2(dFdx(sdf), dFdy(sdf)));
+        float w     = length(vec2(dFdx(sdf), dFdy(sdf))) * %f;
         float alpha = smoothstep(0.5 - w, 0.5 + w, sdf);
         fragColor   = vec4(tint.rgb, alpha * tint.a);
     } else {
         fragColor = s * tint;
     }
 }
-` + "\x00"
+`+"\x00", sdfAAScale)
+}
 
 // Gradient shaders — two-color linear fill interpolated in the fragment shader.
 // uDir 0 = horizontal (left→right), 1 = vertical (top→bottom).
@@ -376,6 +404,11 @@ var gfx struct {
 	uiNextID         int
 	uiElements       map[string][4]float32 // id -> [x, y, w, h]
 	uiBackspaceCount int                   // number of backspaces this frame
+	uiDeleteCount    int                   // forward-deletes this frame (Delete key)
+	uiLeftCount      int                   // ← arrow presses this frame
+	uiRightCount     int                   // → arrow presses this frame
+	uiUpCount        int                   // ↑ arrow presses this frame
+	uiDownCount      int                   // ↓ arrow presses this frame
 	uiListSelected   map[string]int        // listId -> selected item index
 	uiListScroll     map[string]int        // listId -> scroll position (top visible item)
 	uiScrollDelta    float64               // vertical mouse wheel delta this frame
@@ -498,9 +531,7 @@ func init() {
 			return typeError("window: title must be a string", ast.Pos{})
 		}
 		drawFn := args[3]
-		switch drawFn.(type) {
-		case *Function, *Builtin:
-		default:
+		if !IsCallable(drawFn) {
 			return typeError(fmt.Sprintf("window: drawFn must be a function, got %s", drawFn.Type()), ast.Pos{})
 		}
 
@@ -722,17 +753,27 @@ func init() {
 			gfx.charBuf = append(gfx.charBuf, char)
 		})
 		win.SetKeyCallback(func(_ *glfw.Window, key glfw.Key, _ int, action glfw.Action, _ glfw.ModifierKey) {
+			// Edit / navigation keys need a count (not just `justPressed`) so
+			// the held-key auto-repeat events GLFW delivers translate into
+			// multiple edits-per-frame. Otherwise only the first press
+			// registers per frame and the user has to tap once per character.
+			bumpEditCount := func() {
+				switch key {
+				case glfw.KeyBackspace: gfx.uiBackspaceCount++
+				case glfw.KeyDelete:    gfx.uiDeleteCount++
+				case glfw.KeyLeft:      gfx.uiLeftCount++
+				case glfw.KeyRight:     gfx.uiRightCount++
+				case glfw.KeyUp:        gfx.uiUpCount++
+				case glfw.KeyDown:      gfx.uiDownCount++
+				}
+			}
 			switch action {
 			case glfw.Press:
 				gfx.keys[key] = true
 				gfx.justPressed[key] = true
-				if key == glfw.KeyBackspace {
-					gfx.uiBackspaceCount++
-				}
+				bumpEditCount()
 			case glfw.Repeat:
-				if key == glfw.KeyBackspace {
-					gfx.uiBackspaceCount++
-				}
+				bumpEditCount()
 			case glfw.Release:
 				gfx.keys[key] = false
 			}
@@ -772,6 +813,11 @@ func init() {
 			gfx.mouseRightClicked = false
 			gfx.charBuf = gfx.charBuf[:0]
 			gfx.uiBackspaceCount = 0
+			gfx.uiDeleteCount    = 0
+			gfx.uiLeftCount      = 0
+			gfx.uiRightCount     = 0
+			gfx.uiUpCount        = 0
+			gfx.uiDownCount      = 0
 			gfx.uiScrollDelta = 0
 			gfx.uiScrollX = 0
 			// Safety: reset clip stack in case user left unmatched pushClip/popClip pairs.
@@ -1229,8 +1275,8 @@ func init() {
 			verts[i] = float32(toFloat64(el))
 		}
 		if gfx.doFill {
-			fanVerts := make([]float32, 0, len(verts)+2)
-			// Centre point: average of all vertices
+			// Centre point (2) + every vertex (len(verts)) + closing vertex (2) = +4.
+			fanVerts := make([]float32, 0, len(verts)+4)
 			var cx, cy float32
 			for i := 0; i < len(verts); i += 2 {
 				cx += verts[i]
@@ -1273,21 +1319,34 @@ func init() {
 
 	Builtins["loadImage"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
-			return runtimeError("loadImage expects 1 argument: path", ast.Pos{})
+			return runtimeError("loadImage expects 1 argument: path | bytes", ast.Pos{})
 		}
-		pathObj, ok := args[0].(*String)
-		if !ok {
-			return typeError("loadImage: path must be a string", ast.Pos{})
-		}
-		f, err := os.Open(pathObj.Value)
-		if err != nil {
-			return runtimeError(fmt.Sprintf("loadImage: cannot open %q: %v", pathObj.Value, err), ast.Pos{})
-		}
-		defer f.Close()
 
-		src, _, err := image.Decode(f)
-		if err != nil {
-			return runtimeError(fmt.Sprintf("loadImage: cannot decode %q: %v", pathObj.Value, err), ast.Pos{})
+		// loadImage accepts either a filesystem path or encoded bytes — bytes
+		// fetched over a bridge (AI image generation, HTTP downloads, format
+		// decoders) skip the disk round-trip entirely. Decode path is the
+		// same past source resolution.
+		var src image.Image
+		switch a := args[0].(type) {
+		case *String:
+			f, err := os.Open(a.Value)
+			if err != nil {
+				return runtimeError(fmt.Sprintf("loadImage: cannot open %q: %v", a.Value, err), ast.Pos{})
+			}
+			defer f.Close()
+			decoded, _, err := image.Decode(f)
+			if err != nil {
+				return runtimeError(fmt.Sprintf("loadImage: cannot decode %q: %v", a.Value, err), ast.Pos{})
+			}
+			src = decoded
+		case *Bytes:
+			decoded, _, err := image.Decode(bytes.NewReader(a.Value))
+			if err != nil {
+				return runtimeError(fmt.Sprintf("loadImage: cannot decode bytes (%d bytes): %v", len(a.Value), err), ast.Pos{})
+			}
+			src = decoded
+		default:
+			return typeError(fmt.Sprintf("loadImage: argument must be a path string or bytes, got %s", args[0].Type()), ast.Pos{})
 		}
 
 		rgba := image.NewRGBA(src.Bounds())
@@ -1295,6 +1354,171 @@ func init() {
 
 		// Store pixels; GPU upload deferred to first drawImage() call.
 		return &Image{W: rgba.Bounds().Dx(), H: rgba.Bounds().Dy(), pixels: rgba.Pix}
+	}}
+
+	// imageFromRgba(bytes, width, height) → image
+	//
+	// Wraps raw RGBA8 pixel bytes (row-major, exactly width*height*4
+	// bytes) into a kLex Image handle without going through PNG/JPEG
+	// decode. The counterpart to loadImage(pngBytes) for sources that
+	// already have raw pixels — Metal surface readbacks, procedural
+	// generators, video frames, screen captures.
+	//
+	// Pixels are copied into the Image's own buffer so the caller can
+	// mutate the source bytes afterwards without affecting the image.
+	Builtins["imageFromRgba"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 3 {
+			return runtimeError("imageFromRgba expects (bytes, width, height)", ast.Pos{})
+		}
+		bs, bok := args[0].(*Bytes)
+		w, wok := args[1].(*Integer)
+		h, hok := args[2].(*Integer)
+		if !bok || !wok || !hok {
+			return typeError("imageFromRgba expects (bytes: bytes, width: int, height: int)", ast.Pos{})
+		}
+		if w.Value <= 0 || h.Value <= 0 {
+			return runtimeError("imageFromRgba: width and height must be positive", ast.Pos{})
+		}
+		expected := w.Value * h.Value * 4
+		if len(bs.Value) != expected {
+			return runtimeError(fmt.Sprintf(
+				"imageFromRgba: bytes length %d does not match width*height*4 = %d",
+				len(bs.Value), expected), ast.Pos{})
+		}
+		// Defensive copy — kLex bytes are reference-type from the
+		// runtime's perspective; if the caller mutates them later, an
+		// already-uploaded GPU texture wouldn't change but the
+		// pre-upload CPU pixels would, which is surprising. Copying
+		// closes that gap for the small one-time cost of width*height*4
+		// bytes.
+		pix := make([]byte, len(bs.Value))
+		copy(pix, bs.Value)
+		return &Image{W: w.Value, H: h.Value, pixels: pix}
+	}}
+
+	// imageToRgba(img) → bytes
+	//
+	// Returns the Image's raw RGBA8 pixels (row-major, width*height*4
+	// bytes). The natural counterpart to imageFromRgba — round-tripping
+	// `imageFromRgba(imageToRgba(img), w, h)` produces an equivalent
+	// image.
+	//
+	// Source priority:
+	//   1. img.pixels  — pre-GPU-upload CPU bytes (present after loadImage
+	//                    until the first drawImage uploads to a texture).
+	//   2. img.TextureID — once uploaded, reads back from the GPU via
+	//                      glGetTexImage. MUST be called from the GL
+	//                      thread (i.e. inside a draw frame).
+	Builtins["imageToRgba"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("imageToRgba expects 1 argument: img", ast.Pos{})
+		}
+		img, ok := args[0].(*Image)
+		if !ok {
+			return typeError(fmt.Sprintf("imageToRgba: argument must be an image, got %s", args[0].Type()), ast.Pos{})
+		}
+		if img.W <= 0 || img.H <= 0 {
+			return runtimeError("imageToRgba: image has no dimensions", ast.Pos{})
+		}
+		expected := img.W * img.H * 4
+		if len(img.pixels) >= expected {
+			// Defensive copy so caller mutations don't leak into the
+			// Image's source bytes.
+			out := make([]byte, expected)
+			copy(out, img.pixels)
+			return &Bytes{Value: out}
+		}
+		if img.TextureID != 0 {
+			out := make([]byte, expected)
+			gl.BindTexture(gl.TEXTURE_2D, img.TextureID)
+			gl.GetTexImage(gl.TEXTURE_2D, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(out))
+			gl.BindTexture(gl.TEXTURE_2D, 0)
+			return &Bytes{Value: out}
+		}
+		return runtimeError("imageToRgba: image has no pixel data — has it been drawn yet?", ast.Pos{})
+	}}
+
+	// imageSize(img) → (width, height)
+	//
+	// Returns the pixel dimensions of a kLex Image as a two-element tuple.
+	// Cheap (struct field reads); safe to call before the image's first
+	// drawImage (no GPU upload required).
+	Builtins["imageSize"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("imageSize expects 1 argument: img", ast.Pos{})
+		}
+		img, ok := args[0].(*Image)
+		if !ok {
+			return typeError(fmt.Sprintf("imageSize: argument must be an image, got %s", args[0].Type()), ast.Pos{})
+		}
+		return &Tuple{Elements: []Object{
+			&Integer{Value: img.W},
+			&Integer{Value: img.H},
+		}}
+	}}
+
+	// saveImage(img, path) — encode an Image to disk. Format is chosen from
+	// the path extension: .png (default, lossless), .jpg/.jpeg (quality 92),
+	// .gif (palette-quantised). Returns null on success, runtime error on
+	// failure. The image's RGBA pixels are encoded directly — no separate
+	// readback path needed because loadImage already keeps them in memory.
+	Builtins["saveImage"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("saveImage expects 2 arguments: img, path", ast.Pos{})
+		}
+		img, ok := args[0].(*Image)
+		if !ok {
+			return typeError(fmt.Sprintf("saveImage: first argument must be an image, got %s", args[0].Type()), ast.Pos{})
+		}
+		pathObj, ok := args[1].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("saveImage: path must be a string, got %s", args[1].Type()), ast.Pos{})
+		}
+		// Resolve pixel data. Once an Image has been drawn, drawImageGL
+		// uploads its bytes to a GPU texture and sets img.pixels = nil to
+		// free the CPU-side memory. That means after the first paint, the
+		// only place the pixels live is the texture — read them back with
+		// glGetTexImage so saveImage works post-render. We don't repopulate
+		// img.pixels because subsequent paints reuse the existing texture.
+		var pix []byte
+		switch {
+		case len(img.pixels) > 0:
+			pix = img.pixels
+		case img.TextureID != 0 && img.W > 0 && img.H > 0:
+			pix = make([]byte, img.W*img.H*4)
+			gl.BindTexture(gl.TEXTURE_2D, img.TextureID)
+			gl.GetTexImage(gl.TEXTURE_2D, 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(pix))
+			gl.BindTexture(gl.TEXTURE_2D, 0)
+		default:
+			return runtimeError("saveImage: image has no pixel data — has it been drawn yet?", ast.Pos{})
+		}
+		rgba := &image.RGBA{
+			Pix:    pix,
+			Stride: img.W * 4,
+			Rect:   image.Rect(0, 0, img.W, img.H),
+		}
+		ext := strings.ToLower(filepath.Ext(pathObj.Value))
+		f, err := os.Create(pathObj.Value)
+		if err != nil {
+			return runtimeError(fmt.Sprintf("saveImage: cannot create %q: %v", pathObj.Value, err), ast.Pos{})
+		}
+		defer f.Close()
+		switch ext {
+		case ".jpg", ".jpeg":
+			if err := jpeg.Encode(f, rgba, &jpeg.Options{Quality: 92}); err != nil {
+				return runtimeError(fmt.Sprintf("saveImage: JPEG encode failed: %v", err), ast.Pos{})
+			}
+		case ".gif":
+			if err := gif.Encode(f, rgba, nil); err != nil {
+				return runtimeError(fmt.Sprintf("saveImage: GIF encode failed: %v", err), ast.Pos{})
+			}
+		default:
+			// PNG is the safe lossless default for unknown / missing extensions.
+			if err := png.Encode(f, rgba); err != nil {
+				return runtimeError(fmt.Sprintf("saveImage: PNG encode failed: %v", err), ast.Pos{})
+			}
+		}
+		return NULL
 	}}
 
 	Builtins["drawImage"] = &Builtin{Fn: func(args []Object) Object {
@@ -1777,13 +2001,19 @@ func drawImageGL(img *Image, x, y, w, h float32) {
 		var texID uint32
 		gl.GenTextures(1, &texID)
 		gl.BindTexture(gl.TEXTURE_2D, texID)
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+		// Trilinear filtering with a generated mipmap chain so the image
+		// stays crisp at any display size — drawing a large image into a
+		// small slot (e.g. 1024×512 logo into a 234×117 header) would
+		// otherwise alias badly with a plain LINEAR min filter. Mag filter
+		// stays LINEAR because mipmaps only apply when down-sampling.
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA,
 			int32(img.W), int32(img.H), 0,
 			gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(img.pixels))
+		gl.GenerateMipmap(gl.TEXTURE_2D)
 		gl.BindTexture(gl.TEXTURE_2D, 0)
 		img.TextureID = texID
 		img.pixels = nil

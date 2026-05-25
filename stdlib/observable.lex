@@ -1,4 +1,9 @@
 // stdlib/observable.lex — reactive value wrapper
+// @module    observable
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   reactive value wrapper
 //
 // An Observable wraps any value. When the value changes via set(), every
 // subscribed handler is called synchronously with the new value.
@@ -70,7 +75,7 @@ struct Observable {
     // emitted value. Initial value is fnRef(current value).
     fn map(fnRef) {
         let src = self
-        out = newObservable(fnRef(src.get()))
+        let out = newObservable(fnRef(src.get()))
         src.subscribe(fn(v) { out.set(fnRef(v)) })
         return out
     }
@@ -79,7 +84,7 @@ struct Observable {
     // Initial value is the source's current value (may not satisfy the predicate).
     fn filter(fnRef) {
         let src = self
-        out = newObservable(src.get())
+        let out = newObservable(src.get())
         src.subscribe(fn(v) {
             if fnRef(v) { out.set(v) }
         })
@@ -92,9 +97,9 @@ struct Observable {
     fn distinct() {
         let src  = self
         let last = src.get()
-        out = newObservable(last)
+        let out = newObservable(last)
         src.subscribe(fn(v) {
-            eq, _ = safe(fn() { return v == last })
+            let eq, _ = safe(fn() { return v == last })
             last = v
             if eq != true { out.set(v) }
         })
@@ -106,7 +111,7 @@ struct Observable {
     fn skip(n) {
         let src     = self
         let skipped = 0
-        out = newObservable(src.get())
+        let out = newObservable(src.get())
         src.subscribe(fn(v) {
             if skipped >= n {
                 out.set(v)
@@ -122,7 +127,7 @@ struct Observable {
     fn take(n) {
         let src   = self
         let count = 0
-        out = newObservable(src.get())
+        let out = newObservable(src.get())
         src.subscribe(fn(v) {
             if count < n {
                 out.set(v)
@@ -138,7 +143,7 @@ struct Observable {
     fn debounce(ms) {
         let src     = self
         let version = 0
-        out = newObservable(src.get())
+        let out = newObservable(src.get())
         src.subscribe(fn(v) {
             version = version + 1
             let myVer = version
@@ -197,11 +202,11 @@ struct Computed {
 // computeFn — zero-argument function that reads from deps and returns a value.
 // The initial value is computed immediately at construction time.
 fn computed(deps, computeFn) {
-    c = Computed { val: computeFn(), computeFn: computeFn, emitter: ev.newEmitter() }
+    let c = Computed { val: computeFn(), computeFn: computeFn, emitter: ev.newEmitter() }
     for dep in deps {
         let cRef = c
         dep.subscribe(fn(_) {
-            newVal = cRef.computeFn()
+            let newVal = cRef.computeFn()
             cRef.val = newVal
             cRef.emitter.emit("change", newVal)
         })
@@ -222,7 +227,7 @@ fn computed(deps, computeFn) {
 //   events.subscribe(fn(v) { println(v) })
 // -------------------------------------
 fn merge(sources...) {
-    out = newObservable(null)
+    let out = newObservable(null)
     for src in sources {
         src.subscribe(fn(v) { out.set(v) })
     }
@@ -244,13 +249,13 @@ fn merge(sources...) {
 // -------------------------------------
 fn combine(sources...) {
     fn getAll() {
-        vals = []
+        let vals = []
         for s in sources {
             vals = push(vals, s.get())
         }
         return vals
     }
-    out = newObservable(getAll())
+    let out = newObservable(getAll())
     for src in sources {
         src.subscribe(fn(_) { out.set(getAll()) })
     }

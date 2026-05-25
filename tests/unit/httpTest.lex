@@ -1,7 +1,7 @@
 import "stdlib/http.lex" as http
 
 // --- GET ---
-resp, err = http.get("https://httpbin.org/get")
+let resp, err = http.get("https://httpbin.org/get")
 println(err == null)           // true
 println(http.isOk(resp))       // true
 println(resp.status)           // 200
@@ -9,11 +9,11 @@ println(type(resp.body) == "STRING")   // true
 println(type(resp.headers) == "HASH")  // true
 
 // content-type header present
-ct = http.header(resp, "content-type")
+let ct = http.header(resp, "content-type")
 println(ct != null)            // true
 
 // --- POST JSON ---
-resp, err = http.post("https://httpbin.org/post", "\{\"name\":\"kLex\"}", "application/json")
+resp, err = http.post("https://httpbin.org/post", `{"name":"kLex"}`, "application/json")
 println(err == null)           // true
 println(http.isOk(resp))       // true
 println(resp.status)           // 200

@@ -16,10 +16,10 @@ println(f.identity([1,2,3]))
 // =====================================
 println("\n== compose ==")
 
-inc = fn(x) { x + 1 }
-double = fn(x) { x * 2 }
+let inc = fn(x) { x + 1 }
+let double = fn(x) { x * 2 }
 
-comp = f.compose(double, inc)
+let comp = f.compose(double, inc)
 
 println(comp(5))   // (5+1)*2 = 12
 
@@ -29,7 +29,7 @@ println(comp(5))   // (5+1)*2 = 12
 // =====================================
 println("\n== pipe ==")
 
-process = f.pipe(
+let process = f.pipe(
     fn(x) { x + 1 },
     fn(x) { x * 2 },
     fn(x) { x - 3 }
@@ -43,7 +43,7 @@ println(process(5))   // ((5+1)*2)-3 = 9
 // =====================================
 println("\n== tap ==")
 
-debug = f.tap(fn(x) {
+let debug = f.tap(fn(x) {
     println("DEBUG VALUE: " + str(x))
 })
 
@@ -55,7 +55,7 @@ println(debug(10))   // prints debug + returns 10
 // =====================================
 println("\n== always ==")
 
-const5 = f.always(5)
+let const5 = f.always(5)
 
 println(const5("a"))
 println(const5(999))
@@ -67,9 +67,9 @@ println(const5([1,2,3]))
 // =====================================
 println("\n== partial ==")
 
-add = fn(a, b) { a + b }
+let add = fn(a, b) { a + b }
 
-add10 = f.partial(add, 10)
+let add10 = f.partial(add, 10)
 
 println(add10(5))    // 15
 println(add10(20))   // 30
@@ -80,9 +80,9 @@ println(add10(20))   // 30
 // =====================================
 println("\n== flip ==")
 
-sub = fn(a, b) { a - b }
+let sub = fn(a, b) { a - b }
 
-flipSub = f.flip(sub)
+let flipSub = f.flip(sub)
 
 println(sub(10, 3))        // 7
 println(flipSub(10, 3))    // 3 - 10 = -7
@@ -93,10 +93,10 @@ println(flipSub(10, 3))    // 3 - 10 = -7
 // =====================================
 println("\n== real pipeline ==")
 
-data = [1,2,3,4,5,6]
+let data = [1,2,3,4,5,6]
 
 // double → filter evens → sum
-result = f.pipe(
+let result = f.pipe(
     fn(arr) { map(arr, fn(x) { x * 2 }) },
     fn(arr) { filter(arr, fn(x) { x % 2 == 0 }) },
     fn(arr) { reduce(arr, fn(acc, x) { acc + x }, 0) }
@@ -110,11 +110,11 @@ println(result(data))   // (2+4+6+8+10+12 filtered evens => all even => sum = 42
 // =====================================
 println("\n== nested compose ==")
 
-add1 = fn(x) { x + 1 }
-square = fn(x) { x * x }
+let add1 = fn(x) { x + 1 }
+let square = fn(x) { x * x }
 
-f1 = f.compose(square, add1)   // (x+1)^2
-f2 = f.compose(add1, square)   // x^2 + 1
+let f1 = f.compose(square, add1)   // (x+1)^2
+let f2 = f.compose(add1, square)   // x^2 + 1
 
 println(f1(3))   // 16
 println(f2(3))   // 10
@@ -125,7 +125,7 @@ println(f2(3))   // 10
 // =====================================
 println("\n== sanity ==")
 
-chain = f.pipe(
+let chain = f.pipe(
     fn(x) { x + 2 },
     fn(x) { x * x },
     fn(x) { x - 1 }

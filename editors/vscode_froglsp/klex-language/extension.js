@@ -9,8 +9,17 @@ let client = null
 
 // Find the froglsp binary in common locations
 function findFrogLspBinary() {
-	// Try workspace root + froglsp
 	const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
+
+	// Try bin/froglsp first (canonical location)
+	if (workspaceFolder) {
+		const binPath = path.join(workspaceFolder, 'bin', 'froglsp')
+		if (fs.existsSync(binPath)) {
+			return binPath
+		}
+	}
+
+	// Fall back to workspace root + froglsp (legacy location)
 	if (workspaceFolder) {
 		const binaryPath = path.join(workspaceFolder, 'froglsp')
 		if (fs.existsSync(binaryPath)) {

@@ -1,4 +1,9 @@
 // base64.lex
+// @module    base64
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   Base64 encoding and decoding for kLex.
 // Base64 encoding and decoding for kLex.
 //
 // Standard base64 uses A-Z, a-z, 0-9, +, / with = padding.

@@ -40,7 +40,7 @@ fn scaling_parse(workerCounts) {
 
         let start = dt.nowNanos()
 
-        result, err = p.parallel_reduce(
+        let result, err = p.parallel_reduce(
             arr,
             fn(acc, elem) {
                 let value = (elem * 7) % 100
@@ -93,7 +93,7 @@ fn scaling_agg(workerCounts) {
 
         let start = dt.nowNanos()
 
-        sum, err = p.parallel_reduce(
+        let sum, err = p.parallel_reduce(
             arr,
             fn(acc, x) { acc + x },
             fn(a, b) { a + b },
@@ -141,7 +141,7 @@ fn scaling_merge(workerCounts) {
 
         let start = dt.nowNanos()
 
-        result, err = p.parallel_reduce(
+        let result, err = p.parallel_reduce(
             arr,
             fn(acc, x) { if x > 500 { acc + 1 } else { acc } },
             fn(a, b) { a + b },

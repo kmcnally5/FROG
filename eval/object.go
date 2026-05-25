@@ -24,6 +24,7 @@ import (
 	"klex/ast"
 	"net"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,6 +40,7 @@ const (
 	FLOAT_OBJ    ObjectType = "FLOAT"
 	BOOLEAN_OBJ  ObjectType = "BOOLEAN"
 	STRING_OBJ   ObjectType = "STRING"
+	BYTES_OBJ    ObjectType = "BYTES"
 	NULL_OBJ     ObjectType = "NULL"
 	RETURN_OBJ   ObjectType = "RETURN"  // wraps a value being returned
 	ERROR_OBJ    ObjectType = "ERROR"   // runtime or type error
@@ -66,6 +68,18 @@ const (
 	DB_CONN_OBJ            ObjectType = "DB_CONN"
 	DB_TX_OBJ              ObjectType = "DB_TX"
 	BRIDGE_OBJ             ObjectType = "BRIDGE"
+	BRIDGE_POOL_OBJ        ObjectType = "BRIDGE_POOL"
+	MCP_CLIENT_OBJ         ObjectType = "MCP_CLIENT"
+	MCP_SERVER_OBJ         ObjectType = "MCP_SERVER"
+
+	// COMPILED_FUNCTION_OBJ is the type tag for vm.CompiledFunction.
+	// Declared here (not in vm) so eval-side dispatchers can do
+	// `fn.Type() == COMPILED_FUNCTION_OBJ` directly without going
+	// through the previously-required IsExternalCallable hook
+	// indirection (M2 audit fix, 2026-05-22). vm.CompiledFunction's
+	// Type() returns this constant; eval can reference it without
+	// importing vm (avoids the cycle).
+	COMPILED_FUNCTION_OBJ ObjectType = "COMPILED_FUNCTION"
 )
 
 // Object is the interface every runtime value implements.
@@ -105,12 +119,101 @@ func (b *Boolean) Inspect() string  { return fmt.Sprintf("%t", b.Value) }
 
 // -------------------- STRING --------------------
 
+// String holds a kLex string value. Iteration and indexing operate on
+// Unicode code points (runes), not bytes, so len("café") == 4.
+//
+// kLex strings are immutable. To avoid quadratic blow-up when scripts walk
+// a long string with s[i] (e.g. json.parse over a 400KB Forge response —
+// without caching, each index is O(n) for the rune conversion, total O(n²),
+// 1-2 minutes for ~400K chars), the rune-level view is cached lazily on
+// first rune-level access. ASCII strings skip the rune slice entirely and
+// byte-index Value directly — zero extra allocation, O(1) per access.
+//
+// The cache is thread-safe: async-spawned goroutines share *String pointers
+// (env snapshot copies bindings but not the strings they reference), so
+// concurrent RuneAt/RuneLen/RuneSubstring calls are expected. sync.Once
+// guarantees ensureRuneCache runs exactly once per String. After init, the
+// runes/runeCount/isASCII fields are read-only and safe for concurrent reads.
 type String struct {
 	Value string
+
+	runeOnce  sync.Once
+	runes     []rune // nil when isASCII — byte-indexing Value is correct then
+	runeCount int
+	isASCII   bool
 }
 
 func (s *String) Type() ObjectType { return STRING_OBJ }
 func (s *String) Inspect() string  { return s.Value }
+
+// ensureRuneCache populates the rune-level fields exactly once per String.
+// Cheap for ASCII strings — no rune slice allocation, just a byte scan.
+func (s *String) ensureRuneCache() {
+	s.runeOnce.Do(func() {
+		ascii := true
+		for i := 0; i < len(s.Value); i++ {
+			if s.Value[i] >= 0x80 {
+				ascii = false
+				break
+			}
+		}
+		s.isASCII = ascii
+		if ascii {
+			s.runeCount = len(s.Value)
+		} else {
+			s.runes = []rune(s.Value)
+			s.runeCount = len(s.runes)
+		}
+	})
+}
+
+// RuneLen returns the number of Unicode code points in s.
+// O(n) on the first rune-level access, O(1) thereafter.
+func (s *String) RuneLen() int {
+	s.ensureRuneCache()
+	return s.runeCount
+}
+
+// RuneAt returns the i-th rune as (r, true), or (0, false) if i is out of
+// bounds. O(1) after the first rune-level access on this string.
+func (s *String) RuneAt(i int) (rune, bool) {
+	s.ensureRuneCache()
+	if i < 0 || i >= s.runeCount {
+		return 0, false
+	}
+	if s.isASCII {
+		return rune(s.Value[i]), true
+	}
+	return s.runes[i], true
+}
+
+// RuneSubstring returns the substring from rune index start (inclusive) to
+// end (exclusive). Caller is responsible for bounds checking via RuneLen().
+func (s *String) RuneSubstring(start, end int) string {
+	s.ensureRuneCache()
+	if s.isASCII {
+		return s.Value[start:end]
+	}
+	return string(s.runes[start:end])
+}
+
+// -------------------- BYTES --------------------
+
+// Bytes holds an arbitrary sequence of bytes — not necessarily valid utf-8.
+// This is the type kLex uses for binary payloads (file contents, network
+// frames, base64-decoded data, anything that doesn't have a natural text
+// reading). It is a value type passed by reference like Array and Hash:
+// builtins that mutate (none today) must document that explicitly.
+//
+// Inspect() renders as bytes(N) where N is the byte count, deliberately
+// avoiding any attempt to render the raw bytes — they may be binary garbage
+// when printed. Use bytesToHex() / bytesToBase64() / str() for visualisation.
+type Bytes struct {
+	Value []byte
+}
+
+func (b *Bytes) Type() ObjectType { return BYTES_OBJ }
+func (b *Bytes) Inspect() string  { return fmt.Sprintf("bytes(%d)", len(b.Value)) }
 
 // -------------------- NULL --------------------
 
@@ -182,6 +285,12 @@ func intObj(n int) *Integer {
 	return &Integer{Value: n}
 }
 
+// NewInteger is the exported alias for intObj so the vm package (and
+// other future callers outside eval) can box integers through the
+// same pool path the evaluator uses. Keep the exported surface
+// narrow — this is the only public Integer constructor.
+func NewInteger(n int) *Integer { return intObj(n) }
+
 // -------------------- ERROR --------------------
 
 // ErrorKind distinguishes between type errors (wrong types for an operation)
@@ -226,6 +335,20 @@ type Error struct {
 	Stack       []Frame // call frames, innermost first (internal errors only)
 	Code        string  // user-visible error code, e.g. "NOT_FOUND"
 	IsUserError bool    // true = first-class value; false = propagation signal
+
+	// Bridge-originated errors can carry structured detail from the remote
+	// language: the exception class name (e.g. "ValueError", "FileNotFoundError")
+	// and the full traceback. Both are empty for non-bridge errors. Exposed
+	// to kLex code via err.errorType and err.traceback (see eval.go DotExpr).
+	ErrorType string
+	Traceback string
+
+	// hookFired is set true by FireErrorBubbleHook on the first call
+	// for this Error instance, so the agentic on_error_bubble hook
+	// fires at most ONCE per logical error even when the error passes
+	// through both eval-side helpers (typeError / runtimeError) AND
+	// the VM's bubbleError path. Not exported — internal bookkeeping.
+	hookFired bool
 }
 
 func (e *Error) Type() ObjectType { return ERROR_OBJ }
@@ -451,17 +574,184 @@ type HashPair struct {
 // Hash is a mutable key-value store. Valid key types are string, integer,
 // and boolean (anything that can be reliably converted to a HashKey).
 // Like arrays, hashes are passed by reference.
+//
+// CONCURRENCY (OFI #3): kLex's async snapshot semantics pass *Hash by
+// pointer across goroutine boundaries — see the cheatsheet in
+// docs/ASYNC_BEST_PRACTICES.MD §2.1.1. That makes accidental
+// concurrent mutation easy, and a bare Go map panics with
+// "fatal error: concurrent map writes" — unrecoverable.
+//
+// M5 lazy mutex (audit follow-up 2026-05-22): the `mu` mutex used to
+// be acquired on EVERY read/write/iteration. Profiling showed that
+// for synchronous code (the vast majority — json.parse, kv_store,
+// observable on a single goroutine), the mutex cost ~25ns per op
+// dominated. With this change Hash starts NON-shared and skips
+// locking entirely. The first time the hash crosses a goroutine
+// boundary (send/async/parallelArray*/etc.) we MarkShared(h), which
+// atomically flips `shared` to true. From then on every Lock /
+// Unlock takes the mutex.
+//
+// Correctness: MarkShared MUST be called BEFORE the goroutine
+// publication (the channel send / `go` statement). The atomic.Store
+// in MarkShared establishes a happens-before with the read in
+// Lock()/Unlock() of subsequent goroutines, so they correctly observe
+// shared=true and use the mutex. The original goroutine — which may
+// still hold the hash — will also observe its own atomic.Store and
+// switch to mutex-acquiring access on subsequent operations.
+//
+// For high-throughput shared mutation, prefer ConcurrentHash — its
+// sync.Map-backed implementation is lock-free for many operations.
+// Hash's mutex is a correctness floor, not a performance peak.
 type Hash struct {
 	Pairs  map[HashKey]HashPair
 	frozen bool
+	shared atomic.Bool // lazy-shared flag; once true, mu is mandatory
+	mu     sync.Mutex
 }
 
 func (h *Hash) Type() ObjectType { return HASH_OBJ }
+
+// IsShared reports whether the hash has been published across
+// goroutine boundaries (and thus every operation must take mu).
+// Used by Lock/Unlock and the Get/Set/Del/LenSafe/Snapshot helpers.
+// Public so vm-side code (in particular vm/external_callable.go's
+// async snapshot) can include hashes when recursively marking.
+func (h *Hash) IsShared() bool { return h.shared.Load() }
+
+// MarkShared flips the lazy-shared flag and is idempotent. Called
+// by MarkSharedRecursive at every goroutine-crossing sink. Bare
+// MarkShared (without the recursive walk) is rarely what you want —
+// nested hashes inside the marked one would still be lock-free —
+// but is exposed for unit tests and tight wrappers.
+func (h *Hash) MarkShared() { h.shared.Store(true) }
+
+// Lock acquires the hash's mutex IF the hash has been marked shared.
+// For never-shared hashes (the common case under synchronous use),
+// it's a single atomic read + branch — about 1ns vs the ~25ns of
+// an unconditional mu.Lock.
+func (h *Hash) Lock() {
+	if h.shared.Load() {
+		h.mu.Lock()
+	}
+}
+
+// Unlock releases the mutex IF it was acquired by a paired Lock.
+// Must mirror Lock — the shared flag is single-direction
+// (false → true, never back), so it's safe to test load again
+// here: if Lock observed shared=true and took mu, Unlock also
+// observes shared=true (it's monotone) and releases. If Lock
+// observed shared=false, Unlock observes the same and skips.
+//
+// One subtle invariant: a goroutine can be IN the middle of a
+// Lock/Unlock-bracketed section when ANOTHER goroutine calls
+// MarkShared. The mid-section reader observed shared=false at
+// Lock-time (no mu held) and will observe... whatever Load
+// returns at Unlock-time. If shared became true mid-section,
+// Unlock would try mu.Unlock() on an unlocked mutex — panic.
+//
+// Avoidance: MarkShared is ALWAYS called from the OWNING
+// goroutine, BEFORE the value is published. The owning goroutine
+// can't be inside a Lock/Unlock-bracketed section at that moment
+// (single-threaded code, no preemption mid-statement). So when
+// other goroutines later receive the published value, Lock sees
+// shared=true and takes mu; Unlock sees the same.
+func (h *Hash) Unlock() {
+	if h.shared.Load() {
+		h.mu.Unlock()
+	}
+}
+
+// Snapshot returns a stable slice of (HashKey, HashPair) pairs taken
+// under the lock. Callers iterate the snapshot WITHOUT holding the
+// lock, so user-level callbacks (e.g. for-in bodies) don't block
+// concurrent writers and can't deadlock by recursively locking the
+// same hash.
+//
+// Order is non-deterministic (Go map iteration). Snapshot is O(n)
+// in space — fine for typical kLex hashes, but consider locked
+// direct access for very large hashes where you only need a single
+// key.
+func (h *Hash) Snapshot() []HashPair {
+	if h.shared.Load() {
+		h.mu.Lock()
+	}
+	out := make([]HashPair, 0, len(h.Pairs))
+	for _, p := range h.Pairs {
+		out = append(out, p)
+	}
+	if h.shared.Load() {
+		h.mu.Unlock()
+	}
+	return out
+}
+
+// Get safely reads a single key. Returns (HashPair{}, false) on miss.
+// Replaces the unsafe `pair, ok := h.Pairs[k]` pattern at any site
+// that may race with writers.
+func (h *Hash) Get(k HashKey) (HashPair, bool) {
+	if h.shared.Load() {
+		h.mu.Lock()
+		p, ok := h.Pairs[k]
+		h.mu.Unlock()
+		return p, ok
+	}
+	p, ok := h.Pairs[k]
+	return p, ok
+}
+
+// Set safely writes a single pair. Callers that need to preserve the
+// frozen check must do so BEFORE calling Set — Set itself doesn't
+// inspect frozen so it stays a tight, single-purpose primitive.
+func (h *Hash) Set(k HashKey, p HashPair) {
+	if h.shared.Load() {
+		h.mu.Lock()
+		h.Pairs[k] = p
+		h.mu.Unlock()
+		return
+	}
+	h.Pairs[k] = p
+}
+
+// Del safely removes a key. No-op on miss. Same frozen-check
+// expectations as Set.
+func (h *Hash) Del(k HashKey) {
+	if h.shared.Load() {
+		h.mu.Lock()
+		delete(h.Pairs, k)
+		h.mu.Unlock()
+		return
+	}
+	delete(h.Pairs, k)
+}
+
+// LenSafe returns the current entry count under the lock. The bare
+// `len(h.Pairs)` is technically racy with concurrent writers (Go's
+// runtime won't panic on the read but the result could be stale).
+func (h *Hash) LenSafe() int {
+	if h.shared.Load() {
+		h.mu.Lock()
+		n := len(h.Pairs)
+		h.mu.Unlock()
+		return n
+	}
+	return len(h.Pairs)
+}
+
 func (h *Hash) Inspect() string {
 	var buf strings.Builder
 	buf.WriteString("{")
+	pairs := h.Snapshot()
+	// Sort by key.Inspect() so the rendered string is deterministic
+	// across runs. Go map iteration is randomised; without sorting,
+	// `println({a: 1, b: 2})` could print either order, which makes
+	// tree-walker-vs-VM differential tests flaky for any test that
+	// stringifies a hash. The contract that mattered was already
+	// "no guaranteed order" — sorting just picks one.
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].Key.Inspect() < pairs[j].Key.Inspect()
+	})
 	first := true
-	for _, pair := range h.Pairs {
+	for _, pair := range pairs {
 		if !first {
 			buf.WriteString(", ")
 		}
@@ -472,6 +762,94 @@ func (h *Hash) Inspect() string {
 	}
 	buf.WriteString("}")
 	return buf.String()
+}
+
+// MarkSharedRecursive walks `v` and marks every reachable mutable
+// container as goroutine-shared. Called by every goroutine-crossing
+// sink (send, async args+upvalues, parallelArray*, callInParallel)
+// BEFORE the goroutine publication. The atomic.Store inside Hash.
+// MarkShared establishes the happens-before edge so subsequent
+// goroutines observe shared=true and use mu.
+//
+// Currently only *Hash benefits — *Array doesn't have a mutex and
+// *StructInstance has its own (always-on) RWMutex. But we walk
+// Array / StructInstance / Tuple contents in case nested hashes
+// are inside them. Cycles are handled via the visited set.
+//
+// Cheap when the value is a primitive: a single type-switch
+// fall-through, no allocations. Called per goroutine-crossing —
+// not on hot read/write paths — so the recursive walk cost is
+// amortised against the one-time-per-crossing benefit.
+func MarkSharedRecursive(v Object) {
+	if v == nil {
+		return
+	}
+	visited := make(map[Object]bool)
+	markSharedRec(v, visited)
+}
+
+func markSharedRec(v Object, visited map[Object]bool) {
+	if v == nil || visited[v] {
+		return
+	}
+	visited[v] = true
+	switch o := v.(type) {
+	case *Hash:
+		// CRITICAL: take the mutex BEFORE flipping the flag and
+		// iterating Pairs. The walker may be reached for a hash
+		// that's already shared and currently being mutated by
+		// other goroutines (under their own Lock()). Acquiring mu
+		// here serialises the walker against those writers.
+		//
+		// Short-circuit when the hash is ALREADY shared: nested
+		// hashes were marked transitively on the original
+		// publication, so re-walking would be redundant work AND
+		// race-free is no longer guaranteed for any nested state
+		// ADDED after publication (rare; documented limitation —
+		// post-publication insertions of fresh mutable state into
+		// a published container are NOT auto-marked).
+		o.mu.Lock()
+		if o.IsShared() {
+			o.mu.Unlock()
+			return
+		}
+		o.MarkShared()
+		pairs := make([]HashPair, 0, len(o.Pairs))
+		for _, p := range o.Pairs {
+			pairs = append(pairs, p)
+		}
+		o.mu.Unlock()
+		for _, p := range pairs {
+			markSharedRec(p.Value, visited)
+			markSharedRec(p.Key, visited)
+		}
+	case *Array:
+		for _, el := range o.Elements {
+			markSharedRec(el, visited)
+		}
+	case *Tuple:
+		for _, el := range o.Elements {
+			markSharedRec(el, visited)
+		}
+	case *StructInstance:
+		// StructInstance already serialises Fields access via its
+		// own RWMutex (always on). Walking the fields for nested
+		// hashes is the win — a hash inside a struct field that
+		// gets passed across goroutines also needs marking.
+		o.mu.RLock()
+		fields := make([]Object, 0, len(o.Fields))
+		for _, fv := range o.Fields {
+			fields = append(fields, fv)
+		}
+		o.mu.RUnlock()
+		for _, fv := range fields {
+			markSharedRec(fv, visited)
+		}
+	}
+	// Primitives (Integer, Float, String, Boolean, Null), and
+	// reference types without nested mutable state (Function,
+	// Channel, Task, NetConn, DBConn, etc.) fall through — nothing
+	// to mark.
 }
 
 // -------------------- MODULE --------------------
@@ -615,6 +993,88 @@ func (r *BridgeRingBuffer) Snapshot() []byte {
 	return out
 }
 
+// bridgeMetricsSampleN is the per-function circular buffer size for latency
+// samples. 256 is generous enough to give stable percentile estimates while
+// keeping memory predictable: 256 floats × N functions per bridge.
+const bridgeMetricsSampleN = 256
+
+// fnMetrics tracks per-function counters and a circular buffer of recent
+// call latencies (milliseconds) used to compute p50/p95/p99 on read.
+type fnMetrics struct {
+	count    int64
+	errors   int64
+	samples  [bridgeMetricsSampleN]float64
+	wrIdx    int  // next slot to overwrite
+	wrapped  bool // true once samples has filled at least once
+}
+
+// bridgeMetrics holds the per-bridge observability state. All fields are
+// mutated under mu; the bridgeMetrics() builtin reads them as a snapshot.
+type bridgeMetrics struct {
+	mu             sync.Mutex
+	callsTotal     int64
+	callsFailed    int64
+	callsInflight  int64
+	streamsTotal   int64
+	streamsActive  int64
+	streamsFailed  int64
+	bytesSent      int64
+	bytesReceived  int64
+	errorsByCode   map[string]int64
+	perFunction    map[string]*fnMetrics
+}
+
+// recordCall adds one sample for fn and updates the relevant counters.
+// elapsedMs is the wall-clock duration; errCode is "" on success.
+func (m *bridgeMetrics) recordCall(fn string, elapsedMs float64, errCode string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.callsInflight--
+	if errCode != "" {
+		m.callsFailed++
+		if m.errorsByCode == nil {
+			m.errorsByCode = make(map[string]int64)
+		}
+		m.errorsByCode[errCode]++
+	}
+	if m.perFunction == nil {
+		m.perFunction = make(map[string]*fnMetrics)
+	}
+	fm := m.perFunction[fn]
+	if fm == nil {
+		fm = &fnMetrics{}
+		m.perFunction[fn] = fm
+	}
+	fm.count++
+	if errCode != "" {
+		fm.errors++
+	}
+	fm.samples[fm.wrIdx] = elapsedMs
+	fm.wrIdx++
+	if fm.wrIdx >= bridgeMetricsSampleN {
+		fm.wrIdx = 0
+		fm.wrapped = true
+	}
+}
+
+// bridgeResponse is the parsed form of one line from the bridge subprocess's
+// stdout. The reader goroutine parses each line exactly once and forwards
+// this wrapper to the waiting caller's channel — callers used to receive
+// raw bytes and re-parse, which doubled the JSON work and forced a
+// defensive copy out of bufio.Scanner's buffer per message.
+//
+//   msg   — the decoded JSON object the caller would otherwise re-Unmarshal.
+//   bytes — the raw line length, used by bridgeMetrics.bytesReceived. The
+//           reader records this so the call site doesn't need the raw slice.
+//
+// A nil *bridgeResponse delivered on a pending channel is the lifecycle
+// signal used by taintAllBridge ("bridge became unavailable"), matching
+// the previous nil-byte-slice convention.
+type bridgeResponse struct {
+	msg   map[string]interface{}
+	bytes int
+}
+
 // Bridge is a persistent subprocess connection for cross-language FFI.
 // kLex communicates with the subprocess via line-delimited JSON over
 // stdin/stdout. Any language that can read/write JSON lines can be a bridge.
@@ -636,7 +1096,7 @@ type Bridge struct {
 	// It is held only briefly (never during the long wait for a response).
 	mu      sync.Mutex
 	nextID  int
-	pending map[int]chan []byte // per-call response channels; keyed by request id
+	pending map[int]chan *bridgeResponse // per-call response channels; keyed by request id
 	tainted   bool
 	taintMsg  string
 	taintCode string // error code delivered to the FIRST waiting call (BRIDGE_CLOSED, BRIDGE_TIMEOUT, etc.)
@@ -656,6 +1116,54 @@ type Bridge struct {
 	// __schema__ handshake in nativeBridge. nil when the bridge doesn't
 	// expose __schema__ (older-style bridges still work).
 	schemas map[string]*FnSchema
+
+	// protocol, capabilities, and the *Info fields are populated during the
+	// __hello__ handshake in nativeBridge. A bridge that doesn't implement
+	// __hello__ is treated as protocol 0 with an empty capability set; every
+	// pre-handshake bridge keeps working unchanged.
+	//
+	// capabilities holds the negotiated intersection (features both sides
+	// support). New features added to the bridge protocol that need explicit
+	// opt-in are gated on entries in this map — today only "schema" and
+	// "binary" are recognised; more will be added as features land.
+	protocol        int
+	capabilities    map[string]bool
+	helperInfo      string // e.g. "klex_bridge.py/0.7.0"
+	language        string // e.g. "python", "node"
+	languageVersion string // e.g. "3.12.4"
+
+	// metrics captures per-bridge counters, byte volumes, error-code
+	// breakdowns, and per-function latency samples. Lazily allocated in
+	// spawnBridge; mutated under its own mutex by bridgeCall/bridgeStream
+	// instrumentation; read as a snapshot by the bridgeMetrics() builtin.
+	metrics *bridgeMetrics
+
+	// streams holds per-call channels for in-flight bridgeStream() calls,
+	// keyed by request id. The reader goroutine delivers each {"id": N,
+	// "stream": item} message to streams[N], and closes + deletes the entry
+	// when a {"id": N, "stream_end": true} arrives (or on a streaming error,
+	// after delivering the error through the channel).
+	streams map[int]*Channel
+
+	// streamIdleReset is signalled by dispatchBridgeLine on every stream item
+	// arrival so the per-stream watchdog goroutine can reset its idle timer.
+	// Buffered(1) per entry — a second item arriving before the watcher has
+	// drained the previous signal is harmless (one reset covers any number of
+	// items that arrived since the last drain).
+	streamIdleReset map[int]chan struct{}
+
+	// streamUnackedCount tracks items delivered to the kLex consumer channel
+	// since the last ack we sent the bridge. Increments on each stream item
+	// in dispatchBridgeLine; when it reaches streamAckThreshold[id] we emit
+	// an {"ack": K, "id": M} and reset to zero. Per-stream because each
+	// stream has its own ack cadence determined by its window.
+	streamUnackedCount map[int]int
+
+	// streamAckThreshold is window/2 for each stream — the kLex side acks
+	// at half-window so the bridge never blocks waiting for an ack we are
+	// still batching up. Zero entry means "no backpressure on this stream";
+	// dispatchBridgeLine then never sends an ack for it.
+	streamAckThreshold map[int]int
 }
 
 func (b *Bridge) Type() ObjectType { return BRIDGE_OBJ }
@@ -744,7 +1252,64 @@ func (e *EnumInstance) Inspect() string {
 type StructDef struct {
 	Name    string
 	Fields  []string             // declared field names, in order
-	Methods map[string]*Function // method name → function
+	Methods map[string]*Function // method name → tree-walker function
+
+	// MethodsAny is a polymorphic method table populated by alternative
+	// front-ends (currently the bytecode VM, which stores
+	// *vm.CompiledFunction values here). It lets the same StructDef
+	// hold methods compiled by either interpreter without forcing
+	// either one to know about the other's callable type. Method
+	// dispatch sites should consult MethodsAny first, and only fall
+	// back to Methods when MethodsAny is empty or missing the name.
+	// nil-safe — empty / absent means "no VM-compiled methods."
+	MethodsAny map[string]Object
+
+	// H2 (audit fix, 2026-05-22): cache of tree-walker methods with
+	// `self` prepended to their parameter list. The bytecode VM's
+	// OpCallMethod fallback (when MethodsAny misses and we hit the
+	// tree-walker-compiled Methods map) used to allocate a fresh
+	// *Function + two appended slices per call. With this cache,
+	// the wrapper is built once on first dispatch and reused
+	// forever. methodsWithSelfMu serialises lazy population only;
+	// the read path after first init is lock-free via the existing
+	// map-read semantics (no concurrent writes once populated).
+	methodsWithSelf   map[string]*Function
+	methodsWithSelfMu sync.Mutex
+}
+
+// MethodWithSelf returns the tree-walker method `name` with `self`
+// prepended as the first parameter. Lazily populated and cached.
+// Returns nil if the method isn't in the tree-walker Methods map —
+// caller should fall through to the VM-compiled MethodsAny lookup.
+func (s *StructDef) MethodWithSelf(name string) *Function {
+	s.methodsWithSelfMu.Lock()
+	defer s.methodsWithSelfMu.Unlock()
+	if s.methodsWithSelf != nil {
+		if w, ok := s.methodsWithSelf[name]; ok {
+			return w
+		}
+	}
+	fn, ok := s.Methods[name]
+	if !ok {
+		return nil
+	}
+	if s.methodsWithSelf == nil {
+		s.methodsWithSelf = make(map[string]*Function, len(s.Methods))
+	}
+	// Build wrapper once. Append produces a fresh backing array each
+	// invocation in the wild — caching the wrapper means subsequent
+	// calls share the same Params / Defaults slices too.
+	wrapped := &Function{
+		Name:        fn.Name,
+		Params:      append([]string{"self"}, fn.Params...),
+		Defaults:    append([]ast.Node{nil}, fn.Defaults...),
+		Variadic:    fn.Variadic,
+		NumRequired: fn.NumRequired + 1,
+		Body:        fn.Body,
+		Env:         fn.Env,
+	}
+	s.methodsWithSelf[name] = wrapped
+	return wrapped
 }
 
 func (s *StructDef) Type() ObjectType { return STRUCT_DEF_OBJ }
@@ -754,10 +1319,40 @@ func (s *StructDef) Inspect() string  { return "struct " + s.Name }
 
 // StructInstance is one concrete value of a struct type.
 // Fields holds the current values of all declared fields.
+//
+// CONCURRENCY: kLex's async snapshot model passes *StructInstance by
+// pointer, so multiple goroutines can legitimately call methods that
+// mutate the same instance's Fields map. Go's runtime panics on
+// concurrent map mutations even if logically benign — so every
+// read or write of Fields MUST go through GetField / SetField, which
+// take the mutex. Direct `inst.Fields[k]` access is a footgun and
+// will panic under concurrent load. (See observableTest's pattern
+// of multi-goroutine subscribers updating self.value.)
 type StructInstance struct {
+	mu     sync.RWMutex
 	Def    *StructDef
 	Fields map[string]Object
 	frozen bool
+}
+
+// GetField is the locked accessor for instance fields. Use this in
+// every site that reads Fields — direct `inst.Fields[k]` access
+// races against any concurrent SetField from another goroutine.
+func (s *StructInstance) GetField(name string) (Object, bool) {
+	s.mu.RLock()
+	v, ok := s.Fields[name]
+	s.mu.RUnlock()
+	return v, ok
+}
+
+// SetField is the locked mutator for instance fields. Use this in
+// every site that writes Fields. Skips its own frozen check —
+// callers (EvalSetField) already do that under their own error
+// reporting path before calling here.
+func (s *StructInstance) SetField(name string, val Object) {
+	s.mu.Lock()
+	s.Fields[name] = val
+	s.mu.Unlock()
 }
 
 func (s *StructInstance) Type() ObjectType { return STRUCT_INST_OBJ }
@@ -766,6 +1361,8 @@ func (s *StructInstance) Inspect() string {
 	buf.WriteString(s.Def.Name)
 	buf.WriteString(" {")
 	first := true
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, name := range s.Def.Fields {
 		if !first {
 			buf.WriteString(", ")
@@ -831,8 +1428,24 @@ type BuiltinFunction func(args []Object) Object
 
 // Builtin wraps a Go function so it can live in the environment alongside
 // user-defined functions and be called with the same call syntax.
+//
+// RetainsArgs (M4 audit fix, 2026-05-22): true if the Fn captures the
+// args slice in any way that outlives the call — e.g. async() hands
+// args[1:] to a goroutine that runs after the Fn returns. When true,
+// the VM's OpCallBuiltin allocates a fresh args slice per call so the
+// retained reference can't see another caller's args. When false
+// (the default), OpCallBuiltin reuses a pooled args buffer — Fn
+// reads the args during its own execution but doesn't keep a
+// reference beyond return.
+//
+// Default false. Most builtins return after consuming args (println,
+// len, arithmetic helpers, etc.); the few retainers (async, anything
+// that fires-and-forgets a goroutine) must opt in explicitly.
+// Mismarking a true retainer as false → silent data corruption on
+// next call. Mismarking a non-retainer as true → harmless allocation.
 type Builtin struct {
-	Fn BuiltinFunction
+	Fn          BuiltinFunction
+	RetainsArgs bool
 }
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_OBJ }

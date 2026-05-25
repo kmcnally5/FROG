@@ -1,6 +1,6 @@
 import "stdlib/event.lex" as ev
 
-e = ev.newEmitter()
+let e = ev.newEmitter()
 
 
 // =====================================
@@ -50,7 +50,7 @@ e.emit("init", 200)   // should NOT print again
 // =====================================
 println("\n== OFF ==")
 
-handler = fn(x) {
+let handler = fn(x) {
     println("should appear only once: " + str(x))
 }
 
@@ -120,7 +120,7 @@ e.on("tick", fn(x) {
     println("tick: " + str(x))
 })
 
-i = 0
+let i = 0
 while i < 5 {
     e.emit("tick", i)
     i = i + 1
@@ -147,8 +147,8 @@ e.emit("a", 5)   // (5+10)*3 = 45
 // =====================================
 println("\n== INDEPENDENT EMITTERS ==")
 
-e1 = ev.newEmitter()
-e2 = ev.newEmitter()
+let e1 = ev.newEmitter()
+let e2 = ev.newEmitter()
 
 e1.on("msg", fn(x) { println("e1: " + str(x)) })
 e2.on("msg", fn(x) { println("e2: " + str(x)) })

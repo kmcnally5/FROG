@@ -8,7 +8,7 @@
 // Test 1: const array — index assignment blocked
 // ========================================
 const arr1 = [1, 2, 3]
-result1, err1 = safe(fn() {
+let result1, err1 = safe(fn() {
     arr1[0] = 99  // should error: cannot mutate frozen array
 })
 assert(err1 != null)
@@ -18,7 +18,7 @@ println("✓ Test 1: const array index assignment blocked")
 // Test 2: const hash — key assignment blocked
 // ========================================
 const hash1 = {"a": 1, "b": 2}
-result2, err2 = safe(fn() {
+let result2, err2 = safe(fn() {
     hash1["a"] = 99  // should error: cannot mutate frozen hash
 })
 assert(err2 != null)
@@ -32,7 +32,7 @@ struct Person {
 }
 
 const person1 = Person { name: "alice", age: 30 }
-result3, err3 = safe(fn() {
+let result3, err3 = safe(fn() {
     person1.name = "bob"  // should error: cannot mutate frozen struct
 })
 assert(err3 != null)
@@ -42,7 +42,7 @@ println("✓ Test 3: const struct field assignment blocked")
 // Test 4: Nested array freeze — deep mutation blocked
 // ========================================
 const nested1 = [[1, 2], [3, 4]]
-result4, err4 = safe(fn() {
+let result4, err4 = safe(fn() {
     nested1[0][1] = 99  // should error: cannot mutate frozen array (inner)
 })
 assert(err4 != null)
@@ -52,7 +52,7 @@ println("✓ Test 4: Nested array deep mutation blocked")
 // Test 5: delete() on const hash blocked
 // ========================================
 const hash2 = {"x": 10, "y": 20}
-result5, err5 = safe(fn() {
+let result5, err5 = safe(fn() {
     delete(hash2, "x")  // should error: cannot mutate frozen hash
 })
 assert(err5 != null)
@@ -79,7 +79,7 @@ println("✓ Test 7: const with functions works")
 // ========================================
 // Test 8: Attempt to rebind const still fails
 // ========================================
-result8, err8 = safe(fn() {
+let result8, err8 = safe(fn() {
     const x = 10
     x = 20  // should error: cannot reassign constant
 })
@@ -90,8 +90,8 @@ println("✓ Test 8: const rebind blocked (binding-level protection still works)
 // Test 9: async task with const frozen array
 // ========================================
 const arr9 = [1, 2, 3]
-result9, err9 = safe(fn() {
-    task9 = async(fn() {
+let result9, err9 = safe(fn() {
+    let task9 = async(fn() {
         arr9[0] = 99  // should error in the task
         return "should not reach here"
     })

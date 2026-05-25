@@ -78,6 +78,16 @@ type StringLiteral struct {
 
 func (s *StringLiteral) TokenLiteral() string { return "string" }
 
+// BytesLiteral is a bytes literal in the source, e.g. b"\x00\x01abc".
+// Carries the raw decoded byte sequence — escape processing happens in
+// the lexer, so Value is exactly the bytes the program will see at runtime.
+type BytesLiteral struct {
+	Pos
+	Value []byte
+}
+
+func (b *BytesLiteral) TokenLiteral() string { return "bytes" }
+
 // StringSegment is one piece of an InterpolatedString.
 // When IsExpr is false, Text holds a literal run of characters.
 // When IsExpr is true, Expr holds the embedded expression to evaluate.
@@ -349,6 +359,19 @@ type MultiAssignStmt struct {
 }
 
 func (m *MultiAssignStmt) TokenLiteral() string { return "multi=" }
+
+// MultiLetStmt is a multiple-variable declaration: let a, b = expr
+// Like LetStmt, every name is bound in the current scope via Set (never walks
+// the chain). If a name already exists in an outer scope, this shadows it for
+// the remainder of the current scope. RHS must evaluate to a Tuple with the
+// same arity as Names; mismatch is a RuntimeError.
+type MultiLetStmt struct {
+	Pos
+	Names []string // left-hand side variable names
+	Value Node     // must evaluate to a Tuple
+}
+
+func (m *MultiLetStmt) TokenLiteral() string { return "let multi=" }
 
 // DotExpr is a property access on a module: math.add
 // Left is the module expression, Property is the name after the dot.

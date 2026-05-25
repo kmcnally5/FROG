@@ -1,4 +1,9 @@
 // stdlib/db.lex — Database transaction helpers
+// @module    db
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   Database transaction helpers
 //
 // Provides higher-level patterns built on the dbBegin/dbCommit/dbRollback builtins.
 //
@@ -28,16 +33,16 @@
 // body must return a (value, err) tuple — the standard kLex two-path pattern.
 // Any error returned from body is passed through as the error of withTx.
 fn withTx(conn, body) {
-    tx, beginErr = dbBegin(conn)
+    let tx, beginErr = dbBegin(conn)
     if beginErr != null { return null, beginErr }
 
-    result, bodyErr = body(tx)
+    let result, bodyErr = body(tx)
     if bodyErr != null {
         dbRollback(tx)
         return null, bodyErr
     }
 
-    _, commitErr = dbCommit(tx)
+    let _, commitErr = dbCommit(tx)
     if commitErr != null {
         dbRollback(tx)
         return null, commitErr

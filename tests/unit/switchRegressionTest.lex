@@ -1,5 +1,5 @@
 // 1. Plain value switch — existing behaviour must be unchanged
-status = 404
+let status = 404
 switch status {
     case 200 { println("ok") }
     case 404 { println("not found") }
@@ -7,7 +7,7 @@ switch status {
 }
 
 // 2. Expression switch (no subject)
-x = -5
+let x = -5
 switch {
     case x < 0  { println("negative") }
     case x == 0 { println("zero") }
@@ -15,7 +15,7 @@ switch {
 }
 
 // 3. Multi-value plain arm — first match wins, no pattern
-y = 3
+let y = 3
 switch y {
     case 1, 2   { println("one or two") }
     case 3, 4   { println("three or four") }
@@ -26,7 +26,7 @@ switch y {
 //    Shape.Circle(5) evaluates to an EnumInstance; the subject is also Shape.Circle(5)
 //    so they compare equal via == (same TypeName, VariantName, same field values).
 enum Shape { Circle(radius) Rect(width, height) Point }
-s = Shape.Circle(5)
+let s = Shape.Circle(5)
 switch s {
     case Shape.Circle(5) {
         println("dot-call with literal: matched")
@@ -50,7 +50,7 @@ println(classifyShape(Shape.Rect(4, 9)))
 println(classifyShape(Shape.Point))
 
 // 6. Binding does not leak — verify with explicit check
-radius = "before"
+let radius = "before"
 switch Shape.Circle(42) {
     case Shape.Circle(radius) {
         println("inside: radius=" + str(radius))

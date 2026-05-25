@@ -48,6 +48,7 @@ const (
 	TokenStr      TokenType = "STRING"      // plain string literal, e.g. "hello"
 	TokenInterpStr TokenType = "INTERP_STR" // interpolated string, e.g. "Hello {name}"
 	TokenRawStr   TokenType = "RAW_STR"    // backtick raw string, e.g. `hello\nworld`
+	TokenBytes    TokenType = "BYTES"      // bytes literal, e.g. b"\x00\x01abc"
 
 	// Statement keywords
 	TokenFn     TokenType = "FN"
@@ -149,11 +150,40 @@ var keywords = map[string]TokenType{
 // Token is the unit the lexer produces and the parser consumes.
 // Every token carries its type, its raw text (Literal), and its source
 // position (Line/Col) so that error messages can point to the right place.
+//
+// Segments is populated only for TokenInterpStr. The lexer fully decodes
+// escape sequences in literal segments and pre-tokenizes embedded
+// expressions, so the parser never has to walk raw bytes inside an
+// interpolated string. Other token types leave Segments nil.
 type Token struct {
-	Type    TokenType
-	Literal string // the raw text from the source, e.g. "42" or "myVar"
-	Line    int    // 1-based line number
-	Col     int    // 1-based column number
+	Type     TokenType
+	Literal  string // the raw text from the source, e.g. "42" or "myVar"
+	Line     int    // 1-based line number
+	Col      int    // 1-based column number
+	Segments []InterpSegment
+}
+
+// InterpSegment is one piece of an interpolated string, produced by the
+// lexer. The parser walks these directly — no raw-byte re-scanning.
+//
+//   - IsExpr == false: Text holds a literal run with all \-escape sequences
+//     decoded. Inside text segments, `{{` collapses to a single `{` and
+//     `}}` to a single `}` so source can carry literal braces without
+//     triggering interpolation.
+//   - IsExpr == true: Tokens holds the kLex tokens for the embedded
+//     expression, lexed in the original source so each token's Line/Col
+//     points back to the user's file. The slice is terminated by a synthetic
+//     TokenEOF so the parser can reuse its standard end-of-stream logic.
+//
+// Line and Col record where this segment begins in the outer source — used
+// for precise error messages that reference the interpolation position
+// rather than a meaningless inner offset.
+type InterpSegment struct {
+	IsExpr bool
+	Text   string
+	Tokens []Token
+	Line   int
+	Col    int
 }
 
 // Lexer holds all state needed to walk through the source string.
@@ -171,6 +201,14 @@ type Lexer struct {
 	ch           byte // current char under inspection
 	line         int  // current line (1-based)
 	col          int  // current column (1-based)
+
+	// Replay mode: when non-nil, NextToken yields pre-recorded tokens in
+	// order instead of scanning input. This lets the parser re-use its
+	// normal pipeline to parse expression segments that the outer lexer
+	// already pulled out of an interpolated string literal — no second
+	// trip through the source bytes, no duplicate escape-handling code.
+	replay    []Token
+	replayIdx int
 }
 
 // New creates a lexer and positions it at the first character of the input.
@@ -180,11 +218,26 @@ func New(input string) *Lexer {
 	return l
 }
 
+// NewReplay returns a Lexer that yields tokens from the given slice instead
+// of scanning input text. Used to re-parse the pre-lexed expression tokens
+// captured inside an interpolated string token's Segments. The caller is
+// expected to end the slice with a TokenEOF — the lexer keeps returning
+// that EOF for any reads past the end (matching real lexer behaviour).
+func NewReplay(tokens []Token) *Lexer {
+	return &Lexer{replay: tokens, line: 1, col: 1}
+}
+
 // readChar advances the lexer by one character, updating position tracking.
 // When we reach the end of input, ch is set to 0 (the null byte), which acts
-// as our EOF sentinel.
+// as our EOF sentinel. Once at EOF, further calls are idempotent: l.position
+// saturates at len(l.input) so callers slicing l.input[start:l.position]
+// after an unterminated literal cannot run off the end.
 func (l *Lexer) readChar() {
-	if l.readPosition >= len(l.input) {
+	if l.readPosition > len(l.input) {
+		// Already saturated past EOF — do nothing.
+		return
+	}
+	if l.readPosition == len(l.input) {
 		l.ch = 0
 	} else {
 		l.ch = l.input[l.readPosition]
@@ -225,6 +278,18 @@ func (l *Lexer) pos() (int, int) {
 // Identifiers and numbers are handled separately because they span multiple
 // characters (e.g. "myVariable", "1024").
 func (l *Lexer) NextToken() Token {
+	// Replay mode shortcut: yield the next stored token. Past-the-end reads
+	// repeat the trailing EOF so the parser's normal end-of-stream logic
+	// works without special-casing.
+	if l.replay != nil {
+		if l.replayIdx >= len(l.replay) {
+			return Token{Type: TokenEOF, Line: l.line, Col: l.col}
+		}
+		tok := l.replay[l.replayIdx]
+		l.replayIdx++
+		return tok
+	}
+
 	var tok Token
 
 	l.skipWhitespace()
@@ -238,51 +303,51 @@ func (l *Lexer) NextToken() Token {
 			l.readChar()
 			tok = Token{Type: TokenPlusAssign, Literal: "+=", Line: line, Col: col}
 		} else {
-			tok = Token{TokenPlus, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenPlus, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 	case '-':
 		if l.peekChar() == '=' {
 			l.readChar()
 			tok = Token{Type: TokenMinusAssign, Literal: "-=", Line: line, Col: col}
 		} else {
-			tok = Token{TokenMinus, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenMinus, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 	case '*':
 		if l.peekChar() == '=' {
 			l.readChar()
 			tok = Token{Type: TokenMulAssign, Literal: "*=", Line: line, Col: col}
 		} else {
-			tok = Token{TokenAsterisk, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenAsterisk, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 	case '/':
 		if l.peekChar() == '=' {
 			l.readChar()
 			tok = Token{Type: TokenDivAssign, Literal: "/=", Line: line, Col: col}
 		} else {
-			tok = Token{TokenSlash, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenSlash, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 	case '%':
 		if l.peekChar() == '=' {
 			l.readChar()
 			tok = Token{Type: TokenModAssign, Literal: "%=", Line: line, Col: col}
 		} else {
-			tok = Token{TokenPercent, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenPercent, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 	case '(':
-		tok = Token{TokenLParen, byteStrings[l.ch], line, col}
+		tok = Token{Type: TokenLParen, Literal: byteStrings[l.ch], Line: line, Col: col}
 	case ')':
-		tok = Token{TokenRParen, byteStrings[l.ch], line, col}
+		tok = Token{Type: TokenRParen, Literal: byteStrings[l.ch], Line: line, Col: col}
 	case ',':
-		tok = Token{TokenComma, byteStrings[l.ch], line, col}
+		tok = Token{Type: TokenComma, Literal: byteStrings[l.ch], Line: line, Col: col}
 	case ':':
-		tok = Token{TokenColon, byteStrings[l.ch], line, col}
+		tok = Token{Type: TokenColon, Literal: byteStrings[l.ch], Line: line, Col: col}
 	case '.':
 		if l.peekChar() == '.' && l.readPosition+1 < len(l.input) && l.input[l.readPosition+1] == '.' {
 			l.readChar() // consume second '.'
 			l.readChar() // consume third '.'
 			tok = Token{Type: TokenEllipsis, Literal: "...", Line: line, Col: col}
 		} else {
-			tok = Token{TokenDot, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenDot, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 
 	// '=' could be assignment (=) or equality (==) — peek to decide.
@@ -294,13 +359,13 @@ func (l *Lexer) NextToken() Token {
 			tok = Token{Type: TokenAssign, Literal: "=", Line: line, Col: col}
 		}
 	case '{':
-		tok = Token{TokenLBrace, byteStrings[l.ch], line, col}
+		tok = Token{Type: TokenLBrace, Literal: byteStrings[l.ch], Line: line, Col: col}
 	case '}':
-		tok = Token{TokenRBrace, byteStrings[l.ch], line, col}
+		tok = Token{Type: TokenRBrace, Literal: byteStrings[l.ch], Line: line, Col: col}
 	case '[':
-		tok = Token{TokenLBracket, byteStrings[l.ch], line, col}
+		tok = Token{Type: TokenLBracket, Literal: byteStrings[l.ch], Line: line, Col: col}
 	case ']':
-		tok = Token{TokenRBracket, byteStrings[l.ch], line, col}
+		tok = Token{Type: TokenRBracket, Literal: byteStrings[l.ch], Line: line, Col: col}
 
 	// '>' could be greater-than or greater-than-or-equal.
 	case '>':
@@ -308,7 +373,7 @@ func (l *Lexer) NextToken() Token {
 			l.readChar()
 			tok = Token{Type: TokenGTE, Literal: ">=", Line: line, Col: col}
 		} else {
-			tok = Token{TokenGT, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenGT, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 
 	// '<' could be less-than or less-than-or-equal.
@@ -317,15 +382,21 @@ func (l *Lexer) NextToken() Token {
 			l.readChar()
 			tok = Token{Type: TokenLTE, Literal: "<=", Line: line, Col: col}
 		} else {
-			tok = Token{TokenLT, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenLT, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 
 	case '"':
-		content, hasInterp := l.readString()
-		if l.ch == 0 {
-			tok = Token{Type: TokenIllegal, Literal: "unterminated string literal", Line: line, Col: col}
-		} else if hasInterp {
-			tok = Token{Type: TokenInterpStr, Literal: content, Line: line, Col: col}
+		content, segments, ok := l.readString()
+		if !ok {
+			// readString returns the error message in `content` when ok=false.
+			// Empty content means a generic EOF — use the canonical message.
+			msg := content
+			if msg == "" {
+				msg = "unterminated string literal"
+			}
+			tok = Token{Type: TokenIllegal, Literal: msg, Line: line, Col: col}
+		} else if segments != nil {
+			tok = Token{Type: TokenInterpStr, Line: line, Col: col, Segments: segments}
 		} else {
 			tok = Token{Type: TokenStr, Literal: content, Line: line, Col: col}
 		}
@@ -346,20 +417,20 @@ func (l *Lexer) NextToken() Token {
 	case '&':
 		if l.peekChar() == '&' {
 			l.readChar()
-			tok = Token{TokenAnd, "&&", line, col}
+			tok = Token{Type: TokenAnd, Literal: "&&", Line: line, Col: col}
 		} else {
-			tok = Token{TokenIllegal, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenIllegal, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 
 	case '|':
 		if l.peekChar() == '|' {
 			l.readChar()
-			tok = Token{TokenOr, "||", line, col}
+			tok = Token{Type: TokenOr, Literal: "||", Line: line, Col: col}
 		} else if l.peekChar() == '>' {
 			l.readChar()
 			tok = Token{Type: TokenPipe, Literal: "|>", Line: line, Col: col}
 		} else {
-			tok = Token{TokenIllegal, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenIllegal, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 
 	// '!' could be logical-not or not-equal (!=).
@@ -368,7 +439,7 @@ func (l *Lexer) NextToken() Token {
 			l.readChar()
 			tok = Token{Type: TokenNotEq, Literal: "!=", Line: line, Col: col}
 		} else {
-			tok = Token{TokenNot, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenNot, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 
 	// '?' is the postfix error-propagation operator: expr?
@@ -376,6 +447,20 @@ func (l *Lexer) NextToken() Token {
 		tok = Token{Type: TokenQuestion, Literal: "?", Line: line, Col: col}
 
 	default:
+		// b"…" — bytes literal. The `b` prefix is consumed only when it's
+		// IMMEDIATELY followed by an opening quote; bare `b` continues to lex
+		// as a normal identifier so existing code using `b` as a variable
+		// name keeps working.
+		if l.ch == 'b' && l.peekChar() == '"' {
+			l.readChar() // consume the 'b'
+			content, ok := l.readBytesString()
+			if !ok {
+				tok = Token{Type: TokenIllegal, Literal: "unterminated bytes literal", Line: line, Col: col}
+			} else {
+				tok = Token{Type: TokenBytes, Literal: content, Line: line, Col: col}
+			}
+			break
+		}
 		if isLetter(l.ch) {
 			// Read the full identifier first, then check if it's a keyword.
 			// Keywords are just reserved identifiers — same characters, different meaning.
@@ -395,7 +480,7 @@ func (l *Lexer) NextToken() Token {
 			}
 			return Token{Type: tokType, Literal: lit, Line: line, Col: col}
 		} else {
-			tok = Token{TokenIllegal, byteStrings[l.ch], line, col}
+			tok = Token{Type: TokenIllegal, Literal: byteStrings[l.ch], Line: line, Col: col}
 		}
 	}
 
@@ -465,25 +550,20 @@ func isHexDigit(ch byte) bool {
 	return isDigit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 }
 
-// readString reads from after the opening quote to the closing quote.
-// Returns (content, hasInterp) where hasInterp is true if the string contains
-// at least one bare { (i.e. string interpolation).
+// readString reads from after the opening quote to (but not past) the closing
+// quote. It handles both plain and interpolated strings in one pass.
 //
-// Three cases, each optimised:
+// Returns (content, segments, ok) where:
+//   - ok == false: the string was unterminated (hit EOF before closing quote).
+//   - segments != nil: the string contains interpolations. All escape
+//     sequences in literal segments have been decoded, and each {…}
+//     expression has been pre-lexed into kLex tokens with accurate Line/Col
+//     from the outer source. content is empty in this case — the parser
+//     consumes Segments directly.
+//   - segments == nil: plain string. content holds the fully decoded value
+//     with all escapes applied.
 //
-//  1. No escapes, no interpolation (most common): returns l.input[start:end]
-//     directly — a zero-allocation string slice of the source.
-//
-//  2. Escape sequences, no interpolation: builds procBuf incrementally,
-//     copying raw segments in bulk before each escape and appending the
-//     expanded byte(s) for each sequence. rawBuf is never allocated.
-//
-//  3. Interpolation present: returns l.input[start:end], the raw source slice
-//     with escape sequences preserved as-is so the parser can locate {…}
-//     boundaries before processing escapes segment by segment. rawBuf is
-//     never allocated regardless of whether escapes are also present.
-//
-// Supported escapes (both modes):
+// Supported escapes in literal segments:
 //
 //	\"  → literal double quote
 //	\n  → newline
@@ -491,106 +571,238 @@ func isHexDigit(ch byte) bool {
 //	\t  → tab
 //	\b  → backspace
 //	\\  → literal backslash
-//	\{  → literal { (suppresses interpolation)
+//	\{  → literal {  (alternative to {{)
+//	\}  → literal }  (alternative to }})
+//	\xHH → byte with hex code HH
 //
-// Unknown escapes are preserved as-is.
-func (l *Lexer) readString() (string, bool) {
+// Literal-brace forms in text segments:
+//
+//	{{  → literal {  (Python-style doubling; suppresses interpolation)
+//	}}  → literal }
+//
+// Unknown escapes are preserved as the backslash followed by the next char.
+//
+// Inside an interpolation block ({…}) the lexer recurses through NextToken
+// to gather kLex tokens, tracking brace depth at the token level so nested
+// braces in function bodies / hash literals don't end the interpolation
+// early. Inner string literals inside the expression — including ones that
+// themselves contain interpolations — are handled by that recursive call.
+func (l *Lexer) readString() (string, []InterpSegment, bool) {
 	l.readChar() // skip opening quote
-	start := l.position
-	hasEscapes := false
-	hasInterp := false
-	braceDepth := 0 // tracks nesting inside {…} interpolation blocks
-	var procBuf []byte
 
-	// Loop terminates on a closing '"' that is NOT inside an interpolation block,
-	// or on EOF. When braceDepth > 0 a '"' is the start of a nested string
-	// literal inside the expression — we scan past it rather than terminating.
-	for (l.ch != '"' || braceDepth > 0) && l.ch != 0 {
-		if l.ch == '\\' {
-			if !hasEscapes {
-				// First escape: bulk-copy everything before it into procBuf.
-				procBuf = append(procBuf, l.input[start:l.position]...)
-				hasEscapes = true
-			}
-			l.readChar() // consume backslash, examine the escape character
+	var textBuf []byte
+	var segments []InterpSegment
+	textLine := l.line
+	textCol := l.col
+
+	flushText := func() {
+		if len(textBuf) > 0 {
+			segments = append(segments, InterpSegment{
+				IsExpr: false,
+				Text:   string(textBuf),
+				Line:   textLine,
+				Col:    textCol,
+			})
+			textBuf = nil
+		}
+	}
+
+	for l.ch != '"' && l.ch != 0 {
+		// Escape sequences in text segments.
+		if l.ch == '\\' && l.readPosition < len(l.input) {
+			l.readChar() // consume backslash, look at next char
 			switch l.ch {
 			case '"':
-				procBuf = append(procBuf, '"')
+				textBuf = append(textBuf, '"')
 			case 'n':
-				procBuf = append(procBuf, '\n')
+				textBuf = append(textBuf, '\n')
 			case 't':
-				procBuf = append(procBuf, '\t')
+				textBuf = append(textBuf, '\t')
 			case '\\':
-				procBuf = append(procBuf, '\\')
+				textBuf = append(textBuf, '\\')
 			case 'r':
-				procBuf = append(procBuf, '\r')
+				textBuf = append(textBuf, '\r')
 			case 'b':
-				procBuf = append(procBuf, '\b')
+				textBuf = append(textBuf, '\b')
 			case '{':
-				procBuf = append(procBuf, '{') // \{ in a plain string is just {
+				textBuf = append(textBuf, '{')
+			case '}':
+				textBuf = append(textBuf, '}')
 			case 'x':
-				// \xHH hex escape: read 2 hex digits
 				if l.position+2 < len(l.input) {
-					hex1 := l.input[l.position+1]
-					hex2 := l.input[l.position+2]
-					val1 := hexCharToInt(hex1)
-					val2 := hexCharToInt(hex2)
-					if val1 >= 0 && val2 >= 0 {
-						// Valid hex digits: consume them and append the byte
-						l.readChar() // advance to hex1
-						l.readChar() // advance to hex2
-						byteVal := byte((val1 << 4) | val2)
-						procBuf = append(procBuf, byteVal)
+					v1 := hexCharToInt(l.input[l.position+1])
+					v2 := hexCharToInt(l.input[l.position+2])
+					if v1 >= 0 && v2 >= 0 {
+						l.readChar()
+						l.readChar()
+						textBuf = append(textBuf, byte((v1<<4)|v2))
 					} else {
-						// Invalid hex: preserve as literal
-						procBuf = append(procBuf, '\\', 'x')
+						textBuf = append(textBuf, '\\', 'x')
 					}
 				} else {
-					// Not enough chars for hex escape: preserve as literal
-					procBuf = append(procBuf, '\\', 'x')
+					textBuf = append(textBuf, '\\', 'x')
 				}
 			default:
-				procBuf = append(procBuf, '\\', l.ch)
+				textBuf = append(textBuf, '\\', l.ch)
 			}
-		} else if l.ch == '"' && braceDepth > 0 {
-			// Nested string literal inside an interpolation block — scan past it.
-			// braceDepth > 0 implies hasInterp, so we return raw source and
-			// procBuf is irrelevant; we only need to advance l.position correctly.
-			l.readChar() // move past the inner opening quote
+			l.readChar()
+			continue
+		}
+
+		// {{ → literal { (no interpolation).
+		if l.ch == '{' && l.peekChar() == '{' {
+			textBuf = append(textBuf, '{')
+			l.readChar()
+			l.readChar()
+			continue
+		}
+
+		// }} → literal } (symmetric with {{).
+		if l.ch == '}' && l.peekChar() == '}' {
+			textBuf = append(textBuf, '}')
+			l.readChar()
+			l.readChar()
+			continue
+		}
+
+		// { → start of an interpolation expression.
+		if l.ch == '{' {
+			flushText()
+			exprLine := l.line
+			exprCol := l.col
+			l.readChar() // past the opening '{'
+
+			var exprTokens []Token
+			depth := 1
+			for {
+				tok := l.NextToken()
+				if tok.Type == TokenEOF {
+					return "", nil, false
+				}
+				if tok.Type == TokenIllegal {
+					return "", nil, false
+				}
+				if tok.Type == TokenLBrace {
+					depth++
+				} else if tok.Type == TokenRBrace {
+					depth--
+					if depth == 0 {
+						break // matched closing brace; not included in tokens
+					}
+				}
+				exprTokens = append(exprTokens, tok)
+			}
+			// Terminate with synthetic EOF so the replay parser sees a clean end.
+			exprTokens = append(exprTokens, Token{Type: TokenEOF, Line: l.line, Col: l.col})
+			segments = append(segments, InterpSegment{
+				IsExpr: true,
+				Tokens: exprTokens,
+				Line:   exprLine,
+				Col:    exprCol,
+			})
+			// After NextToken consumed the closing '}', l.ch is positioned
+			// at the next char. The next text segment starts here.
+			textLine = l.line
+			textCol = l.col
+			continue
+		}
+
+		// Bare '}' at top level is reserved. kLex treats both braces as
+		// special everywhere — explicit, no implicit "sometimes literal,
+		// sometimes meaningful" rule. The user must either escape (`\}` or
+		// `}}` for a literal close-brace) or use a raw string (`…` with
+		// backticks) for JSON-shaped text.
+		//
+		// Scan through the rest of the string before returning so the lexer
+		// is positioned past the closing quote — otherwise one bad `}`
+		// would cascade into a flood of unrelated parse errors on the rest
+		// of the file.
+		if l.ch == '}' {
 			for l.ch != '"' && l.ch != 0 {
-				if l.ch == '\\' {
-					l.readChar() // skip the escaped char
+				if l.ch == '\\' && l.readPosition < len(l.input) {
+					l.readChar() // skip the escape character
 				}
 				l.readChar()
 			}
-			// l.ch is now the inner closing '"'; the outer l.readChar() below
-			// will advance past it.
-		} else {
-			if l.ch == '{' {
-				braceDepth++
-				hasInterp = true
-			} else if l.ch == '}' && braceDepth > 0 {
-				braceDepth--
-			}
-			if hasEscapes {
-				procBuf = append(procBuf, l.ch)
-			}
+			return "bare '}' is reserved inside a string — use '}}' or '\\}' for a literal close-brace, or use a `…` raw string for JSON/template text", nil, false
 		}
+
+		textBuf = append(textBuf, l.ch)
 		l.readChar()
 	}
 
-	// Interpolation: the parser needs the raw source form (escape sequences
-	// preserved as literal backslash+char) so it can split on { boundaries.
-	// l.input[start:l.position] is exactly that — zero allocation.
-	if hasInterp {
-		return l.input[start:l.position], true
+	if l.ch == 0 {
+		return "", nil, false
 	}
-	// Plain string with no escapes: slice the source directly — zero allocation.
-	if !hasEscapes {
-		return l.input[start:l.position], false
+
+	if segments != nil {
+		flushText()
+		return "", segments, true
 	}
-	// Plain string with escapes: procBuf holds the fully expanded content.
-	return string(procBuf), false
+	return string(textBuf), nil, true
+}
+
+// readBytesString reads a bytes literal: b"…". The opening 'b' has already
+// been consumed by NextToken; l.ch is positioned on the opening '"'. Returns
+// the raw byte content packed into a Go string (Go strings can hold arbitrary
+// non-utf8 byte sequences), plus an ok flag that is false on EOF before a
+// closing quote.
+//
+// Bytes literals are deliberately a smaller language than string literals:
+//   - No interpolation — `{` is just a literal `{`.
+//   - Escape sequences supported: \" \\ \n \r \t \0 and \xHH (two hex digits).
+//   - Any other \X is treated as literal backslash plus X, matching string
+//     literal behaviour for unknown escapes.
+//
+// The intent is to keep the byte-level meaning of the literal predictable:
+// `b"abc"` is three bytes 0x61 0x62 0x63 regardless of utf-8 considerations,
+// and `b"\xff\xfe"` is exactly two bytes 0xff 0xfe even though that sequence
+// is not valid utf-8.
+func (l *Lexer) readBytesString() (string, bool) {
+	l.readChar() // skip opening quote
+	var buf []byte
+	for l.ch != '"' && l.ch != 0 {
+		if l.ch == '\\' {
+			l.readChar() // consume backslash, examine the escape character
+			switch l.ch {
+			case '"':
+				buf = append(buf, '"')
+			case '\\':
+				buf = append(buf, '\\')
+			case 'n':
+				buf = append(buf, '\n')
+			case 'r':
+				buf = append(buf, '\r')
+			case 't':
+				buf = append(buf, '\t')
+			case '0':
+				buf = append(buf, 0)
+			case 'x':
+				if l.position+2 < len(l.input) {
+					val1 := hexCharToInt(l.input[l.position+1])
+					val2 := hexCharToInt(l.input[l.position+2])
+					if val1 >= 0 && val2 >= 0 {
+						l.readChar() // advance to hex1
+						l.readChar() // advance to hex2
+						buf = append(buf, byte((val1<<4)|val2))
+					} else {
+						buf = append(buf, '\\', 'x')
+					}
+				} else {
+					buf = append(buf, '\\', 'x')
+				}
+			default:
+				buf = append(buf, '\\', l.ch)
+			}
+		} else {
+			buf = append(buf, l.ch)
+		}
+		l.readChar()
+	}
+	if l.ch == 0 {
+		return "", false
+	}
+	return string(buf), true
 }
 
 // readRawString reads a backtick-delimited raw string literal.

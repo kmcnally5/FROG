@@ -7,7 +7,7 @@ fn fetch_and_analyze(id, url, results_bus) {
     println("Worker " + str(id) + " START: " + url)
     
     // CRITICAL: Use 'let' for the tuple assignment
-    resp, err = http.get(url)
+    let resp, err = http.get(url)
     
     if err != null {
         send(results_bus, { "url": url, "error": err, "done": true })
@@ -44,7 +44,7 @@ fn main() {
     let completed = 0
     while completed < len(targets) {
         // CRITICAL: Use 'let' here too
-        result, ok = recv(bus)
+        let result, ok = recv(bus)
         
         if ok {
             completed = completed + 1

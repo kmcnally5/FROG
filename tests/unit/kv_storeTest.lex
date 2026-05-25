@@ -1,6 +1,6 @@
 import "stdlib/kv_store.lex" as kv
 
-store = kv.newKVStore()
+let store = kv.newKVStore()
 
 // =====================================
 // 1. basic set/get
@@ -43,7 +43,7 @@ println("\n== PERSISTENCE ==")
 store.set("x", 100)
 store.set("y", 200)
 
-store.save("tests/kv_test.txt")
+store.save("/tmp/kv_test.txt")
 
 store.del("x")
 store.del("y")
@@ -51,7 +51,7 @@ store.del("y")
 println(store.get("x"))   // null
 println(store.get("y"))   // null
 
-store.load("tests/kv_test.txt")
+store.load("/tmp/kv_test.txt")
 
 println(store.get("x"))   // 100 (stored as string after round-trip)
 println(store.get("y"))   // 200
@@ -62,8 +62,8 @@ println(store.get("y"))   // 200
 // =====================================
 println("\n== KEYS / VALUES ==")
 
-ks = store.allKeys()
-vs = store.allValues()
+let ks = store.allKeys()
+let vs = store.allValues()
 
 println(len(ks))
 println(len(vs))
@@ -74,11 +74,11 @@ println(len(vs))
 // =====================================
 println("\n== MAP VALUES ==")
 
-mapped = store.mapValues(fn(v) {
+let mapped = store.mapValues(fn(v) {
     return int(v) * 2
 })
 
-i = 0
+let i = 0
 while i < len(mapped) {
     println(mapped[i])
     i = i + 1
@@ -90,7 +90,7 @@ while i < len(mapped) {
 // =====================================
 println("\n== FILTER KEYS ==")
 
-filtered = store.filterKeys(fn(k, v) {
+let filtered = store.filterKeys(fn(k, v) {
     return int(v) >= 20
 })
 
@@ -106,7 +106,7 @@ while i < len(filtered) {
 // =====================================
 println("\n== REDUCE ==")
 
-sum = store.reduceStore(fn(acc, k, v) {
+let sum = store.reduceStore(fn(acc, k, v) {
     return acc + int(v)
 }, 0)
 

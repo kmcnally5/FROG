@@ -1,0 +1,419 @@
+{
+  "schema": 1,
+  "kpkg": "0.1.0",
+  "klex": "kLex (FROG) v0.3.36",
+  "modules": [
+    {
+      "name": "actor",
+      "path": "stdlib/actor.lex",
+      "version": "1.0.0",
+      "hash": "sha256:e709250065f64006c7ae1b94555605762b32e515ada7d452a5ac1336ffcba14f",
+      "size": 3612
+    },
+    {
+      "name": "agent",
+      "path": "stdlib/agent.lex",
+      "version": "0.1.0",
+      "hash": "sha256:d4a471ce7eff5842a35dc24385c53a4fbeaad2ae8431cf208ca8685aa32fd9ac",
+      "size": 9015
+    },
+    {
+      "name": "ai_common",
+      "path": "stdlib/ai/ai_common.lex",
+      "version": "1.0.0",
+      "hash": "sha256:2a1213fa4c0c01a72d51898f9e27e551ba6b229194690761b0379587615c5eb0",
+      "size": 7199
+    },
+    {
+      "name": "anthropic",
+      "path": "stdlib/ai/anthropic.lex",
+      "version": "1.0.0",
+      "hash": "sha256:e920d7b22915d54e994eb96e94bd15c7bd151b784ac129d3c62462b86a8143e5",
+      "size": 37378
+    },
+    {
+      "name": "array",
+      "path": "stdlib/array.lex",
+      "version": "1.0.0",
+      "hash": "sha256:73ce0eb04db3c365d8578cded378b652f28f262f1d610c74ce5cffba6f568f9a",
+      "size": 3866
+    },
+    {
+      "name": "assert",
+      "path": "stdlib/assert.lex",
+      "version": "1.0.0",
+      "hash": "sha256:0062583ce458636265aec1dae49a5e32b6340153dd1ce4c8bd8f579680f71cbf",
+      "size": 3192
+    },
+    {
+      "name": "async",
+      "path": "stdlib/async.lex",
+      "version": "1.0.0",
+      "hash": "sha256:b89fdf3c5070aca88d8075306e7c79ae060b84fa9bd8d80547941710598e9ffc",
+      "size": 1086
+    },
+    {
+      "name": "base64",
+      "path": "stdlib/base64.lex",
+      "version": "1.0.0",
+      "hash": "sha256:c4b633ac0e12a7f2048b28c7bcfe78752bb458455801b0761c7461f5d2d71a43",
+      "size": 1002
+    },
+    {
+      "name": "bridge",
+      "path": "stdlib/bridge.lex",
+      "version": "1.0.0",
+      "hash": "sha256:3a239400accc0fdfc289757df54611141b0372f78935db90e7982bf6f994960b",
+      "size": 8977
+    },
+    {
+      "name": "cache",
+      "path": "stdlib/cache.lex",
+      "version": "1.0.0",
+      "hash": "sha256:f5a882b827e3afe0f2f2665a1b49366e1f30a0afba5cfab3ffb253b0470ae424",
+      "size": 7077
+    },
+    {
+      "name": "chunk",
+      "path": "stdlib/ai/chunk.lex",
+      "version": "1.0.0",
+      "hash": "sha256:cd02a7e769bb227f5c5a070cd4e6257c5e7329906750a0daf74962fa4f02e4f6",
+      "size": 8174
+    },
+    {
+      "name": "compress",
+      "path": "stdlib/compress.lex",
+      "version": "1.0.0",
+      "hash": "sha256:e163b13077baec31c0dfed51d27366469ac699fbec2dc20dad0e539d6894be23",
+      "size": 7572
+    },
+    {
+      "name": "crypto",
+      "path": "stdlib/crypto.lex",
+      "version": "1.0.0",
+      "hash": "sha256:62fba804bf6e0a6ccb93b450215d9321f8c7bd6245cc8e8e8f6db32f3f933ce9",
+      "size": 9875
+    },
+    {
+      "name": "csv",
+      "path": "stdlib/csv.lex",
+      "version": "1.0.0",
+      "hash": "sha256:33ac0f8fb361f960e7e92bd77b5911e624f94f4d4f218dec967a47cb119b2963",
+      "size": 10628
+    },
+    {
+      "name": "datetime",
+      "path": "stdlib/datetime.lex",
+      "version": "1.0.0",
+      "hash": "sha256:c0e70e6671ce1239393ac48c5ce94de2e8da1c8714ef378267f3c54ac68c6976",
+      "size": 2701
+    },
+    {
+      "name": "db",
+      "path": "stdlib/db.lex",
+      "version": "1.0.0",
+      "hash": "sha256:1fbe014fd014212f22f2b018f7d5b71573017e062f316b41e63e3bb1b89912f8",
+      "size": 1594
+    },
+    {
+      "name": "encoding",
+      "path": "stdlib/encoding.lex",
+      "version": "1.0.0",
+      "hash": "sha256:7a54b6ad1e12a703c92501ee0f9e86e5723e6846500c051660e61cdece031e7a",
+      "size": 1851
+    },
+    {
+      "name": "evals",
+      "path": "stdlib/ai/evals.lex",
+      "version": "1.0.0",
+      "hash": "sha256:1eacb897754a58affca57ceed9b5ecf7cbf458c81feeac0879b15164892c58c2",
+      "size": 12170
+    },
+    {
+      "name": "event",
+      "path": "stdlib/event.lex",
+      "version": "1.0.0",
+      "hash": "sha256:2a0f252b4bd37ca86e4125ad21f7ad91e8ece7d35d03211827fa2b1ca97fb7c1",
+      "size": 4353
+    },
+    {
+      "name": "frogray",
+      "path": "stdlib/frogray.lex",
+      "version": "1.0.0",
+      "hash": "sha256:51056705ec68bf76e5d784ca22625de6e23d5baadec13f5f254d508c40a0d86f",
+      "size": 23013
+    },
+    {
+      "name": "fs",
+      "path": "stdlib/fs.lex",
+      "version": "1.0.0",
+      "hash": "sha256:36d6aeb2c3879f81ac68a34b8fdf371c072d1accc8096b4e257dac9ce0baaa2e",
+      "size": 4683
+    },
+    {
+      "name": "functional",
+      "path": "stdlib/functional.lex",
+      "version": "1.0.0",
+      "hash": "sha256:3671726b9d3ffa3b5e2b5569fe0074b735f0f790f8c0d78cc276788c39257eea",
+      "size": 2603
+    },
+    {
+      "name": "graph",
+      "path": "stdlib/graph.lex",
+      "version": "1.0.0",
+      "hash": "sha256:b43496b08eb898f787992a6e16b6a8d19477ca798a7c9bacd17e513d8bb6d43d",
+      "size": 5209
+    },
+    {
+      "name": "hash",
+      "path": "stdlib/hash.lex",
+      "version": "1.0.0",
+      "hash": "sha256:3237d559d2113ff4b03755cde68d92bd3c4801e22c9010e545b7fc937e61d7c2",
+      "size": 3380
+    },
+    {
+      "name": "http",
+      "path": "stdlib/http.lex",
+      "version": "1.0.0",
+      "hash": "sha256:b4ad2cf35d888aa86ab685bebca54f3dc3e8f4fbce79e56a3b41a311f5c948d1",
+      "size": 2297
+    },
+    {
+      "name": "jpeg",
+      "path": "stdlib/jpeg.lex",
+      "version": "1.0.0",
+      "hash": "sha256:04328d368de4560d0915487adbebbf7fda7ca151f6e0600cd042785bb5e7a9ec",
+      "size": 1661
+    },
+    {
+      "name": "json",
+      "path": "stdlib/json.lex",
+      "version": "2.0.0",
+      "hash": "sha256:2fc6411ec0c6df30e4fe2aa69d3f4dd628b37caa0243bb745e8258deee734d5b",
+      "size": 2195
+    },
+    {
+      "name": "kv_store",
+      "path": "stdlib/kv_store.lex",
+      "version": "1.0.0",
+      "hash": "sha256:ea8f4cd206963ea3434ec71acf53baf327000218be901b409062b7ec8bb079db",
+      "size": 3495
+    },
+    {
+      "name": "log",
+      "path": "stdlib/log.lex",
+      "version": "1.0.0",
+      "hash": "sha256:5f872efa6a4f49cbf6d061fd71490c38dacff407f85ba08f15306280242bc3ec",
+      "size": 5427
+    },
+    {
+      "name": "math",
+      "path": "stdlib/math.lex",
+      "version": "1.0.0",
+      "hash": "sha256:669649e6e43fa6404b89f2f145dd48316dd2828192fce273802e254289a46c53",
+      "size": 5298
+    },
+    {
+      "name": "mcp",
+      "path": "stdlib/mcp.lex",
+      "version": "1.0.0",
+      "hash": "sha256:84a8e6ec0d87031ae5a6336f055055291d2d89d1d24fdf6a6be2bbc69a1a65a8",
+      "size": 11476
+    },
+    {
+      "name": "mcp_server",
+      "path": "stdlib/mcp_server.lex",
+      "version": "0.1.0",
+      "hash": "sha256:c3ff227a9c6367f6b930c1fd9d5cd510be1d35db7f0cba774fa6e2196553d580",
+      "size": 6003
+    },
+    {
+      "name": "merkle",
+      "path": "stdlib/merkle.lex",
+      "version": "1.0.0",
+      "hash": "sha256:967c3d2e8a741757d209b306e18d874ae4976b006fbd26ea824cd85f05bd9e67",
+      "size": 3903
+    },
+    {
+      "name": "mtl",
+      "path": "stdlib/mtl.lex",
+      "version": "0.2.0",
+      "hash": "sha256:eb7a24282e4d7c7169f79bf833a6a9f078f90993e58cae2b6484e383ca68a0e2",
+      "size": 41766
+    },
+    {
+      "name": "mtl_fx",
+      "path": "stdlib/mtl_fx.lex",
+      "hash": "sha256:79f075d536a9c9abe8842ebff572bfed028aaa078954b82677b01b5564a3170d",
+      "size": 17618
+    },
+    {
+      "name": "network",
+      "path": "stdlib/network.lex",
+      "version": "1.0.0",
+      "hash": "sha256:9a62aa5b8f964b549095e8dc8444c55dead806e2b48306ab790c62b82bd6b895",
+      "size": 3612
+    },
+    {
+      "name": "observable",
+      "path": "stdlib/observable.lex",
+      "version": "1.0.0",
+      "hash": "sha256:31290bac6fb05cd7af391165bedcebd3ccc02a37bc080b6e82f7bf02cf9e4607",
+      "size": 8337
+    },
+    {
+      "name": "ollama",
+      "path": "stdlib/ai/ollama.lex",
+      "version": "1.0.0",
+      "hash": "sha256:8b2ead3e8ac3c4e586c25288cfe70fcf9f7d182378cfbd544d4c4702d5be3655",
+      "size": 30762
+    },
+    {
+      "name": "parallel",
+      "path": "stdlib/parallel.lex",
+      "version": "1.0.0",
+      "hash": "sha256:22db92e9abdea75c5b53f1d002800c693d63dab06c387e42e20cdf3a4c95d4b0",
+      "size": 19188
+    },
+    {
+      "name": "path",
+      "path": "stdlib/path.lex",
+      "version": "1.0.0",
+      "hash": "sha256:3a062871b08734da6290cab20bfd1edc8d8e98e784509f3c36297be9882899ca",
+      "size": 3582
+    },
+    {
+      "name": "pdf",
+      "path": "stdlib/pdf.lex",
+      "version": "1.0.0",
+      "hash": "sha256:66e6b8f1855f107a72c98aac669eed428a839151935a198c1049752935e2121c",
+      "size": 3671
+    },
+    {
+      "name": "quick",
+      "path": "stdlib/ai/quick.lex",
+      "version": "1.0.0",
+      "hash": "sha256:984a13141aaea626595e1e31dc5b7fbb92d1b2cc884413e1ff5bd65001c6ddb9",
+      "size": 25380
+    },
+    {
+      "name": "regex",
+      "path": "stdlib/regex.lex",
+      "version": "1.0.0",
+      "hash": "sha256:4f566b408716d3a2695c8d2a786bfe35ae30be24e92410965a60ed4b2759d6ee",
+      "size": 2095
+    },
+    {
+      "name": "rest",
+      "path": "stdlib/rest.lex",
+      "version": "1.0.0",
+      "hash": "sha256:930210d93cd4423e6ec26e06b947d74a7d4d6eeec7b5408197587261dd91fdbb",
+      "size": 8505
+    },
+    {
+      "name": "retry",
+      "path": "stdlib/retry.lex",
+      "version": "1.0.0",
+      "hash": "sha256:9f1b04d5c55e8b5d4a0d367080c2a87e0b157631957e74135c13c27f0bcca43b",
+      "size": 8915
+    },
+    {
+      "name": "schema",
+      "path": "stdlib/ai/schema.lex",
+      "version": "1.0.0",
+      "hash": "sha256:1db14d6a45864f4523677ef68a76cff085b207c8efc0d08b7bd0727cf5b44a95",
+      "size": 5627
+    },
+    {
+      "name": "sd",
+      "path": "stdlib/ai/sd.lex",
+      "version": "1.0.0",
+      "hash": "sha256:b192cbef916b508731683f09deb244397d665d06b7b9f75e30a3b7bdc540f387",
+      "size": 17208
+    },
+    {
+      "name": "server",
+      "path": "stdlib/server.lex",
+      "version": "1.0.0",
+      "hash": "sha256:79dec0363c21678357fe8e50f84361976d5f0f31313ec46723bff1f88aaa2a54",
+      "size": 5215
+    },
+    {
+      "name": "stream",
+      "path": "stdlib/stream.lex",
+      "version": "1.0.0",
+      "hash": "sha256:e8d8761e32cf52001e155f39d1a22d01049f34212d38911dc1104bdafcb5f506",
+      "size": 13336
+    },
+    {
+      "name": "stream_fusion",
+      "path": "stdlib/stream_fusion.lex",
+      "version": "1.0.0",
+      "hash": "sha256:d61e50d415ace82777e0a24210b59e019f5d85bfb22bf7ea05f9f1d6bce47ab8",
+      "size": 2154
+    },
+    {
+      "name": "strings",
+      "path": "stdlib/strings.lex",
+      "version": "1.0.0",
+      "hash": "sha256:151f95a578d101c0596b7bf288ec9da8aee42d3d0e7c1419b076e2305f191f5d",
+      "size": 2334
+    },
+    {
+      "name": "tensor",
+      "path": "stdlib/tensor.lex",
+      "version": "0.1.0",
+      "hash": "sha256:a4dee4af330a0dd24a3564a377ee512d6990fefc117a706738f82d77a6028938",
+      "size": 16885
+    },
+    {
+      "name": "test",
+      "path": "stdlib/test.lex",
+      "version": "1.0.0",
+      "hash": "sha256:609879f06ffc92cfdc234eb7360b39177074150cd3d57419cb5fe0d99778a24f",
+      "size": 5191
+    },
+    {
+      "name": "ui",
+      "path": "stdlib/ui.lex",
+      "version": "1.0.0",
+      "hash": "sha256:3b1d1151696a213fa0e48c251e30fca3ec2d1775d4625069a738e222aaa97662",
+      "size": 38903
+    },
+    {
+      "name": "ui_themes",
+      "path": "stdlib/ui_themes.lex",
+      "version": "1.0.0",
+      "hash": "sha256:9a226384b43297054fc5dbe1819a3886f9108c4914f02966a78d820bd9bed6a0",
+      "size": 21126
+    },
+    {
+      "name": "url",
+      "path": "stdlib/url.lex",
+      "version": "1.0.0",
+      "hash": "sha256:3cd38dbf1a9ec17f4707e9789d1ec3c3e3861cb6cf6be18fffd12f0422e70820",
+      "size": 1672
+    },
+    {
+      "name": "vector_store",
+      "path": "stdlib/ai/vector_store.lex",
+      "version": "1.0.0",
+      "hash": "sha256:f1588ac6ef9e4486c2a4ceb805eface156dceca1b70f3eca1a4efa1626968fd0",
+      "size": 6762
+    },
+    {
+      "name": "vfs",
+      "path": "stdlib/vfs.lex",
+      "version": "1.0.0",
+      "hash": "sha256:694b68fb6ae07b6123a24f172733b4d120b6044cbd86c99e828304c3ac606295",
+      "size": 1692
+    },
+    {
+      "name": "voyage",
+      "path": "stdlib/ai/voyage.lex",
+      "version": "1.0.0",
+      "hash": "sha256:dd399822598215cab163ecfc78d3e9708711bd3227f4114f88583495b4d2368f",
+      "size": 8615
+    }
+  ]
+}

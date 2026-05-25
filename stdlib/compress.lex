@@ -1,6 +1,9 @@
-// ============================================================================
-// compress.lex — Data compression utilities
-// ============================================================================
+// compress.lex — Data compression utilities (gzip, deflate)
+// @module    compress
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   Data compression utilities (gzip, deflate)
 //
 // Provides gzip and deflate compression/decompression for strings and binary data.
 // Primary use: reducing size of large payloads (files, API responses, logs).
@@ -98,8 +101,8 @@ fn inflate(data) {
 //   ratio = compressionRatio(data, compressed)
 //   println("Compression ratio: " + str(ratio) + "x")
 fn compressionRatio(original, compressed) {
-    origLen = len(original)
-    compLen = len(compressed)
+    let origLen = len(original)
+    let compLen = len(compressed)
 
     if compLen == 0 {
         return 1.0
@@ -120,7 +123,7 @@ fn compressionRatio(original, compressed) {
 fn compressFile(path) {
     import "stdlib/fs.lex" as fs
 
-    data, err = fs.read(path)
+    let data, err = fs.read(path)
     if err != null { return null, err }
 
     return compress(data)
@@ -135,7 +138,7 @@ fn compressFile(path) {
 fn decompressFile(path) {
     import "stdlib/fs.lex" as fs
 
-    data, err = fs.read(path)
+    let data, err = fs.read(path)
     if err != null { return null, err }
 
     return decompress(data)
@@ -153,7 +156,7 @@ fn decompressFile(path) {
 //   size = compressedSize(large_json)
 //   println("Will transfer " + str(size) + " bytes")
 fn compressedSize(data) {
-    compressed, err = compress(data)
+    let compressed, err = compress(data)
     if err != null { return 0 }
     return len(compressed)
 }
@@ -166,15 +169,15 @@ fn compressedSize(data) {
 //   println(savings(data, compressed))
 //   // Output: "Saved 4,500 bytes (94.5%)"
 fn savings(original, compressed) {
-    origLen = len(original)
-    compLen = len(compressed)
+    let origLen = len(original)
+    let compLen = len(compressed)
 
     if compLen >= origLen {
         return "No savings (data expanded by " + str(compLen - origLen) + " bytes)"
     }
 
-    bytesSaved = origLen - compLen
-    percent = (float(bytesSaved) / float(origLen)) * 100.0
+    let bytesSaved = origLen - compLen
+    let percent = (float(bytesSaved) / float(origLen)) * 100.0
 
     return "Saved " + str(bytesSaved) + " bytes (" + str(percent) + "%)"
 }
@@ -197,10 +200,10 @@ fn compressMany(items) {
         return null, error("TYPE_ERROR", "compressMany expects array")
     }
 
-    results = makeArray(len(items), null)
-    i = 0
+    let results = makeArray(len(items), null)
+    let i = 0
     while i < len(items) {
-        compressed, err = compress(items[i])
+        let compressed, err = compress(items[i])
         if err != null { return null, err }
         results[i] = compressed
         i = i + 1
@@ -219,10 +222,10 @@ fn decompressMany(items) {
         return null, error("TYPE_ERROR", "decompressMany expects array")
     }
 
-    results = makeArray(len(items), null)
-    i = 0
+    let results = makeArray(len(items), null)
+    let i = 0
     while i < len(items) {
-        decompressed, err = decompress(items[i])
+        let decompressed, err = decompress(items[i])
         if err != null { return null, err }
         results[i] = decompressed
         i = i + 1

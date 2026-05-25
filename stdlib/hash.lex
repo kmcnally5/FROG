@@ -1,6 +1,9 @@
-// =====================================
-// kLex HASH + HASHMAP UTILITIES
-// =====================================
+// hash.lex — Hash and hashmap utilities (FNV-1a hashing, map merge/pick/omit/invert)
+// @module    hash
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   kLex HASH + HASHMAP UTILITIES
 //
 // Combines:
 // - map utilities (merge, pick, omit, invert)
@@ -19,7 +22,7 @@
 //
 // =====================================
 
-import "stdlib/encoding.lex" as enc
+// ord() and chr() are kLex builtins — no import needed here.
 
 
 // =====================================
@@ -28,7 +31,7 @@ import "stdlib/encoding.lex" as enc
 
 // merge two hashes (b overwrites a)
 fn merge(a, b) {
-    result = {}
+    let result = {}
 
     for k in keys(a) {
         result[k] = a[k]
@@ -43,7 +46,7 @@ fn merge(a, b) {
 
 // invert keys and values
 fn invert(h) {
-    result = {}
+    let result = {}
 
     for k in keys(h) {
         result[h[k]] = k
@@ -54,7 +57,7 @@ fn invert(h) {
 
 // pick only selected keys
 fn pick(h, arr) {
-    result = {}
+    let result = {}
 
     for k in arr {
         if hasKey(h, k) {
@@ -67,12 +70,12 @@ fn pick(h, arr) {
 
 // omit selected keys (O(n) with hash-based lookup)
 fn omit(h, arr) {
-    excluded = {}
+    let excluded = {}
     for k in arr {
         excluded[k] = true
     }
 
-    result = {}
+    let result = {}
     for k in keys(h) {
         if !hasKey(excluded, k) {
             result[k] = h[k]
@@ -90,13 +93,13 @@ fn omit(h, arr) {
 // bitwise XOR for 32-bit integers
 // -------------------------------------
 fn xor(a, b) {
-    result = 0
-    bit = 1
+    let result = 0
+    let bit = 1
 
-    i = 0
+    let i = 0
     while i < 32 {
-        abit = a % 2
-        bbit = b % 2
+        let abit = a % 2
+        let bbit = b % 2
 
         if abit != bbit {
             result = result + bit
@@ -114,16 +117,17 @@ fn xor(a, b) {
 // -------------------------------------
 // hash(string)
 // -------------------------------------
-OFFSET = 2166136261
-PRIME  = 16777619
-MOD    = 4294967296   // 2^32
+let OFFSET = 2166136261
+let PRIME  = 16777619
+let MOD    = 4294967296   // 2^32
 
+// hash(s) — compute a 32-bit FNV-1a hash of string s and return it as an integer.
 fn hash(s) {
-    h = OFFSET
-    i = 0
+    let h = OFFSET
+    let i = 0
 
     while i < len(s) {
-        c = enc.ord(s[i])
+        let c = ord(s[i])
 
         // XOR (safe)
         h = xor(h, c)
@@ -141,11 +145,11 @@ fn hash(s) {
 // hashBytes(array)
 // -------------------------------------
 fn hashBytes(arr) {
-    h = OFFSET
-    i = 0
+    let h = OFFSET
+    let i = 0
 
     while i < len(arr) {
-        c = arr[i]
+        let c = arr[i]
 
         if c == 0 {
             c = 63   // fallback for null byte
@@ -165,7 +169,7 @@ fn hashBytes(arr) {
 // combineHash(a, b)
 // -------------------------------------
 fn combineHash(a, b) {
-    h = OFFSET
+    let h = OFFSET
 
     h = xor(h, a)
     h = (h * PRIME) % MOD

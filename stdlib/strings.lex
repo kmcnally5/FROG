@@ -1,4 +1,9 @@
 // stdlib/strings.lex — string utilities not provided by builtins
+// @module    strings
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   string utilities not provided by builtins
 //
 // Provides trimLeft, trimRight, padLeft, padRight, repeat, count, lines, words.
 // For startsWith, endsWith, indexOf, replace, use the builtin functions directly.
@@ -15,7 +20,7 @@
 // O(total-length) instead of O(n × total-length) from repeated concat.
 fn repeat(str, n) {
     if n <= 0 { return "" }
-    parts = makeArray(n, str)
+    let parts = makeArray(n, str)
     return join(parts, "")
 }
 
@@ -23,15 +28,15 @@ fn repeat(str, n) {
 // count("banana", "an") → 2
 fn count(str, sub) {
     if len(sub) == 0 { return 0 }
-    parts = split(str, sub)
+    let parts = split(str, sub)
     return len(parts) - 1
 }
 
 // trimLeft removes leading whitespace (spaces, tabs, newlines). O(n).
 fn trimLeft(str) {
-    i = 0
+    let i = 0
     while i < len(str) {
-        c = str[i]
+        let c = str[i]
         if c != " " && c != "\t" && c != "\n" {
             return substr(str, i)
         }
@@ -42,9 +47,9 @@ fn trimLeft(str) {
 
 // trimRight removes trailing whitespace (spaces, tabs, newlines). O(n).
 fn trimRight(str) {
-    i = len(str) - 1
+    let i = len(str) - 1
     while i >= 0 {
-        c = str[i]
+        let c = str[i]
         if c != " " && c != "\t" && c != "\n" {
             return substr(str, 0, i + 1)
         }

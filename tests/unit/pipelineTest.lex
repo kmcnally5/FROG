@@ -7,12 +7,12 @@ println("  hello  " |> trim)
 println("a,b,c" |> split(","))
 
 // Chained pipeline — left-associative
-input = "  hello , world , kLex  "
-result = input |> trim |> split(",") |> map(trim)
+let input = "  hello , world , kLex  "
+let result = input |> trim |> split(",") |> map(trim)
 println(result)
 
 // Pipeline with filter
-nums = [1, -2, 3, -4, 5]
+let nums = [1, -2, 3, -4, 5]
 result = nums |> filter(fn(x) { return x > 0 }) |> map(fn(x) { return x * 2 })
 println(result)
 

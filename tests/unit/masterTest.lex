@@ -2,75 +2,75 @@ import "stdlib/fs.lex"      as fs
 
 // Resolve the interpreter path from our own argv[0] so sub-processes
 // use the exact same binary (works with both `go run .` and `./klex`).
-allArgs = _osArgs()
-interpreter = allArgs[0]
+let allArgs = _osArgs()
+let interpreter = allArgs[0]
 
 // Discover test files — listDir returns names sorted alphabetically.
-files, listErr = fs.listDir("tests/unit")
+let files, listErr = fs.listDir("tests/unit")
 if listErr != null {
     println("ERROR: cannot list tests/: " + listErr)
     return null
 }
 
 // Collect .lex files, excluding ourselves.
-tests = []
-i = 0
+let tests = []
+let i = 0
 while i < len(files) {
-    name = files[i]
-    parts = split(name, ".")
+    let name = files[i]
+    let parts = split(name, ".")
     if parts[len(parts) - 1] == "lex" && name != "masterTest.lex" {
         tests = push(tests, name)
     }
     i = i + 1
 }
 
-total = len(tests)
+let total = len(tests)
 
 // Layout constants — tweak if test names grow longer.
-NAME_WIDTH = 22
-DOTS_WIDTH = 28
+let NAME_WIDTH = 22
+let DOTS_WIDTH = 28
 
 println("")
 println("  kLex Master Test Suite")
 println("  ========================")
 println("")
 
-passed = []
-failed = []
+let passed = []
+let failed = []
 
 i = 0
 while i < total {
-    name = tests[i]
+    let name = tests[i]
 
     // Strip ".lex" for display.
-    nameParts = split(name, ".")
-    displayName = nameParts[0]
+    let nameParts = split(name, ".")
+    let displayName = nameParts[0]
 
     // Pad name to fixed width.
-    label = displayName
+    let label = displayName
     while len(label) < NAME_WIDTH {
         label = label + " "
     }
 
     // Build dot separator.
-    dots = ""
+    let dots = ""
     while len(dots) < DOTS_WIDTH {
         dots = dots + "."
     }
 
     // Index badge — right-align the numerator within its field.
-    numStr = str(i + 1)
-    totStr = str(total)
+    let numStr = str(i + 1)
+    let totStr = str(total)
     while len(numStr) < len(totStr) {
         numStr = " " + numStr
     }
-    badge = "  [" + numStr + "/" + totStr + "]  "
+    let badge = "  [" + numStr + "/" + totStr + "]  "
 
     // Print the row prefix with no newline — result appended after exec.
     print(badge + label + " " + dots + " ")
 
     // Run the sub-script, capturing all output so nothing leaks to the terminal.
-    stdout, stderr, exitCode, runErr = _processExec(interpreter, ["tests/unit/" + name])
+    let stdout, stderr, exitCode, runErr = _processExec(interpreter, ["tests/unit/" + name])
 
     // Determine pass/fail.
     // exitCode != 0 → parse error (main.go calls os.Exit(1) on parse failures).

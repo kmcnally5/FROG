@@ -50,9 +50,12 @@ IDENT        = letter { letter | digit }
 **Keywords** (reserved; cannot be used as identifiers):
 ```
 if  else  fn  return  while  for  in  break  continue
-switch  case  default  struct  enum  select  let  import  as
+switch  case  default  struct  enum  select  let  const  import  as
 true  false  null
 ```
+
+Source of truth: `keywords` map in `lexer/lexer.go`. Identifiers that match any
+of these tokenise to the corresponding keyword instead of `IDENT`.
 
 **IMPORTANT:** `fn` is a reserved keyword and cannot be used as a parameter name
 or variable name. Using `fn` as a parameter causes the parser to miscount the
@@ -81,9 +84,12 @@ INTERP_STR   = '"' { str_char | interp_expr } '"'
                (* INTERP_STR is produced whenever the string contains at
                   least one bare "{"; STRING otherwise.
                   A string not closed before end-of-file is a ParseError:
-                  "unterminated string literal" *)
+                  "unterminated string literal".
+                  A bare "}" outside an interp_expr is a ParseError:
+                  "bare '}' is reserved inside a string" — use \} or }} *)
 
-str_char     = escape_seq | (* any character except '"' and unescaped "{" *)
+str_char     = escape_seq | brace_double
+             | (* any character except '"', bare "{", bare "}", or "\" *)
 escape_seq   = '\"'         (* literal double quote          *)
              | '\n'         (* newline                        *)
              | '\t'         (* tab                            *)
@@ -91,8 +97,15 @@ escape_seq   = '\"'         (* literal double quote          *)
              | '\r'         (* carriage return                *)
              | '\b'         (* backspace                      *)
              | '\{'         (* literal "{" — NOT interpolation *)
+             | '\}'         (* literal "}" — symmetric with \{ *)
              | '\x' HEX HEX (* byte with hex value (e.g. \x1b for ESC) *)
+brace_double = '{{'         (* literal "{" (Python f-string style) *)
+             | '}}'         (* literal "}" *)
 interp_expr  = "{" expression "}"
+               (* Inside the {…}, contents are real kLex code — no escape
+                  processing. Inner string literals are recognised by the
+                  recursive lexer, so `"<{f("a")}>"` is the natural form;
+                  there is no need to escape inner quotes. *)
 
 RAW_STR      = '`' { any_char_except_backtick } '`'
                (* No escape processing. No interpolation. Every character
@@ -101,11 +114,23 @@ RAW_STR      = '`' { any_char_except_backtick } '`'
                   A backtick cannot appear inside a raw string.
                   A raw string not closed before end-of-file is a ParseError:
                   "unterminated raw string literal" *)
+
+BYTES        = 'b' '"' { bytes_char } '"'
+               (* binary literal — the `b` prefix is only consumed when
+                  immediately followed by `"`. Bare `b` remains a normal
+                  identifier so existing code using `b` as a variable name
+                  keeps working.
+
+                  Escape sequences supported: \"  \\  \n  \r  \t  \0  \xHH
+                  No {expr} interpolation — `{` is literal inside bytes.
+                  Indexing returns an integer in [0,255], len() returns the
+                  byte count. See LANGUAGE.TXT "BYTES" for full semantics. *)
 ```
 
-**Two delimiter rules — no overlap:**
-* `"..."` — escape sequences and `{expr}` interpolation are active
-* `` `...` `` — all characters are literal; nothing is processed
+**Three delimiter rules — no overlap:**
+* `"..."`  — escape sequences and `{expr}` interpolation are active
+* `` `...` `` — raw: all characters literal, nothing processed
+* `b"..."` — bytes: escape sequences active, NO interpolation, indexing is byte-numeric
 
 ### Operators and Punctuation
 
@@ -230,9 +255,19 @@ continue_stmt= "continue"
 
 ```
 import_stmt  = "import" STRING "as" IDENT
-               (* path is resolved against KLEX_PATH env var when not absolute;
-                  each import evaluates the file independently — no caching;
-                  import cycles are detected and reported as a RuntimeError *)
+               (* Path is resolved against five locations in order, first
+                  existing file wins: (1) path as given (CWD-relative),
+                  (2) directory of the importing .lex file, (3) $KLEX_PATH,
+                  (4) directory of the klex binary, (5) one level above the
+                  binary. See LANGUAGE.TXT "MODULES" for full rationale.
+
+                  Imports are deduplicated by absolute file path for the
+                  lifetime of the process — the first import evaluates the
+                  module's top-level code, and subsequent imports (under any
+                  alias, from anywhere) return a module bound to the SAME
+                  underlying environment. Module-level mutable state is
+                  therefore process-global. See LANGUAGE.TXT "MODULE CACHING".
+                  Import cycles are detected and reported as a RuntimeError. *)
 
 named_fn_stmt= "fn" IDENT "(" [ params ] ")" [ ":" type_name ] block
                (* syntactic sugar — desugared at parse time to:
@@ -302,18 +337,31 @@ block        = "{" { statement } "}"
 ### Parameters
 
 ```
-params       = (* empty *)
-             | param { "," param } [ "," IDENT "..." ]
-             (* "..." must appear on the last parameter only;
-                that parameter receives any extra arguments as an array;
-                zero extra arguments yields an empty array, never null *)
+params       = (* empty *) | param { "," param }
 
-param        = IDENT [ "=" expression ]
-             (* optional default value; evaluated at call time in the
-                function's closure environment, not at definition time.
-                Parameters with defaults must follow all required parameters —
-                a required param after a defaulted one is a ParseError. *)
+param        = [ type_name ] IDENT [ "..." ] [ "=" expression ]
+             (* Order: optional type → name → optional variadic marker → optional default.
+
+                Type annotation:
+                  Optional, but ALL-OR-NOTHING — if any parameter is annotated,
+                  every parameter must be annotated, or it is a ParseError.
+
+                Variadic ("..."):
+                  Must appear on the LAST parameter only. The parameter
+                  receives any extra arguments as an array; zero extra
+                  arguments yields an empty array, never null. The variadic
+                  parameter cannot itself carry a default value.
+
+                Default value ("= expression"):
+                  Evaluated at call time in the function's closure environment,
+                  not at definition time. Parameters with defaults must follow
+                  all required parameters — a required param after a defaulted
+                  one is a ParseError. *)
 ```
+
+`fn_literal` accepts the same `params` block plus an optional return-type
+annotation after the closing paren — `fn(integer a): integer { ... }`. See
+`fn_literal` in the Primary Expressions section.
 
 ---
 
@@ -334,6 +382,10 @@ Expressions are parsed with a Pratt (top-down operator precedence) parser. The g
 | 8 | `( args )` | left | call |
 | 9 | `[ index ]` | left | subscript |
 | 9 | `. ident` | left | dot access |
+| 9 | `?` | left (postfix) | error-propagation unwrap |
+
+Source of truth: `precedences` map and `LOWEST..INDEX` constants in
+`parser/parser.go`. Higher number = binds tighter.
 
 ### Expression Rules
 
@@ -364,6 +416,11 @@ postfix_expr = primary { postfix_op }
 postfix_op   = "[" expression "]"     (* subscript / index      *)
              | "(" arg_list ")"       (* call                   *)
              | "." IDENT              (* property or method name *)
+             | "?"                    (* error-propagation unwrap;
+                                         the preceding expression must
+                                         evaluate to a 2-element tuple
+                                         (value, err) — see LANGUAGE.TXT
+                                         "ERROR PROPAGATION — THE ? OPERATOR" *)
 
 arg_list     = (* empty *) | expression { "," expression }
 ```
@@ -376,6 +433,7 @@ primary      = INT
              | STRING
              | RAW_STR
              | INTERP_STR
+             | BYTES
              | "true"
              | "false"
              | "null"
@@ -410,22 +468,18 @@ hash_literal = "{" [ pair { "," pair } ] "}"
 pair         = expression ":" expression
 
 fn_literal   = "fn" "(" [ params ] ")" [ ":" type_name ] block
-             (* anonymous function; use named_fn_stmt for top-level named fns *)
-
-params       = param { "," param }
-
-param        = [ type_name ] IDENT [ "?" ] [ "..." ]
-             (* Type annotation is optional, but if ANY param has a type,
-                ALL params must have types (all-or-nothing rule).
-                "?" indicates a default value follows (not shown here for brevity).
-                "..." makes this param variadic (must be the last param).
-                Order: [type] name [?] [...] *)
+             (* anonymous function; use named_fn_stmt for top-level named fns.
+                The `params` and `param` productions are defined in the
+                "Parameters" section above. *)
 
 type_name    = IDENT
-             (* Valid type names: integer, float, string, boolean, array, hash,
-                function, null, task, channel, error, tuple, struct.
+             (* Valid type names: integer, float, string, boolean, bytes,
+                array, hash, function, null, task, channel, error, tuple,
+                struct.
                 Type names are plain identifiers (not reserved keywords);
-                any identifier can be used as a type. *)
+                any identifier is syntactically accepted, but kLex tooling
+                only recognises the names above for hover/documentation.
+                Annotations are NOT enforced at runtime. *)
 ```
 
 ### String Interpolation
@@ -436,16 +490,44 @@ An interpolated string (`INTERP_STR`) contains embedded kLex expressions:
 "Hello, {name}! Result: {1 + 2}"
 ```
 
-Each `{…}` is parsed as a full expression using a nested parser instance. Nested braces are tracked by depth, so function bodies and hashes inside interpolations work correctly:
+The lexer builds the alternating text/expression segments in one pass and pre-tokenizes each expression so its tokens carry accurate source line/col. The parser walks the structured segments — there is no raw-byte re-scanning anywhere downstream.
+
+#### Braces are special everywhere
+
+Both `{` and `}` are reserved inside `"..."` strings:
+
+* Bare `{` starts an interpolation expression and must have a matching `}`.
+* Bare `}` outside an interpolation is a **parse error** (`bare '}' is reserved inside a string`). No silent "literal close-brace" fallback.
+
+#### Two ways to write a literal brace
 
 ```
-"value: {fn(x) { x + 1 }(5)}"   -- valid
+"path = \{home\}"        -- backslash escape:   path = {home}
+"path = {{home}}"        -- brace doubling:     path = {home}
 ```
 
-Use `\{` to include a literal `{` without triggering interpolation:
+Both styles are equivalent. Use whichever reads better in context. For longer JSON / regex / template text, the raw-string syntax avoids both styles entirely:
 
 ```
-"not interpolated: \{name}"      -- prints: not interpolated: {name}
+json = `{"users": [], "count": 0}`   -- backtick: no escapes, no interp
+```
+
+#### Inner strings inside expressions
+
+Inside `{…}`, you write real kLex code. The recursive lexer handles inner string literals so you do **not** need to escape inner quotes:
+
+```
+"hash[\"a\"]"            -- error: \ is illegal in expression position
+"<{ h["a"] }>"           -- correct: inner string is recognised naturally
+"<{ format("%d", n) }>"  -- correct
+```
+
+#### Mixed examples
+
+```
+"value: {fn(x) { x + 1 }(5)}"        -- expression contains a function literal
+"sum is {{ {1+2} }}"                  -- prints: sum is { 3 }
+"score: \{base\}+{bonus}"             -- prints: score: {base}+<bonus value>
 ```
 
 ---
@@ -514,6 +596,15 @@ Assigning to `"true"`, `"false"`, or `"null"` is a parse-time error:
 null = 3    -- parse error: cannot assign to reserved literal
 ```
 
+### 8. Compound Assignment Is Not Valid
+
+The lexer tokenises `+=`, `-=`, `*=`, `/=`, `%=` so the parser can emit a clear
+diagnostic, but no compound-assignment construct exists in the grammar:
+```
+x += 1    -- parse error: operator += is not valid in kLex — use x = x + 1
+```
+Use plain `x = x + 1` (or for collections, `arr[i] = arr[i] + 1`).
+
 ---
 
 ## SEMANTIC CONSTRAINTS
@@ -544,7 +635,7 @@ These are not grammar rules but are listed here because they shape what programs
   * If ANY parameter in a function has a type annotation, ALL parameters must have type annotations (all-or-nothing rule). Mixing annotated and unannotated parameters is a `ParseError`.
   * Return type annotations are optional even when parameters are annotated.
   * Type annotations are not enforced at runtime and do not affect runtime behavior.
-  * Valid type names are plain identifiers: `integer`, `float`, `string`, `boolean`, `array`, `hash`, `function`, `null`, `task`, `channel`, `error`, `tuple`, `struct`.
+  * Valid type names are plain identifiers: `integer`, `float`, `string`, `boolean`, `bytes`, `array`, `hash`, `function`, `null`, `task`, `channel`, `error`, `tuple`, `struct`.
   * Type annotations are available for IDE hover tooltips and code documentation.
 
 * Multi-assign requires the right-hand side to be a `Tuple` with exactly as many elements as there are names on the left.
@@ -582,7 +673,10 @@ These are not grammar rules but are listed here because they shape what programs
 
 *(always in scope — no import required)*
 
-**Extracted from source:** use `go run tools/docwalk/extract_builtins.go` to verify completeness.
+**Extracted from source:** run `go run ./tools/syncdocs` to audit builtins
+against LSP, VS Code syntax, LANGUAGE.TXT, and this file. (The legacy
+`tools/docwalk/extract_builtins.go` still works for a quick name dump but is
+superseded by syncdocs.)
 
 ### Output & Input
 
@@ -624,6 +718,7 @@ Use when input is untrusted (CSV, HTTP, databases). Returns `(value, null)` on s
 * `endsWith(str, suf)` — `BOOLEAN`
 * `substr(str, start [, end])` — substring by 0-based index; end exclusive
 * `format(template, args...)` — printf-style formatting
+* `replaceAll(str, old, new)` — replace every occurrence (alias of `replace` with explicit "all" naming for code that prefers it)
 
 ### String Encoding (Low-level)
 
@@ -640,6 +735,7 @@ Use when input is untrusted (CSV, HTTP, databases). Returns `(value, null)` on s
 * `push(arr, val)` — new array with val appended
 * `pop(arr)` — new array without last element
 * `concat(arr1, arr2)` — new array containing all elements of arr1 followed by arr2; single allocation
+* `concatAll(arrayOfArrays)` — single-allocation flatten of an array-of-arrays. Use instead of looping `concat()` (which is O(n²) on the growing accumulator).
 * `makeArray(size)` — new `ARRAY` with `size` null elements; O(n) pre-allocation
 * `makeArray(size, default)` — new `ARRAY` with `size` elements, each initialized to `default`
   * **CRITICAL:** Use instead of `push()` in loops (avoids O(n²))
@@ -660,6 +756,7 @@ Use when input is untrusted (CSV, HTTP, databases). Returns `(value, null)` on s
 * `map(arr, fn)` — apply `fn(el)` → new `ARRAY`
 * `filter(arr, fn)` — keep elements where `fn(el)` is true
 * `reduce(arr, fn, init)` — fold to single value; `fn` may be user-defined or built-in
+* `apply(fn, args)` — spread an `ARRAY` of args into a positional call; `apply(println, ["hello", "world"]) ≡ println("hello", "world")`
 
 ### Math Functions
 
@@ -689,6 +786,40 @@ Use when input is untrusted (CSV, HTTP, databases). Returns `(value, null)` on s
 * `sin(x)` → `FLOAT` — sine (radians)
 * `sqrt(x)` → `FLOAT` — square root; x must be non-negative
 * `tan(x)` → `FLOAT` — tangent (radians)
+
+### Math — Interpolation & Remapping
+
+* `lerp(a, b, t)` → `FLOAT` — linear interpolation `a + (b-a)*t`; t=0 → a, t=1 → b; not clamped
+* `constrain(val, lo, hi)` — clamp `val` to `[lo, hi]`; returns `INTEGER` if `val` is `INTEGER`, `FLOAT` otherwise
+* `remap(val, inLow, inHigh, outLow, outHigh)` → `FLOAT` — re-map from one range to another; not clamped (chain with `constrain()` if needed); named `remap` rather than `map` to avoid collision with the higher-order `map(arr, fn)`
+
+### Bitwise (named functions; not operators)
+
+All arguments must be `INTEGER`; any other type is a `TypeError`. Hex/binary/
+octal integer literals (`0xFF`, `0b1101`, `0o755`) are integers at runtime.
+
+* `bitAnd(a, b)` → `INTEGER` — bitwise AND
+* `bitOr(a, b)` → `INTEGER` — bitwise OR
+* `bitXor(a, b)` → `INTEGER` — bitwise XOR
+* `bitNot(x)` → `INTEGER` — ones'-complement
+* `bitShiftLeft(x, n)` → `INTEGER` — `x * 2^n`; `n` must be ≥ 0
+* `bitShiftRight(x, n)` → `INTEGER` — arithmetic right shift; `n` must be ≥ 0
+
+### Bytes (binary values)
+
+* `bytes(x)` — construct a `BYTES` value (`STRING`→utf-8 / `ARRAY`→pack 0..255 / `INTEGER` N→N zero bytes / `BYTES`→defensive copy)
+* `strToBytes(s)` → `BYTES` — utf-8 encode a string
+* `bytesToStr(b)` → `(STRING, error)` — utf-8 decode; err.code `BYTES_INVALID_UTF8`
+* `bytesToBase64(b)` → `STRING` — RFC 4648, padded
+* `base64ToBytes(s)` → `(BYTES, error)` — err.code `BASE64_INVALID`
+* `bytesToHex(b)` → `STRING` — lowercase hex, no separator
+* `hexToBytes(s)` → `(BYTES, error)` — accepts upper or lower; err.code `HEX_INVALID`
+* `floatsToBytes(arr)` → `BYTES` — pack a number array as little-endian IEEE-754 float32 bytes (len = 4 × len(arr))
+* `bytesToFloats(b)` → `(ARRAY, error)` — unpack little-endian float32 bytes; err.code `BYTES_LEN_INVALID` if len not a multiple of 4
+* `bytesConcat(arrayOfBytes)` → `BYTES` — merge an array of `BYTES` into a single value in one Go-level allocation (avoids round-tripping through an int array).
+* `_randomBytes(n)` → `BYTES` — n cryptographically-strong random bytes
+* `chr(n)` → `STRING` — single-character string from Unicode codepoint
+* `ord(c)` → `INTEGER` — codepoint of the first character of `c`
 
 ### Error Handling
 
@@ -788,6 +919,11 @@ with normal `[]` indexing syntax — reads and writes are atomic.
 * `_fsChmod(path, mode)` → `(null, error)`
 * `_fsTmpDir()` → `(STRING, error)` — system temp directory
 * `_fsTmpFile([prefix])` → `(STRING, error)` — create temp file
+* `_fsReadBytes(path)` → `(BYTES, error)` — like `_fsRead` but returns raw bytes (required for binary data)
+* `_fsAppendBytesSync(path, bytes)` → `(null, error)` — atomic append + fsync; bytes are durably on disk on return
+* `_fsMap(path)` → `(STRING, error)` — memory-map file; content backed by mmap, zero-copy; perfect for parallel analysis of files up to ~1GB
+* `_fsCountLines(path)` → `(INTEGER, error)` — stream-count `\n` bytes (matches `wc -l` semantics). Works on multi-GB files without loading into memory.
+* `_fsTruncate(path, newSize)` → `error` — truncate to exactly `newSize` bytes (grows with zero-padding if larger; POSIX truncate(2) semantics).
 
 **Simple file helpers (no error tuple — RuntimeError on failure):**
 
@@ -804,12 +940,15 @@ with normal `[]` indexing syntax — reads and writes are atomic.
 * `_osPid()` → `INTEGER` — process ID
 * `_osArgs()` → `ARRAY` — command-line arguments
 * `_osExit(code)` — terminate process (does not return)
+* `_osName()` → `STRING` — Go's `runtime.GOOS` verbatim (`"darwin"`, `"linux"`, `"windows"`, ...). Use for cross-platform branching when path-probing would be brittle.
+* `_scriptDir()` → `STRING` — absolute directory containing the currently-running .lex script
 
 ### Process Execution (Low-level)
 
 * `_processExec(cmd, args)` → `(stdout, stderr, exitCode, error)`
 * `_processRun(cmd, args)` → `(stdout, stderr, exitCode, error)`
 * `_processShell(cmd)` → `(stdout, stderr, exitCode, error)`
+* `_processSpawnDetached(cmd, args, opts?)` → `(pid, error)` — start a child detached from the parent (survives parent exit). Returns immediately; do NOT block on the child's exit. `opts` (all optional): `logFile`, `env`, `dir`. Child is reaped in a background goroutine — no zombie leak.
 
 **Simple process helpers (RuntimeError on failure):**
 
@@ -818,14 +957,14 @@ with normal `[]` indexing syntax — reads and writes are atomic.
 
 ### Networking (Low-level)
 
-* `tcpDial(addr)` → `(CONN, error)` — connect to TCP server
-* `tcpListen(addr)` → `(LISTENER, error)` — listen on TCP port
-* `netRead(conn)` → `(STRING, error)` — read from connection
-* `netWrite(conn, data)` → `(null, error)` — write to connection
-* `netClose(conn)` → `(null, error)` — close connection
+* `tcpDial(host: STRING, port: INTEGER)` → `(CONN, error)` — connect to TCP server
+* `tcpListen(host: STRING, port: INTEGER)` → `CHANNEL` of accepted connections — start TCP server; break from `for-in` to stop listening
+* `netRead(conn, maxBytes: INTEGER)` → `(STRING, error)` — read up to `maxBytes` from connection
+* `netWrite(conn, data: STRING)` → `(null, error)` — write to connection
+* `netClose(conn)` → `null` — close connection
 * `_httpDo(method, url, headers, body)` → `(response, error)` — HTTP request
 * `_httpServe(addr, handler)` → `(null, error)` — HTTP server
-* `dnsLookup(hostname)` → `(ARRAY, error)` — DNS resolution
+* `dnsLookup(hostname: STRING)` → `(ARRAY, error)` — DNS resolution → array of IP strings
 
 ### Native Bridge (cross-language FFI)
 
@@ -840,6 +979,88 @@ kLex communicates with subprocesses via line-delimited JSON over stdin/stdout. A
 * `bridgeClose(bridge: BRIDGE)` → `null` — send EOF to subprocess and wait for it to exit
 
 **Type mapping** (kLex ↔ JSON): `INTEGER`/`FLOAT` ↔ number · `STRING` ↔ string · `BOOLEAN` ↔ boolean · `NULL` ↔ null · `ARRAY` ↔ array · `HASH` ↔ object
+
+### JSON (Low-level)
+
+* `_jsonParse(s: STRING)` → `(value, errStr)` — decode a JSON document into kLex values. `(value, null)` on success, `(null, "<message>")` on parse failure.
+* `_jsonStringify(v: any)` → `(STRING, errStr)` — encode a kLex value as JSON. Hash keys are emitted sorted (deterministic output). Errors when a value isn't JSON-representable (Bytes, cycles, NaN/Inf floats).
+
+### Agentic Runtime Hooks (Low-level)
+
+The runtime exposes structured semantic events that an external observer (an LLM, a debugger, a telemetry sink) can subscribe to. Each `_set*Hook` registers a single callable (or `null` to clear). Hooks are zero-cost when no handler is registered and synchronous when invoked. Observer-only — a hook cannot alter the event or interfere with the host program. **Prefer the friendlier `agent.lex` wrappers** (`agent.onErrorBubble` / `onAsyncSpawn` / `onAsyncDone`) over these primitives.
+
+* `_setErrorHook(hookFn: fn | null)` → `null` — Phase 1. Hook fires once per internal `*Error` at the moment it begins propagating up the call stack — BEFORE any `safe()` / `?` / top-level handler sees it. Event hash: `{kind, message, code, line, stack}`. User errors from `error()` do NOT fire the hook.
+* `_setAsyncSpawnHook(hookFn: fn | null)` → `null` — Phase 2. Invoked synchronously in the spawning goroutine BEFORE the task's goroutine starts. Event hash: `{task_id, fn, argc, spawned_at}`.
+* `_setAsyncDoneHook(hookFn: fn | null)` → `null` — Phase 2. Invoked from the task's OWN goroutine immediately after the body returns. Event hash: `{task_id, duration_ms, ok, error}`. Use `task_id` to pair with the earlier spawn event.
+* `_setUiEventHook(hookFn: fn | null)` → `null` — Phase 3. Fires SYNCHRONOUSLY from interactive widgets in `stdlib/ui.lex` (button / slider / checkbox / dropdown / textField / toggle / radio) when the user causes a state change. Pure-display widgets do NOT fire; hover is not emitted. Event hash: `{kind, widget, label, value, x, y}`.
+* `_setBridgeCallHook(hookFn: fn | null)` → `null` — Phase 3. Fires once per `_bridgeCall` AFTER the round-trip completes. Event hash: `{fn, argc, duration_ms, ok, error}`. A remote function returning a `(null, errorValue)` tuple is NOT a bridge-call failure — the hook fires with `ok=true`.
+* `_uiEventActive()` → `BOOLEAN` — fast gate used by widget instrumentation to skip event-hash construction when no consumer is registered. Single atomic pointer load on the no-hook path.
+* `_uiEvent(kind, widget, label: STRING, value: any, x, y: INTEGER)` → `null` — producer-side primitive called by instrumented widgets to emit a UI event. See `_setUiEventHook` for the documented kind / widget vocabulary. Custom widgets may call this directly.
+
+Re-entry guard: if a hook itself errors, the runtime skips the recursive call — no infinite loop.
+
+### Tensors — FrogPy (Low-level)
+
+FrogPy is kLex's NumPy-equivalent: contiguous N-D numeric arrays backed by Go + cgo C kernels. Prefer the `tensor.lex` stdlib wrapper. dtypes: `"f32"` / `"float32"`, `"f64"` / `"float64"`, `"i64"` / `"int64"`.
+
+**Construction & introspection**
+
+* `_tensor_from_array(data: ARRAY, dtype: STRING)` → `TENSOR` — build a 1-D tensor from a flat number array; element conversion is strict (rejects values that don't fit dtype).
+* `_tensor_zeros(shape: ARRAY, dtype: STRING)` → `TENSOR` — fresh contiguous zero-filled tensor with the given shape.
+* `_tensor_full(shape: ARRAY, value: NUMBER, dtype: STRING)` → `TENSOR` — fresh tensor with every element set to `value`. NumPy parallel: `np.full`. i64 rejects Float values.
+* `_tensor_random(shape: ARRAY, dtype: STRING, seed: INTEGER)` → `TENSOR` — pseudo-random tensor. Floats: uniform [0,1) (NumPy `np.random.rand`). i64: full int63 range. `seed > 0` deterministic; `seed == 0` time-seeded. Go `math/rand`; not cryptographic.
+* `_tensor_dtype(t: TENSOR)` → `STRING` — returns `"f32"`, `"f64"`, or `"i64"`.
+* `_tensor_shape(t: TENSOR)` → `ARRAY` — fresh kLex array of integers describing t's shape.
+* `_tensor_numel(t: TENSOR)` → `INTEGER` — total element count (product of shape).
+* `_tensor_get(t: TENSOR, idx: INTEGER)` → number — linear element access (treats t as a flat 1-D view); bounds-checked.
+
+**Shape operations** (all view-based — share backing storage with input)
+
+* `_tensor_reshape(t: TENSOR, newShape: ARRAY)` → `TENSOR` — NumPy-style reshape view. `product(newShape)` must equal `numel(t)`. Contiguous inputs only in v1.
+* `_tensor_squeeze(t: TENSOR)` → `TENSOR` — remove all size-1 dimensions; all-1s shape collapses to 0-D scalar. NumPy parallel: `np.squeeze`.
+* `_tensor_expand_dims(t: TENSOR, axis: INTEGER)` → `TENSOR` — insert a new size-1 dimension at `axis`. Negative axis OK (counts from end). NumPy parallel: `np.expand_dims`.
+
+**Pure element-wise ops** (allocate a fresh result tensor — NumPy semantics with full broadcasting)
+
+* `_tensor_abs(a)` `_tensor_neg(a)` `_tensor_exp(a)` `_tensor_log(a)` `_tensor_sqrt(a)` `_tensor_sin(a)` `_tensor_cos(a)` → `TENSOR` — unary element-wise; float-only for `exp`/`log`/`sqrt`/`sin`/`cos`.
+* `_tensor_pow(a, b)` → `TENSOR` — element-wise pow with broadcasting.
+* `_tensor_add(a, b)` `_tensor_sub(a, b)` `_tensor_mul(a, b)` `_tensor_div(a, b)` → `TENSOR` — binary element-wise with **NumPy-style broadcasting**: either operand may be a scalar (Integer or Float) or a tensor with a broadcast-compatible shape (e.g. `(m,n) op (n,)` for per-column op; `(m,1) op (1,n)` for outer-style). Dtype must match across tensor operands. `_tensor_div` follows IEEE 754 for f32/f64 (n/0 = ±Inf, 0/0 = NaN); i64 rejects zero divisors pre-kernel with the offending index.
+
+**In-place ops** (mutate the LHS tensor, return it; use when the caller owns the LHS)
+
+* `_tensor_abs_inplace(a)` `_tensor_neg_inplace(a)` `_tensor_exp_inplace(a)` `_tensor_log_inplace(a)` `_tensor_sqrt_inplace(a)` `_tensor_sin_inplace(a)` `_tensor_cos_inplace(a)` → `TENSOR` — in-place unary.
+* `_tensor_pow_inplace(a, exp)` → `TENSOR` — in-place pow.
+* `_tensor_add_inplace(a, b)` `_tensor_sub_inplace(a, b)` `_tensor_mul_inplace(a, b)` `_tensor_div_inplace(a, b)` → `TENSOR` — in-place binary. **Strict shape match — no broadcasting** (so the LHS isn't silently resized).
+
+**Full reductions** (produce a scalar from a tensor)
+
+* `_tensor_sum(t)` → number — accumulator type matches t's dtype.
+* `_tensor_mean(t)` → `FLOAT` — `sum/n`; `i64` widens to `f64` for the divide (matches `np.mean` on integer arrays).
+* `_tensor_max(t)` `_tensor_min(t)` → number — extreme values; return type matches t's dtype.
+* `_tensor_argmax(t)` `_tensor_argmin(t)` → `INTEGER` — index of the extreme element in the flat 1-D view; first occurrence wins on ties.
+
+**Axis-aware reductions** (collapse one axis of a 2-D tensor → 1-D tensor; v1 is 2-D only)
+
+* `_tensor_sum_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — sum along one axis. Output dtype matches input. Empty axis returns zeros (sum's identity). NumPy parallel: `np.sum(t, axis=N)`.
+* `_tensor_mean_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — mean along one axis. Output is always f64 dtype (matches scalar mean's policy). Empty axis errors.
+* `_tensor_min_axis(t: TENSOR, axis: INTEGER)` `_tensor_max_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — extreme values along one axis. Output dtype matches input. Empty axis errors.
+* `_tensor_argmin_axis(t: TENSOR, axis: INTEGER)` `_tensor_argmax_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — index of extreme element along one axis. Output is i64 dtype regardless of input. First-occurrence on ties. Empty axis errors.
+
+axis accepts 0/1 (or -1/-2 negative-indexed). For input shape `[m, n]`: axis 0 → output shape `[n]`; axis 1 → output shape `[m]`.
+
+**Linear algebra**
+
+* `_tensor_matmul(a: TENSOR, b: TENSOR)` → `TENSOR` — 2-D matrix multiply C := A · B. Shapes: a `[m, k]`, b `[k, n]`, result `[m, n]`. Both inputs must be 2-D, same dtype, contiguous. Dispatch: f32 routes through Apple `MPSMatrixMultiplication` on macOS (GPU; ~1 TFLOPS @ 1024³ on M4); f32 on Linux + f64/i64 always use the CPU autovec kernel with goroutine row-strip parallelism above `m >= 128` (f64 ~74 GFLOPS @ 1024³ on M4 4× P-cores).
+* `_tensor_transpose(t: TENSOR)` → `TENSOR` — 2-D matrix transpose. `[m, n] → [n, m]`, `out[i, j] = in[j, i]`. Materialising (fresh contiguous tensor, does NOT share storage). v1 is 2-D only.
+* `_tensor_dot(a: TENSOR, b: TENSOR)` → number — 1-D inner product `sum(a[i] * b[i])`. Both inputs must be 1-D, same dtype, same length, contiguous. Returns a scalar matching the dtype. Fused mul+sum C kernel — no temporary tensor.
+
+### Store Recovery (Low-level)
+
+* `_replaySeenFile(path: STRING)` → `HASH` — read a JSONL file where each line is `{"path": ..., "mtime": ..., ...}`; returns a hash keyed by `path` with the latest `mtime` value (last write wins). Missing file → empty hash. Used by `stdlib/store.lex`'s crash-recovery path to populate `s.seen` without the interpreted-JSON-parser bottleneck.
+
+### VM Compiler Helpers (not user APIs)
+
+* `_iterPrep(coll, twoVar: BOOLEAN)` → `(iterArray, isPairs)` — internal helper emitted by the VM's `compileForIn` lowering. Normalises any iterable into a `(iterArray, isPairs)` tuple the index-based loop can consume. Not intended for direct kLex use.
 
 ### Database (SQL Server and PostgreSQL)
 
@@ -927,6 +1148,176 @@ Always pass values as an `ARRAY` argument — never interpolate into the SQL str
 * `_aesEncrypt(plaintext: STRING, key: STRING)` → `(STRING, STRING|NULL)` — encrypts with AES-256-GCM; returns `(ciphertext_hex, null)` on success or `(null, error)` on failure; key shorter than 32 bytes is PBKDF2-SHA256 derived; every call produces a unique ciphertext (random 12-byte nonce prepended)
 * `_aesDecrypt(ciphertext_hex: STRING, key: STRING)` → `(STRING, STRING|NULL)` — decrypts output from `_aesEncrypt`; returns `(plaintext, null)` on success or `(null, error)` if key is wrong or data has been tampered with (GCM authentication tag enforced)
 
+### Hashing & Password / HMAC
+
+* `_md5(data: STRING | BYTES)` → `STRING` — MD5 lowercase hex (32 chars); legacy interop only — NOT for security
+* `_sha256(data: STRING | BYTES)` → `STRING` — SHA-256 lowercase hex (64 chars)
+* `_sha512(data: STRING | BYTES)` → `STRING` — SHA-512 lowercase hex (128 chars)
+* `_hmacSha256(key: STRING | BYTES, data: STRING | BYTES)` → `STRING` — HMAC-SHA256 lowercase hex
+* `_hmacSha512(key: STRING | BYTES, data: STRING | BYTES)` → `STRING` — HMAC-SHA512 lowercase hex
+* `_bcryptHash(password: STRING [, cost: INTEGER])` → `(STRING, error)` — bcrypt hash (cost default 10)
+* `_bcryptVerify(password: STRING, hash: STRING)` → `BOOLEAN` — constant-time bcrypt verify
+* `_constantTimeEquals(a: STRING, b: STRING)` → `BOOLEAN` — timing-safe string equality (use when comparing secrets / signatures)
+
+### Compression
+
+* `_gzipCompress(data: STRING | BYTES [, level: INTEGER])` → `(BYTES, error)` — RFC 1952 gzip
+* `_gzipDecompress(data: BYTES)` → `(BYTES, error)`
+* `_deflateCompress(data: STRING | BYTES [, level: INTEGER])` → `(BYTES, error)` — raw RFC 1951 deflate (no header)
+* `_deflateDecompress(data: BYTES)` → `(BYTES, error)`
+
+### CSV (Low-level)
+
+* `_csvParse(s: STRING)` → `(ARRAY<ARRAY<STRING>>, error)` — parse RFC 4180 CSV
+* `_csvParseDelim(s: STRING, delim: STRING)` → `(ARRAY<ARRAY<STRING>>, error)` — custom delimiter
+* `_csvParseHeaders(s: STRING)` → `(ARRAY<HASH>, error)` — first row becomes hash keys
+* `_csvHasRows(s: STRING)` → `BOOLEAN` — quick non-empty test
+* `_csvFirstRowCols(s: STRING)` → `(ARRAY<STRING>, error)` — header row only
+* `_csvFormat(rows: ARRAY<ARRAY>)` → `STRING` — serialize back to CSV
+* `_csvFormatDelim(rows, delim: STRING)` → `STRING` — custom delimiter
+* `_csvStream(path: STRING)` → `(CHANNEL, error)` — streaming row-by-row reader for huge files
+
+### HTTP — Streaming
+
+* `_httpStream(method, url, headers, body [, mode])` → `(CHANNEL, error)` — server-sent events / chunked transfer; one channel item per yielded chunk
+
+### MCP Client (Model Context Protocol)
+
+* `_mcpSpawn(cmd: STRING, args: ARRAY [, opts: HASH])` → `(MCP_CLIENT, error)` — start an MCP subprocess
+* `_mcpCall(client, method: STRING, params, timeoutSec)` → `(result, error)` — JSON-RPC request
+* `_mcpNotify(client, method: STRING, params)` → `(null, error)` — fire-and-forget notification
+* `_mcpClose(client)` → `null` — terminate the MCP subprocess
+* `_mcpInfo(client)` → `HASH` — handshake info (protocol version, capabilities, tools, …)
+* `_mcpNotifications(client)` → `CHANNEL` — server-initiated notifications stream
+
+### MCP Server (Expose kLex As an MCP Server)
+
+* `_mcpServeHTTP(spec: HASH)` → `(MCP_SERVER, error)` — start an HTTP+SSE MCP server, returns immediately
+* `_mcpStopServer(server: MCP_SERVER)` → `null` — graceful shutdown, idempotent
+* `_mcpServerInfo(server: MCP_SERVER)` → `HASH` — snapshot of name/version/port/tools/stopped
+
+### Build / Version
+
+* `__version__` → `STRING` — kLex runtime version (e.g. "0.3.35"); accessible as a special identifier without parentheses
+
+### PDF (text extraction)
+
+* `_pdfExtractText(path)` → `(STRING, error)` — concatenated text from every page
+* `_pdfExtractByPage(path)` → `(ARRAY, error)` — array of per-page text strings
+* `_pdfPageCount(path)` → `(INTEGER, error)` — page count without loading text
+
+### TSV (tab-separated values)
+
+* `_tsvParse(s: STRING)` → `ARRAY` of arrays of strings
+* `_tsvFormat(rows: ARRAY)` → `STRING`
+
+### Vector / Similarity Math
+
+* `cosineSim(v1, v2: ARRAY)` → `FLOAT` — cosine similarity in [-1, 1]; zero-magnitude vectors return 0
+* `dotProduct(v1, v2: ARRAY)` → `FLOAT` — sum of element-wise products
+* `vecNorm(vec: ARRAY)` → `FLOAT` — L2 (Euclidean) norm
+
+### Concurrent Hash — additional helper
+
+* `quiesceLen(ch: CONCURRENT_HASH)` → `INTEGER` — exact length AFTER waiting for in-flight mutations to settle; use over `len()` when an exact snapshot is needed under heavy concurrent writes
+
+### Native Bridge — introspection + pool
+
+* `bridgeInfo(bridge)` → `HASH` — protocol version, capabilities, function list
+* `bridgeSchema(bridge [, fn])` → `HASH | null` — JSON Schema for a function (or all functions)
+* `bridgeStderr(bridge)` → `ARRAY<STRING>` — drained recent stderr ring buffer
+* `bridgeStream(bridge, fn, args [, timeout])` → `(CHANNEL, error)` — streaming call; one channel item per yielded message
+* `bridgeNotifications(bridge)` → `CHANNEL` — unsolicited notifications from the subprocess
+* `bridgeMetrics(bridge)` → `HASH` — counters + per-function p50/p95/p99 latency
+* `bridgePool(n: INTEGER, cmd: STRING, args: ARRAY [, opts: HASH])` → `(POOL, error)` — spawn N identical workers
+* `bridgePoolCall(pool, fn, args [, timeout])` → `(any, error)` — call via idle worker
+* `bridgePoolStream(pool, fn, args [, timeout])` → `(CHANNEL, error)` — streaming variant
+* `bridgePoolHealth(pool)` → `HASH` — per-worker health + restart history
+* `bridgePoolStderr(pool)` → `ARRAY<STRING>` — combined stderr across workers
+* `bridgePoolClose(pool)` → `null` — shut down every worker
+
+### Image (low-level pixel access)
+
+* `imageFromRgba(bytes: BYTES, w: INTEGER, h: INTEGER)` → `IMAGE` — wrap raw RGBA8 pixels (w*h*4 bytes) into an Image without PNG decode
+* `imageSize(img: IMAGE)` → `(INTEGER, INTEGER)` — (width, height) tuple
+* `imageToRgba(img: IMAGE)` → `BYTES` — raw RGBA8 pixels; reads pre-upload CPU buffer if available, else GL readback
+* `saveImage(img: IMAGE, path: STRING)` → `null` — encode + write; extension picks format (.png / .jpg / .gif)
+* `image(img, x, y, w, h [, mode])` — draw an Image at a rect; mode = "stretch" (default) | "fit" | "fill"
+* `droppedFiles()` → `ARRAY<STRING>` — drained list of paths dragged onto the window since last call
+
+### Image FX (Go-backed cross-platform pixel filters)
+
+All take `(bytes: BYTES, w: INTEGER, h: INTEGER, ...)` and return `(BYTES, error)`. Alpha preserved. sRGB-encoded byte math (matches Photoshop / Lightroom defaults).
+
+* `_imgExposure(bytes, w, h, stops: FLOAT)` — multiply RGB by 2^stops
+* `_imgBrightness(bytes, w, h, amount: FLOAT)` — additive in [-1, +1]
+* `_imgContrast(bytes, w, h, amount: FLOAT)` — scale around 0.5
+* `_imgSaturation(bytes, w, h, amount: FLOAT)` — pull toward / away from luma
+* `_imgHueShift(bytes, w, h, degrees: FLOAT)` — HSV rotate (wraps mod 360)
+* `_imgGamma(bytes, w, h, gamma: FLOAT)` — `c ^= 1/gamma` per channel
+* `_imgLevels(bytes, w, h, inB, inW, gamma, outB, outW: FLOAT)` — Photoshop levels
+* `_imgChannelMixer(bytes, w, h, matrix9: ARRAY)` — 3×3 RGB matrix
+* `_imgInvert(bytes, w, h)` — photo negative
+* `_imgDesaturate(bytes, w, h)` — every channel → Rec.709 luma
+* `_imgSepia(bytes, w, h, strength: FLOAT)` — mix sepia-toned by strength
+* `_imgVignette(bytes, w, h, strength: FLOAT, radius: FLOAT)` — centre-darkening
+
+### Metal / GPU (macOS only — error tuple elsewhere)
+
+Most users will reach for `stdlib/mtl.lex` which wraps these. Cross-platform scripts should branch on `mtl.isAvailable()` first.
+
+**Device:**
+
+* `_mtlInfo()` → `(HASH, error)` — name, registry_id, has_unified_memory, supports_raytracing, supports_apple7, max_threads_per_group, max_bind_slots
+
+**Surfaces:**
+
+* `_mtlSurface(w, h: INTEGER)` → `(handle, error)` — blank RGBA8 texture
+* `_mtlSurfaceFromBytes(rgba: BYTES, w, h: INTEGER)` → `(handle, error)` — upload pixels (w*h*4 bytes)
+* `_mtlSurfaceReadRgba(handle)` → `(BYTES, error)` — readback
+* `_mtlSurfaceSavePng(handle, path)` → `CHANNEL(null, error)` — async PNG write
+* `_mtlClear(handle, color: ARRAY)` → `CHANNEL(null, error)` — async clear-to-color (4-element RGBA in [0,1])
+* `_mtlSurfaceRelease(handle)` — free
+
+**Kernels:**
+
+* `_mtlKernel(msl: STRING, fnName: STRING)` → `(handle, error)` — compile MSL pipeline
+* `_mtlKernelRelease(handle)` — free
+
+**Buffers:**
+
+* `_mtlBuffer(arr: ARRAY)` → `(handle, error)` — float32 buffer from array
+* `_mtlBufferFromTensor(t: TENSOR)` → `(handle, error)` — zero-marshalling upload from a FrogPy f32 tensor's `[]float32` slice. ~5× faster than `_mtlBuffer` for large arrays (skips the per-element kLex-Float→float32 conversion loop). Tensor must be DType f32 and contiguous.
+* `_mtlBufferU32(arr: ARRAY)` → `(handle, error)` — uint32 buffer
+* `_mtlBufferAllocF32(count: INTEGER)` → `(handle, error)` — N zeroed float32
+* `_mtlBufferAllocU32(count: INTEGER)` → `(handle, error)` — N zeroed uint32
+* `_mtlReadBuffer(handle)` → `(ARRAY<FLOAT>, error)`
+* `_mtlReadBufferU32(handle)` → `(ARRAY<INTEGER>, error)`
+* `_mtlBufferRelease(handle)` — free
+
+**Dispatch:**
+
+* `_mtlDispatch(kernel, bindings: HASH, grid: ARRAY)` → `CHANNEL(null, error)` — async; bindings has `textures`, `buffers`, `accels` arrays of handles
+
+**Batching:**
+
+* `_mtlBatchBegin()` → `(batch, error)`
+* `_mtlBatchDispatch(batch, kernel, bindings, grid)` → `(null, error)` — encode into open batch
+* `_mtlBatchCommit(batch)` → `CHANNEL(null, error)` — async commit + wait
+* `_mtlBatchRelease(batch)` — abandon batch (error path)
+
+**MPS primitives:**
+
+* `_mtlMatmulMPS(a, b, c, m, k, n)` → `CHANNEL(null, error)` — C = A·B
+* `_mtlFFT(buf, n, inverse)` → `CHANNEL(null, error)` — 1D complex-to-complex
+* `_mtlHistogram(buf, count, numBins, minVal, maxVal)` → `CHANNEL(ARRAY<INTEGER>, error)`
+
+**Acceleration structures:**
+
+* `_mtlAccel(vertex_buffer, vertex_count)` → `CHANNEL(handle, error)` — flat triangle list
+* `_mtlAccelIndexed(vertex_buffer, vertex_count, index_buffer, index_count)` → `CHANNEL(handle, error)`
+* `_mtlAccelRelease(handle)`
+
 ---
 
 ## GRAPHICS BUILTINS (macOS / Linux — OpenGL 4.1)
@@ -957,16 +1348,44 @@ Graphics builtins are only available when an OpenGL window is open. All colour v
 * `polygon(points: ARRAY)` — arbitrary polygon; flat array `[x1,y1, x2,y2, ...]`; at least 3 points
 * `point(x, y: FLOAT)` — single pixel at (x, y); colour = current stroke; size = `strokeWeight`
 * `roundedRect(x, y, w, h, r: FLOAT)` — SDF rounded rectangle with corner radius `r`; mathematically perfect AA edges
+* `arc(cx, cy, radius, startAngle, endAngle: FLOAT [, segments: INTEGER])` — arc / partial circle; angles in radians, drawn anticlockwise from `startAngle` to `endAngle`; `segments` defaults to a count chosen for smooth-looking edges
 
-### Gradients
+### Path API (Canvas-style)
+
+For curves and shapes that don't fit the primitive shapes. Build a path with move/line/curve commands then fill or stroke it.
+
+* `beginPath()` — start a fresh empty path
+* `moveTo(x, y: FLOAT)` — move cursor without drawing
+* `lineTo(x, y: FLOAT)` — straight line from cursor to (x, y)
+* `quadTo(cpx, cpy, x, y: FLOAT)` — quadratic Bézier through control point
+* `bezierTo(c1x, c1y, c2x, c2y, x, y: FLOAT)` — cubic Bézier with two control points
+* `closePath()` — line back to path start
+* `fillPath()` — fill current path with current fill colour
+* `strokePath()` — stroke current path with current stroke colour + weight
+
+### Gradients & Blending
 
 * `gradient(x, y, w, h: FLOAT, color1, color2: ARRAY, dir: STRING)` → `null` — GPU linear gradient fill; `color1`/`color2` are `[r,g,b,a]` float arrays; `dir`: `"h"` = horizontal (left→right), `"v"` = vertical (top→bottom); can be called inside or outside `uiBegin()/uiEnd()`
+* `blendMode(mode: STRING)` — set blend mode: `"normal"` | `"add"` | `"multiply"` | `"screen"`
+* `hsl(h, s, l [, a]: FLOAT)` → `ARRAY` — construct an `[r,g,b,a]` colour from HSL (hue 0-360, saturation/lightness 0-1)
+* `noShadow()` — disable any previously-set drop shadow
+
+### Charts (high-level data visualisation)
+
+* `barChart(data: ARRAY, x, y, w, h: FLOAT [, min, max: FLOAT])` — bar chart
+* `lineChart(data: ARRAY, x, y, w, h: FLOAT [, min, max: FLOAT])` — line chart connecting points
+* `pieChart(data: ARRAY, colors: ARRAY, cx, cy, radius: FLOAT [, innerRadius: FLOAT])` — pie or donut
+* `sparkline(data: ARRAY, x, y, w, h: FLOAT)` — minimal one-line trend, no axes
 
 ### Images
 
 * `loadImage(path: STRING)` → `IMAGE` — load PNG or JPEG; safe to call before `window()`
+* `loadImage(bytes: BYTES)` → `IMAGE` — same but from in-memory encoded bytes
 * `drawImage(img: IMAGE, x, y: FLOAT)` — draw at natural size
 * `drawImage(img: IMAGE, x, y, w, h: FLOAT)` — draw scaled to w×h
+* `image(img: IMAGE, x, y, w, h: INTEGER [, mode: STRING])` — draw at integer rect; mode = `"stretch"` (default) | `"fit"` | `"fill"`
+* `saveImage(img: IMAGE, path: STRING)` → `null` — encode + write; extension picks format
+* `droppedFiles()` → `ARRAY<STRING>` — drained list of paths dragged onto the window since last call
 
 ### Text
 
@@ -1070,6 +1489,7 @@ if keyPressed("TAB") {
 ### Selection Widgets
 
 * `list(label: STRING, items: ARRAY, x, y, w, h: INTEGER [, size: FLOAT])` → `STRING` — scrollable list; mouse wheel to scroll; click to select; returns selected item
+* `listMulti(label: STRING, items: ARRAY, selected: ARRAY, x, y, w, h: INTEGER [, size: FLOAT])` → `ARRAY` — multi-select variant; `selected` is the array of currently-selected items; returns the updated selection
 * `dropdown(label: STRING, items: ARRAY, x, y, w: INTEGER [, size: FLOAT])` → `STRING` — header bar + pop-down menu; call after other widgets so open menu renders on top
 * `tabs(x, y, w: INTEGER, items: ARRAY, activeIdx: INTEGER [, size: FLOAT])` → `INTEGER` — horizontal tab bar; returns new active index; active tab shown with accent underline
 
@@ -1088,6 +1508,11 @@ if keyPressed("TAB") {
 ### Context Menu
 
 * `contextMenu(x, y: INTEGER, items: ARRAY, visible: BOOL [, size: FLOAT])` → `INTEGER` — floating popup menu; call after all other widgets; returns index of clicked item, -1 if none, -2 if clicked outside (dismiss)
+
+### Notifications
+
+* `toast(message: STRING [, style: STRING] [, duration: FLOAT])` — non-modal notification toast; style: `"info"` (default) | `"success"` | `"warning"` | `"error"`; duration in seconds (default ~3); auto-dismisses
+* `tooltip(text: STRING)` — show hover text for the widget drawn immediately before this call. Appears after the cursor rests on the widget for ~0.5s.
 
 ### Advanced Widgets
 

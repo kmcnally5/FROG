@@ -18,25 +18,25 @@ println(str(sortBy(["banana", "fig", "apple", "kiwi"], fn(a, b) { return len(a) 
 // 6. sortBy structs by field
 struct Person { name, age }
 
-people = [
+let people = [
     Person { name: "Charlie", age: 30 },
     Person { name: "Alice",   age: 25 },
     Person { name: "Bob",     age: 35 }
 ]
 
-byAge = sortBy(people, fn(a, b) { return a.age < b.age })
+let byAge = sortBy(people, fn(a, b) { return a.age < b.age })
 for p in byAge {
     println(p.name + " " + str(p.age))
 }
 
 // 7. sortBy structs descending by field
-byAgeDesc = sortBy(people, fn(a, b) { return a.age > b.age })
+let byAgeDesc = sortBy(people, fn(a, b) { return a.age > b.age })
 for p in byAgeDesc {
     println(p.name + " " + str(p.age))
 }
 
 // 8. original array is unchanged (functions transform, not mutate)
-nums = [3, 1, 2]
-sorted = sortBy(nums, fn(a, b) { return a < b })
+let nums = [3, 1, 2]
+let sorted = sortBy(nums, fn(a, b) { return a < b })
 println(str(nums))    // [3, 1, 2] — unchanged
 println(str(sorted))  // [1, 2, 3]

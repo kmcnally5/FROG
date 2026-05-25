@@ -1,4 +1,9 @@
 // stdlib/async.lex — async utilities
+// @module    async
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   async utilities
 //
 // Provides higher-level helpers built on top of the async/await/sleep builtins.
 //
@@ -17,14 +22,15 @@
 //   println(results[0])   // "slow"
 //   println(results[1])   // "fast"
 fn await_all(tasks) {
-    n = len(tasks)
-    results = makeArray(n)
+    let n = len(tasks)
+    let results = makeArray(n)
     for i, t in tasks {
         results[i] = await(t)
     }
     return results
 }
 
+// parallel(tasks) — alias for await_all(tasks). Await an array of async tasks and return their results in order.
 fn parallel(tasks) {
     return await_all(tasks)
 }

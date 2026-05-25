@@ -1,3 +1,9 @@
+// @module    jpeg
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   JPEG DCT-based image encoder
+
 const PI = pi()
 
 // DCT basis function for an 8x8 block
@@ -30,7 +36,7 @@ fn apply_dct(block8x8) {
 
 // Standard JPEG Luminance Quantization Table
 // Higher numbers = more compression = more data thrown away
-Q_TABLE = [
+let Q_TABLE = [
     16, 11, 10, 16, 24, 40, 51, 61,
     12, 12, 14, 19, 26, 58, 60, 55,
     14, 13, 16, 24, 40, 57, 69, 56,

@@ -1,0 +1,11 @@
+# Fake credentials for SecretHunter regression — JWT detection.
+# All tokens below are hand-crafted with bogus signatures and are NOT live.
+
+# alg:none JWT — should be flagged critical (forgeable)
+JWT_NONE = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsImlzcyI6ImFwaS5leGFtcGxlLmNvbSJ9.PLACEHOLDERSIG-1234567890"
+
+# HS256 expired token — weak alg + EXPIRED status
+JWT_EXPIRED = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYWNrdXAtdXNlciIsImlzcyI6ImNpLmV4YW1wbGUuY29tIiwic2NvcGUiOiJyZWFkIHdyaXRlIGFkbWluIiwiZXhwIjoxNTc3ODM2ODAwfQ.PLACEHOLDERSIG-1234567890"
+
+# RS256 with no exp claim — NO EXPIRY warning
+JWT_LONG_LIVED = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdmMtYWNjb3VudCIsImlzcyI6Imluc2lkZS5leGFtcGxlLmNvbSIsImF1ZCI6ImFwaS1nYXRld2F5In0.PLACEHOLDERSIG-1234567890

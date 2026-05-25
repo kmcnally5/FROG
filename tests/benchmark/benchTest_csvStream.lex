@@ -17,20 +17,20 @@ println("=== STREAMING CSV WITH REAL PROCESSING WORK ===")
 println("")
 
 // Generate CSV with numeric data for calculations
-generateCSV = fn(size) {
-    rows = makeArray(size + 1, null)
+let generateCSV = fn(size) {
+    let rows = makeArray(size + 1, null)
     rows[0] = "ID,FirstName,LastName,Email,Department,Salary,Address,City"
-    i = 1
+    let i = 1
     while i <= size {
-        id = str(i)
-        fname = "Employee" + str(i)
-        lname = "User" + str(i)
-        email = "emp" + id + "@company.com"
-        dept = ["Sales", "Engineering", "Marketing", "HR", "Finance"][i % 5]
-        salary = str(50000 + (i * 10))
-        addr = "\"" + str(100 + i) + " Street, Suite " + str(i % 100) + "\""
-        city = ["NYC", "SF", "CHI", "SEA", "BOS"][i % 5]
-        row = id + "," + fname + "," + lname + "," + email + "," + dept + "," + salary + "," + addr + "," + city
+        let id = str(i)
+        let fname = "Employee" + str(i)
+        let lname = "User" + str(i)
+        let email = "emp" + id + "@company.com"
+        let dept = ["Sales", "Engineering", "Marketing", "HR", "Finance"][i % 5]
+        let salary = str(50000 + (i * 10))
+        let addr = "\"" + str(100 + i) + " Street, Suite " + str(i % 100) + "\""
+        let city = ["NYC", "SF", "CHI", "SEA", "BOS"][i % 5]
+        let row = id + "," + fname + "," + lname + "," + email + "," + dept + "," + salary + "," + addr + "," + city
         rows[i] = row
         i = i + 1
     }
@@ -38,32 +38,32 @@ generateCSV = fn(size) {
 }
 
 println("Setup: Generating 500K row CSV...")
-tSetup = dt.nowNanos()
-csvData = generateCSV(500000)
-tSetupDone = dt.nowNanos()
-setupTime = (tSetupDone - tSetup) / 1000000
+let tSetup = dt.nowNanos()
+let csvData = generateCSV(500000)
+let tSetupDone = dt.nowNanos()
+let setupTime = (tSetupDone - tSetup) / 1000000
 println("Done in " + str(setupTime) + " ms")
 println("")
 
 // ============================================================================
 // Worker that processes rows (extracts fields, does CPU work)
 // ============================================================================
-processWorker = fn(workerCh) {
-    checksum = 0
-    count = 0
+let processWorker = fn(workerCh) {
+    let checksum = 0
+    let count = 0
 
     while count < 1000000 {
-        row, ok = recv(workerCh)
+        let row, ok = recv(workerCh)
         if !ok { break }
         if type(row) == "ERROR" { break }
 
         // Do real work: process each field in the row
         // (In a real app, this might be validation, transformation, aggregation, etc.)
-        i = 0
+        let i = 0
         while i < len(row) {
-            field = row[i]
+            let field = row[i]
             // Process field: count characters as a simple CPU-bound operation
-            j = 0
+            let j = 0
             while j < len(field) {
                 checksum = checksum + len(field)
                 j = j + 1
@@ -83,11 +83,11 @@ processWorker = fn(workerCh) {
 println("STRATEGY 1: Single worker processes streaming rows")
 println("")
 
-tStart1 = dt.nowNanos()
-ch1 = csv.stream(csvData, ",")
-result1 = processWorker(ch1)
-tEnd1 = dt.nowNanos()
-time1 = (tEnd1 - tStart1) / 1000000
+let tStart1 = dt.nowNanos()
+let ch1 = csv.stream(csvData, ",")
+let result1 = processWorker(ch1)
+let tEnd1 = dt.nowNanos()
+let time1 = (tEnd1 - tStart1) / 1000000
 
 println("  Time: " + str(time1) + " ms")
 println("  Checksum: " + str(result1))
@@ -99,22 +99,22 @@ println("")
 println("STRATEGY 2: 4 workers process streaming rows in parallel")
 println("")
 
-tStart2 = dt.nowNanos()
-ch2 = csv.stream(csvData, ",")
+let tStart2 = dt.nowNanos()
+let ch2 = csv.stream(csvData, ",")
 
-t1 = async(fn() { return processWorker(ch2) })
-t2 = async(fn() { return processWorker(ch2) })
-t3 = async(fn() { return processWorker(ch2) })
-t4 = async(fn() { return processWorker(ch2) })
+let t1 = async(fn() { return processWorker(ch2) })
+let t2 = async(fn() { return processWorker(ch2) })
+let t3 = async(fn() { return processWorker(ch2) })
+let t4 = async(fn() { return processWorker(ch2) })
 
-r1 = await(t1)
-r2 = await(t2)
-r3 = await(t3)
-r4 = await(t4)
+let r1 = await(t1)
+let r2 = await(t2)
+let r3 = await(t3)
+let r4 = await(t4)
 
-totalResult2 = r1 + r2 + r3 + r4
-tEnd2 = dt.nowNanos()
-time2 = (tEnd2 - tStart2) / 1000000
+let totalResult2 = r1 + r2 + r3 + r4
+let tEnd2 = dt.nowNanos()
+let time2 = (tEnd2 - tStart2) / 1000000
 
 println("  Time: " + str(time2) + " ms")
 println("  Checksum: " + str(totalResult2))
@@ -126,34 +126,34 @@ println("")
 println("STRATEGY 3: 10 workers process streaming rows in parallel")
 println("")
 
-tStart3 = dt.nowNanos()
-ch3 = csv.stream(csvData, ",")
+let tStart3 = dt.nowNanos()
+let ch3 = csv.stream(csvData, ",")
 
 t1 = async(fn() { return processWorker(ch3) })
 t2 = async(fn() { return processWorker(ch3) })
 t3 = async(fn() { return processWorker(ch3) })
 t4 = async(fn() { return processWorker(ch3) })
-t5 = async(fn() { return processWorker(ch3) })
-t6 = async(fn() { return processWorker(ch3) })
-t7 = async(fn() { return processWorker(ch3) })
-t8 = async(fn() { return processWorker(ch3) })
-t9 = async(fn() { return processWorker(ch3) })
-t10 = async(fn() { return processWorker(ch3) })
+let t5 = async(fn() { return processWorker(ch3) })
+let t6 = async(fn() { return processWorker(ch3) })
+let t7 = async(fn() { return processWorker(ch3) })
+let t8 = async(fn() { return processWorker(ch3) })
+let t9 = async(fn() { return processWorker(ch3) })
+let t10 = async(fn() { return processWorker(ch3) })
 
 r1 = await(t1)
 r2 = await(t2)
 r3 = await(t3)
 r4 = await(t4)
-r5 = await(t5)
-r6 = await(t6)
-r7 = await(t7)
-r8 = await(t8)
-r9 = await(t9)
-r10 = await(t10)
+let r5 = await(t5)
+let r6 = await(t6)
+let r7 = await(t7)
+let r8 = await(t8)
+let r9 = await(t9)
+let r10 = await(t10)
 
-totalResult3 = r1 + r2 + r3 + r4 + r5 + r6 + r7 + r8 + r9 + r10
-tEnd3 = dt.nowNanos()
-time3 = (tEnd3 - tStart3) / 1000000
+let totalResult3 = r1 + r2 + r3 + r4 + r5 + r6 + r7 + r8 + r9 + r10
+let tEnd3 = dt.nowNanos()
+let time3 = (tEnd3 - tStart3) / 1000000
 
 println("  Time: " + str(time3) + " ms")
 println("  Checksum: " + str(totalResult3))
@@ -169,8 +169,8 @@ println("4 workers:    " + str(time2) + " ms  (" + str(time1 / time2) + "x speed
 println("10 workers:   " + str(time3) + " ms  (" + str(time1 / time3) + "x speedup)")
 println("")
 
-speedup4 = time1 / time2
-speedup10 = time1 / time3
+let speedup4 = time1 / time2
+let speedup10 = time1 / time3
 
 if speedup4 > 3.5 {
     println("✓ EXCELLENT: Near-linear scaling with streaming")

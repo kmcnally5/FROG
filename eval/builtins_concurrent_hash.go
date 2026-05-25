@@ -167,38 +167,51 @@ func init() {
 			// Retry - another goroutine modified the entry
 		}
 	}}
+
+	// quiesceLen(ch) -> integer
+	//
+	// Exact entry count for a ConcurrentHash. Unlike len(ch), which reads the
+	// atomic Cnt counter and can briefly diverge from reality by the number of
+	// in-flight Store/Delete operations, quiesceLen walks the entire sync.Map
+	// via Range and counts live entries. O(n) in the size of the map.
+	//
+	// Use after a known quiescent point (all writer tasks awaited) when you
+	// need a guaranteed-accurate size — e.g. for invariants, assertions, or
+	// "did the pipeline emit exactly N items" checks. Prefer len(ch) for
+	// progress indicators and other use-cases where ~1 off is fine.
+	//
+	// Concurrent writes during the Range are not blocked; an entry inserted
+	// or deleted mid-walk may or may not be counted (sync.Map.Range semantics).
+	// For a fully consistent snapshot, ensure no writers are active.
+	Builtins["quiesceLen"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("quiesceLen expects 1 argument (ConcurrentHash)", ast.Pos{})
+		}
+		ch, ok := args[0].(*ConcurrentHash)
+		if !ok {
+			return typeError(fmt.Sprintf("quiesceLen: argument must be ConcurrentHash, got %s", args[0].Type()), ast.Pos{})
+		}
+		n := 0
+		ch.M.Range(func(_, _ any) bool {
+			n++
+			return true
+		})
+		return intObj(n)
+	}}
 }
 
-// valuesEqual compares two kLex values by structural equality for primitive
-// types. Used by atomicHashCAS to determine if the current value matches the
-// expected "old" value the caller is trying to swap from.
-//
-// KEEP IN SYNC WITH evalEquals (eval.go). Both functions must agree on what
-// "equal" means for the primitive types — if one ever gains a numeric
-// coercion rule (e.g. Int == Float with same value) or any other comparison
-// extension, the other needs the matching change or CAS semantics will
-// silently diverge from the == operator users see in their kLex code.
+// valuesEqual compares two kLex values for atomicHashCAS. Delegates to
+// primitiveEqual (eval.go) so CAS semantics stay locked to the `==`
+// operator — a future change to primitive equality (e.g. a new primitive
+// type, a numeric coercion rule) lands in one place and both sites pick
+// it up. Reference types fall back to pointer identity, matching
+// evalEquals's own reference-type rule.
 func valuesEqual(a, b Object) bool {
 	if a == b {
 		return true // same pointer or both nil
 	}
-	if a == nil || b == nil {
-		return false
-	}
-	if a.Type() != b.Type() {
-		return false
-	}
-	switch av := a.(type) {
-	case *Integer:
-		return av.Value == b.(*Integer).Value
-	case *Float:
-		return av.Value == b.(*Float).Value
-	case *String:
-		return av.Value == b.(*String).Value
-	case *Boolean:
-		return av.Value == b.(*Boolean).Value
-	case *Null:
-		return true // *Null is a singleton
+	if handled, equal := primitiveEqual(a, b); handled {
+		return equal
 	}
 	return false
 }

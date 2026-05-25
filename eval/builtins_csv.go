@@ -33,7 +33,7 @@ func csvReadAll(data string, delim rune, fieldsPerRecord int) ([][]string, Objec
 // Each element must be an *Array of *String values
 func objectToRows(arr *Array) ([][]string, Object) {
 	if arr == nil {
-		return nil, typeError("expected array, got nil", ast.Pos{})
+		return nil, typeError("csv: expected an array of rows, got nil — pass an array of arrays of strings, e.g. [[\"a\",\"b\"],[\"c\",\"d\"]]", ast.Pos{})
 	}
 
 	rows := make([][]string, len(arr.Elements))

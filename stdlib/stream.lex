@@ -1,4 +1,9 @@
 // stdlib/stream.lex — channel-based lazy streams with error propagation
+// @module    stream
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   channel-based lazy streams with error propagation
 //
 // Every Stream carries two channels:
 //   ch    — data values
@@ -28,8 +33,8 @@ struct Stream {
 // fromArray — produce a stream from an array
 // -------------------------------------
 fn fromArray(arr) {
-    ch    = channel(64)
-    errCh = channel(1)
+    let ch    = channel(64)
+    let errCh = channel(1)
     async(fn() {
         for x in arr {
             if send(ch, x) == false { break }
@@ -45,10 +50,10 @@ fn fromArray(arr) {
 // rangeStream — produce a stream of integers [start, stop)
 // -------------------------------------
 fn rangeStream(start, stop) {
-    ch    = channel(64)
-    errCh = channel(1)
+    let ch    = channel(64)
+    let errCh = channel(1)
     async(fn() {
-        i = start
+        let i = start
         while i < stop {
             if send(ch, i) == false { break }
             i = i + 1
@@ -64,8 +69,8 @@ fn rangeStream(start, stop) {
 // repeat — infinite stream of a single value
 // -------------------------------------
 fn repeat(val) {
-    ch    = channel(64)
-    errCh = channel(1)
+    let ch    = channel(64)
+    let errCh = channel(1)
     async(fn() {
         while true {
             if send(ch, val) == false { break }
@@ -84,15 +89,15 @@ fn repeat(val) {
 // through the goroutine. Breaking out of the for-in auto-cancels src.
 // -------------------------------------
 fn map(stream, fnRef) {
-    src    = stream.ch
-    srcErr = stream.errCh
-    out    = channel(64)
-    errCh  = channel(1)
+    let src    = stream.ch
+    let srcErr = stream.errCh
+    let out    = channel(64)
+    let errCh  = channel(1)
     async(fn() {
         let myErr        = null
         let outCancelled = false
         for x in src {
-            result, callErr = safe(fnRef, x)
+            let result, callErr = safe(fnRef, x)
             if callErr != null {
                 myErr = callErr
                 break
@@ -109,7 +114,7 @@ fn map(stream, fnRef) {
         if myErr != null || outCancelled {
             send(errCh, myErr)
         } else {
-            upstreamErr, _ = recv(srcErr)
+            let upstreamErr, _ = recv(srcErr)
             send(errCh, upstreamErr)
         }
         close(out)
@@ -122,15 +127,15 @@ fn map(stream, fnRef) {
 // filter — keep elements where fnRef returns true (lazy)
 // -------------------------------------
 fn filter(stream, fnRef) {
-    src    = stream.ch
-    srcErr = stream.errCh
-    out    = channel(64)
-    errCh  = channel(1)
+    let src    = stream.ch
+    let srcErr = stream.errCh
+    let out    = channel(64)
+    let errCh  = channel(1)
     async(fn() {
         let myErr        = null
         let outCancelled = false
         for x in src {
-            keep, callErr = safe(fnRef, x)
+            let keep, callErr = safe(fnRef, x)
             if callErr != null {
                 myErr = callErr
                 break
@@ -149,7 +154,7 @@ fn filter(stream, fnRef) {
         if myErr != null || outCancelled {
             send(errCh, myErr)
         } else {
-            upstreamErr, _ = recv(srcErr)
+            let upstreamErr, _ = recv(srcErr)
             send(errCh, upstreamErr)
         }
         close(out)
@@ -162,14 +167,14 @@ fn filter(stream, fnRef) {
 // take — limit stream to first n elements (lazy, terminating)
 // -------------------------------------
 fn take(stream, n) {
-    src    = stream.ch
-    srcErr = stream.errCh
-    out    = channel(64)
-    errCh  = channel(1)
+    let src    = stream.ch
+    let srcErr = stream.errCh
+    let out    = channel(64)
+    let errCh  = channel(1)
     async(fn() {
         let limitHit     = false
         let outCancelled = false
-        count = 0
+        let count = 0
         for x in src {
             if count >= n {
                 limitHit = true
@@ -184,7 +189,7 @@ fn take(stream, n) {
         if limitHit || outCancelled {
             send(errCh, null)
         } else {
-            upstreamErr, _ = recv(srcErr)
+            let upstreamErr, _ = recv(srcErr)
             send(errCh, upstreamErr)
         }
         close(out)
@@ -197,15 +202,15 @@ fn take(stream, n) {
 // tap — run a side-effect on each element without changing it (lazy)
 // -------------------------------------
 fn tap(stream, fnRef) {
-    src    = stream.ch
-    srcErr = stream.errCh
-    out    = channel(64)
-    errCh  = channel(1)
+    let src    = stream.ch
+    let srcErr = stream.errCh
+    let out    = channel(64)
+    let errCh  = channel(1)
     async(fn() {
         let myErr        = null
         let outCancelled = false
         for x in src {
-            tapResult, callErr = safe(fnRef, x)
+            let tapResult, callErr = safe(fnRef, x)
             if callErr != null {
                 myErr = callErr
                 break
@@ -222,7 +227,7 @@ fn tap(stream, fnRef) {
         if myErr != null || outCancelled {
             send(errCh, myErr)
         } else {
-            upstreamErr, _ = recv(srcErr)
+            let upstreamErr, _ = recv(srcErr)
             send(errCh, upstreamErr)
         }
         close(out)
@@ -236,15 +241,15 @@ fn tap(stream, fnRef) {
 // drained into a single output stream in order (sequential, not concurrent).
 // -------------------------------------
 fn flatMap(stream, fnRef) {
-    src    = stream.ch
-    srcErr = stream.errCh
-    out    = channel(64)
-    errCh  = channel(1)
+    let src    = stream.ch
+    let srcErr = stream.errCh
+    let out    = channel(64)
+    let errCh  = channel(1)
     async(fn() {
         let myErr        = null
         let outCancelled = false
         for x in src {
-            inner, callErr = safe(fnRef, x)
+            let inner, callErr = safe(fnRef, x)
             if callErr != null {
                 myErr = callErr
                 break
@@ -262,7 +267,7 @@ fn flatMap(stream, fnRef) {
             if outCancelled {
                 break
             }
-            innerErr, _ = recv(inner.errCh)
+            let innerErr, _ = recv(inner.errCh)
             if innerErr != null {
                 myErr = innerErr
                 break
@@ -271,7 +276,7 @@ fn flatMap(stream, fnRef) {
         if myErr != null || outCancelled {
             send(errCh, myErr)
         } else {
-            upstreamErr, _ = recv(srcErr)
+            let upstreamErr, _ = recv(srcErr)
             send(errCh, upstreamErr)
         }
         close(out)
@@ -286,9 +291,9 @@ fn flatMap(stream, fnRef) {
 // Output stream closes only after every source is exhausted.
 // -------------------------------------
 fn merge(streams...) {
-    out     = channel(64)
-    errCh   = channel(1)
-    results = channel(len(streams))
+    let out     = channel(64)
+    let errCh   = channel(1)
+    let results = channel(len(streams))
 
     for st in streams {
         let src    = st.ch
@@ -304,7 +309,7 @@ fn merge(streams...) {
             if outCancelled {
                 send(results, null)
             } else {
-                srcErrVal, _ = recv(srcErr)
+                let srcErrVal, _ = recv(srcErr)
                 send(results, srcErrVal)
             }
         })
@@ -314,7 +319,7 @@ fn merge(streams...) {
         let firstErr = null
         let i = 0
         while i < len(streams) {
-            err, _ = recv(results)
+            let err, _ = recv(results)
             if firstErr == null && err != null {
                 firstErr = err
             }
@@ -334,8 +339,8 @@ fn merge(streams...) {
 // Stops as soon as any stream is exhausted. Cancels remaining streams on exit.
 // -------------------------------------
 fn zip(streams...) {
-    out   = channel(64)
-    errCh = channel(1)
+    let out   = channel(64)
+    let errCh = channel(1)
     async(fn() {
         let myErr        = null
         let outCancelled = false
@@ -344,9 +349,9 @@ fn zip(streams...) {
             let done = false
             let idx = 0
             for st in streams {
-                val, ok = recv(st.ch)
+                let val, ok = recv(st.ch)
                 if ok == false {
-                    stErr, _ = recv(st.errCh)
+                    let stErr, _ = recv(st.errCh)
                     if stErr != null { myErr = stErr }
                     done = true
                     break
@@ -408,7 +413,7 @@ fn collect(stream) {
         i = i + 1
     }
 
-    errVal, _ = recv(stream.errCh)
+    let errVal, _ = recv(stream.errCh)
     if errVal != null { return null, errVal }
     return out, null
 }
@@ -419,11 +424,11 @@ fn collect(stream) {
 // Returns (value, null) on success, (null, error) on failure.
 // -------------------------------------
 fn reduce(stream, fnRef, init) {
-    acc = init
+    let acc = init
     for x in stream.ch {
         acc = fnRef(acc, x)
     }
-    errVal, _ = recv(stream.errCh)
+    let errVal, _ = recv(stream.errCh)
     if errVal != null { return null, errVal }
     return acc, null
 }
@@ -447,8 +452,13 @@ fn pipe(stream, ops...) {
 // Uppercase = returns a fn(stream) suitable for pipe
 // Lowercase = direct two-argument form (unchanged)
 // -------------------------------------
+// Map(f) — return a fn(stream) that applies map(stream, f). For use with pipe().
 fn Map(f)     { return fn(st) { return map(st, f) } }
+// Filter(f) — return a fn(stream) that applies filter(stream, f). For use with pipe().
 fn Filter(f)  { return fn(st) { return filter(st, f) } }
+// Take(n) — return a fn(stream) that applies take(stream, n). For use with pipe().
 fn Take(n)    { return fn(st) { return take(st, n) } }
+// Tap(f) — return a fn(stream) that applies tap(stream, f) for side effects. For use with pipe().
 fn Tap(f)     { return fn(st) { return tap(st, f) } }
+// FlatMap(f) — return a fn(stream) that applies flatMap(stream, f). For use with pipe().
 fn FlatMap(f) { return fn(st) { return flatMap(st, f) } }

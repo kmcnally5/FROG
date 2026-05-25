@@ -1,4 +1,9 @@
 // server.lex — HTTP server stdlib for kLex
+// @module    server
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   HTTP server stdlib for kLex
 //
 // Wraps the _httpServe primitive with a route-based API.
 // Routes are matched in registration order; the first match wins.
@@ -117,9 +122,9 @@ struct Server {
 
     fn start(port) {
         _httpServe(port, fn(req) {
-            i = 0
+            let i = 0
             while i < len(self.routes) {
-                route = self.routes[i]
+                let route = self.routes[i]
                 if route["method"] == req["method"] && route["path"] == req["path"] {
                     if route["async"] {
                         async(route["handler"], req)
@@ -135,26 +140,33 @@ struct Server {
     }
 }
 
+// new() — create and return a new Server instance with no routes registered.
 fn new() {
     return Server { routes: [] }
 }
 
+// ok(body) — return a 200 OK response with a plain-text body.
 fn ok(body) {
     return {"status": 200, "body": body, "headers": {}}
 }
 
+// json(body) — return a 200 OK response with Content-Type: application/json. body is serialised automatically.
 fn json(body) {
     return {"status": 200, "body": body, "headers": {"Content-Type": "application/json"}}
 }
 
+// status(code, body) — return a response with a custom HTTP status code and plain-text body.
 fn status(code, body) {
     return {"status": code, "body": body, "headers": {}}
 }
 
+// respond(code, body, headers) — return a fully customised response: status code, body, and headers hash.
 fn respond(code, body, headers) {
     return {"status": code, "body": body, "headers": headers}
 }
 
+// accepted() — return a 202 Accepted response. Used by async route handlers to signal
+// the request was received and is being processed in the background.
 fn accepted() {
     return {"status": 202, "body": "Accepted", "headers": {}}
 }

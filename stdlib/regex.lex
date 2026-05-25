@@ -1,4 +1,9 @@
 // regex.lex
+// @module    regex
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   Regular expression operations for kLex.
 // Regular expression operations for kLex.
 //
 // All functions accept a Go-syntax regular expression pattern string.

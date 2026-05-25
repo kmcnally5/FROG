@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -29,25 +30,37 @@ type serveResponse struct {
 	headers map[string]string
 }
 
-// httpClient is shared across all _httpDo calls so connections are reused.
+// httpClient is shared across all _httpDo calls that don't specify a
+// per-call timeout. Default 30s — fine for normal REST APIs.
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
+// unboundedHTTPClient is used when a per-call timeout is specified —
+// the timeout is enforced via request context instead of the client.
+// LLM calls (Ollama cold-start, streaming-style requests collected
+// non-streaming, large batch embeddings) regularly exceed the default.
+var unboundedHTTPClient = &http.Client{}
+
 func init() {
-	// _httpDo(method, url, headers, body) → (status, body, headers, err)
+	// _httpDo(method, url, headers, body [, timeoutSec]) → (status, body, headers, err)
 	//
 	// The single Go-level primitive that backs all kLex HTTP functions.
-	// method  — string: "GET", "POST", "PUT", "PATCH", "DELETE", etc.
-	// url     — string
-	// headers — HASH of string → string, or null for no custom headers
-	// body    — string payload, or null for no body
+	// method     — string: "GET", "POST", "PUT", "PATCH", "DELETE", etc.
+	// url        — string
+	// headers    — HASH of string → string, or null for no custom headers
+	// body       — string payload, or null for no body
+	// timeoutSec — optional number of seconds. Omitted/null/0 = use the
+	//              shared 30s client (good for normal REST). Pass an int
+	//              or float to override per-call — required for LLM calls
+	//              with cold-start (Ollama, llama.cpp), large batch
+	//              embeddings, or any endpoint that may take >30s.
 	//
 	// Always returns a 4-element Tuple so the kLex caller can destructure:
 	//   status, body, headers, err = _httpDo(...)
 	// On failure: status=0, body="", headers={}, err=<message string>
 	// On success: err=null
 	Builtins["_httpDo"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) != 4 {
-			return httpErrTuple("_httpDo expects 4 arguments")
+		if len(args) < 4 || len(args) > 5 {
+			return httpErrTuple("_httpDo expects 4 or 5 arguments: method, url, headers, body [, timeoutSec]")
 		}
 
 		method, ok := args[0].(*String)
@@ -98,7 +111,32 @@ func init() {
 			return httpErrTuple(fmt.Sprintf("_httpDo: headers must be hash or null, got %s", args[2].Type()))
 		}
 
-		resp, err := httpClient.Do(req)
+		// Optional 5th arg: per-call timeout in seconds. When supplied as a
+		// positive number, switch to the unbounded client and enforce the
+		// timeout via request context — this avoids the 30s default in the
+		// shared client which is too short for LLM cold-start.
+		client := httpClient
+		if len(args) == 5 {
+			var sec float64
+			switch v := args[4].(type) {
+			case *Integer:
+				sec = float64(v.Value)
+			case *Float:
+				sec = v.Value
+			case *Null:
+				// treat as "no override" — keep default client
+			default:
+				return httpErrTuple(fmt.Sprintf("_httpDo: timeoutSec must be number or null, got %s", args[4].Type()))
+			}
+			if sec > 0 {
+				ctx, cancel := context.WithTimeout(req.Context(), time.Duration(sec*float64(time.Second)))
+				defer cancel()
+				req = req.WithContext(ctx)
+				client = unboundedHTTPClient
+			}
+		}
+
+		resp, err := client.Do(req)
 		if err != nil {
 			return httpErrTuple(err.Error())
 		}

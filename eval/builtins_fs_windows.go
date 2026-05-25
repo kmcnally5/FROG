@@ -214,6 +214,57 @@ func init() {
 		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
+	// _fsReadBytes(path) → (bytes, err)
+	//
+	// Counterpart to _fsRead but returns the raw file bytes — required
+	// for binary data (float32 vectors, image bytes, encrypted blobs)
+	// where the string-based _fsRead would corrupt or fail to round-trip.
+	Builtins["_fsReadBytes"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("_fsReadBytes expects 1 argument", ast.Pos{})
+		}
+		path, ok := args[0].(*String)
+		if !ok {
+			return typeError("_fsReadBytes: argument must be string", ast.Pos{})
+		}
+		data, err := os.ReadFile(path.Value)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		return &Tuple{Elements: []Object{&Bytes{Value: data}, NULL}}
+	}}
+
+	// _fsAppendBytesSync(path, bytes) → (null, err)
+	//
+	// Append `bytes` to the file and call Sync before close. Durable
+	// append-only write — bytes are on disk when this returns.
+	Builtins["_fsAppendBytesSync"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("_fsAppendBytesSync expects 2 arguments", ast.Pos{})
+		}
+		path, pathOk := args[0].(*String)
+		bs, bsOk := args[1].(*Bytes)
+		if !pathOk || !bsOk {
+			return typeError("_fsAppendBytesSync expects (path: string, bytes: bytes)", ast.Pos{})
+		}
+		f, err := os.OpenFile(path.Value, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		if _, err = f.Write(bs.Value); err != nil {
+			f.Close()
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		if err = f.Sync(); err != nil {
+			f.Close()
+			return &Tuple{Elements: []Object{NULL, &String{Value: "fsync: " + err.Error()}}}
+		}
+		if err = f.Close(); err != nil {
+			return &Tuple{Elements: []Object{NULL, &String{Value: err.Error()}}}
+		}
+		return &Tuple{Elements: []Object{NULL, NULL}}
+	}}
+
 	// _fsAppend(path, content) → (null, err)
 	Builtins["_fsAppend"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {

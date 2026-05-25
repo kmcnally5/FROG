@@ -1,4 +1,13 @@
 {
+  // Format-on-save for kLex files. The kLex Language Server (froglsp)
+  // advertises documentFormattingProvider, so VS Code routes the format
+  // request to our LSP — same code path as `klex fmt` on the CLI.
+  // Disable per-file with `// @formatter:off` if you ever need to skip.
+  "[klex]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "klex.klex-lsp"
+  },
+
   "editor.tokenColorCustomizations": {
     "textMateRules": [
       {

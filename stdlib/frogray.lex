@@ -1,6 +1,10 @@
-// ============================================================
-// FROGRAY — RAY TRACING LIBRARY
-// ============================================================
+// frogray.lex — FROGRAY: high-performance ray tracing library
+// @module    frogray
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   FROGRAY — RAY TRACING LIBRARY
+//
 // High-performance ray tracing with reflections, shadows, MSAA.
 // Renders to PPM format.
 
@@ -8,22 +12,27 @@
 // VECTOR MATH (Vec3 as [x, y, z])
 // ============================================================
 
+// vec3_add(a, b) — return the component-wise sum of two Vec3 arrays [x,y,z].
 fn vec3_add(a, b) {
     return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
+// vec3_sub(a, b) — return the component-wise difference a - b of two Vec3 arrays.
 fn vec3_sub(a, b) {
     return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
+// vec3_scale(v, s) — return Vec3 v scaled by scalar s.
 fn vec3_scale(v, s) {
     return [v[0] * s, v[1] * s, v[2] * s]
 }
 
+// vec3_dot(a, b) — return the scalar dot product of two Vec3 arrays.
 fn vec3_dot(a, b) {
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
+// vec3_cross(a, b) — return the cross product of two Vec3 arrays.
 fn vec3_cross(a, b) {
     return [
         a[1] * b[2] - a[2] * b[1],
@@ -32,21 +41,25 @@ fn vec3_cross(a, b) {
     ]
 }
 
+// vec3_length(v) — return the Euclidean length (magnitude) of Vec3 v.
 fn vec3_length(v) {
     return sqrt(vec3_dot(v, v))
 }
 
+// vec3_normalize(v) — return a unit-length Vec3 in the direction of v. Returns [0,0,0] if v is near zero.
 fn vec3_normalize(v) {
     let len = vec3_length(v)
     if len < 0.0001 { return [0, 0, 0] }
     return [v[0] / len, v[1] / len, v[2] / len]
 }
 
+// vec3_reflect(v, n) — reflect Vec3 v about surface normal n. Used for specular/mirror rays.
 fn vec3_reflect(v, n) {
     let d = vec3_dot(v, n)
     return vec3_sub(v, vec3_scale(n, 2 * d))
 }
 
+// pow_fast(base, exp) — integer exponentiation: base^exp. Faster than pow() for integer shininess values.
 fn pow_fast(base, exp) {
     if exp == 0 { return 1 }
     if exp == 1 { return base }
@@ -64,18 +77,23 @@ fn pow_fast(base, exp) {
 // MATERIAL & LIGHT & SHAPES
 // ============================================================
 
+// create_material(r, g, b, reflectance, shininess) — create a material descriptor array [r, g, b, reflectance, shininess].
+// reflectance is 0.0–1.0 (0 = matte, 1 = mirror). shininess controls specular highlight size.
 fn create_material(r, g, b, reflectance, shininess) {
     return [r, g, b, reflectance, shininess]
 }
 
+// create_light(x, y, z, r, g, b, intensity) — create a point light at position (x,y,z) with RGB colour and intensity multiplier.
 fn create_light(x, y, z, r, g, b, intensity) {
     return [x, y, z, r, g, b, intensity]
 }
 
+// create_sphere(cx, cy, cz, radius, material) — create a sphere shape descriptor at centre (cx,cy,cz) with given radius and material.
 fn create_sphere(cx, cy, cz, radius, material) {
     return ["sphere", cx, cy, cz, radius, material]
 }
 
+// create_plane(px, py, pz, nx, ny, nz, material) — create an infinite plane passing through point (px,py,pz) with normal (nx,ny,nz) and given material.
 fn create_plane(px, py, pz, nx, ny, nz, material) {
     return ["plane", px, py, pz, nx, ny, nz, material]
 }
@@ -84,6 +102,8 @@ fn create_plane(px, py, pz, nx, ny, nz, material) {
 // BVH ACCELERATION STRUCTURE
 // ============================================================
 
+// compute_aabb(objects, indices) — compute the axis-aligned bounding box over the subset of objects at given indices.
+// Returns [min_x, min_y, min_z, max_x, max_y, max_z].
 fn compute_aabb(objects, indices) {
     let min_x = 999999
     let min_y = 999999
@@ -113,6 +133,8 @@ fn compute_aabb(objects, indices) {
     return [min_x, min_y, min_z, max_x, max_y, max_z]
 }
 
+// build_bvh_recursive(objects, indices, nodes, counter) — recursively partition objects into a BVH tree stored in nodes[].
+// counter[0] tracks the next free node slot. Returns the index of the root node created.
 fn build_bvh_recursive(objects, indices, nodes, counter) {
     if len(indices) <= 2 {
         let aabb = compute_aabb(objects, indices)
@@ -188,6 +210,7 @@ fn build_bvh_recursive(objects, indices, nodes, counter) {
     return node_idx
 }
 
+// build_bvh(objects) — build a BVH acceleration structure over all objects and return the trimmed nodes array.
 fn build_bvh(objects) {
     let indices = makeArray(len(objects), -1)
     let i = 0
@@ -211,6 +234,8 @@ fn build_bvh(objects) {
     return final_nodes
 }
 
+// intersect_aabb(ro_x, ro_y, ro_z, rd_x, rd_y, rd_z, min_x, min_y, min_z, max_x, max_y, max_z) — slab-method ray/AABB test.
+// Returns true if the ray (origin + direction) intersects the axis-aligned bounding box.
 fn intersect_aabb(ro_x, ro_y, ro_z, rd_x, rd_y, rd_z, min_x, min_y, min_z, max_x, max_y, max_z) {
     let dx = 1.0 / (rd_x + 0.0001)
     let dy = 1.0 / (rd_y + 0.0001)
@@ -257,6 +282,7 @@ fn intersect_aabb(ro_x, ro_y, ro_z, rd_x, rd_y, rd_z, min_x, min_y, min_z, max_x
 // RAY-OBJECT INTERSECTION
 // ============================================================
 
+// ray_sphere_hit(ray_orig, ray_dir, sphere) — test ray against a sphere. Returns [t, hit_x, hit_y, hit_z, nx, ny, nz, material] or null on miss.
 fn ray_sphere_hit(ray_orig, ray_dir, sphere) {
     let cx = sphere[1]
     let cy = sphere[2]
@@ -295,6 +321,7 @@ fn ray_sphere_hit(ray_orig, ray_dir, sphere) {
     return [t, hp_x, hp_y, hp_z, norm[0], norm[1], norm[2], sphere[5]]
 }
 
+// ray_plane_hit(ray_orig, ray_dir, plane) — test ray against an infinite plane. Returns [t, hit_x, hit_y, hit_z, nx, ny, nz, material] or null on miss.
 fn ray_plane_hit(ray_orig, ray_dir, plane) {
     let px = plane[1]
     let py = plane[2]
@@ -316,6 +343,7 @@ fn ray_plane_hit(ray_orig, ray_dir, plane) {
     return [t, hp_x, hp_y, hp_z, nx, ny, nz, plane[7]]
 }
 
+// find_nearest_hit(ray_orig, ray_dir, objects, bvh) — traverse the BVH and return the closest hit record, or null if no object is hit.
 fn find_nearest_hit(ray_orig, ray_dir, objects, bvh) {
     let nearest = null
     let nearest_t = 999999
@@ -381,6 +409,7 @@ fn find_nearest_hit(ray_orig, ray_dir, objects, bvh) {
 // SHADOW TEST
 // ============================================================
 
+// in_shadow(hit_point, light_pos, objects, bvh) — return true if any object occludes the path from hit_point to light_pos.
 fn in_shadow(hit_point, light_pos, objects, bvh) {
     let dx = light_pos[0] - hit_point[0]
     let dy = light_pos[1] - hit_point[1]
@@ -400,6 +429,8 @@ fn in_shadow(hit_point, light_pos, objects, bvh) {
 // LIGHTING: PHONG MODEL
 // ============================================================
 
+// shade(hit_point, normal, ray_dir, material, lights, objects, depth, bvh) — compute Phong-model colour at a surface hit point.
+// Includes ambient, diffuse, specular, shadow tests, and recursive reflection up to depth bounces.
 fn shade(hit_point, normal, ray_dir, material, lights, objects, depth, bvh) {
     let color_r = material[0]
     let color_g = material[1]
@@ -478,6 +509,8 @@ fn shade(hit_point, normal, ray_dir, material, lights, objects, depth, bvh) {
 // RAY CASTING
 // ============================================================
 
+// cast_ray(ray_orig, ray_dir, objects, lights, depth, bvh) — cast a single ray and return its RGB colour [r, g, b].
+// Returns sky colour [0.5, 0.7, 1.0] on miss. Recurses for reflections up to depth bounces.
 fn cast_ray(ray_orig, ray_dir, objects, lights, depth, bvh) {
     let hit = find_nearest_hit(ray_orig, ray_dir, objects, bvh)
 
@@ -493,6 +526,8 @@ fn cast_ray(ray_orig, ray_dir, objects, lights, depth, bvh) {
 // CAMERA & TILE RENDERING
 // ============================================================
 
+// compute_camera_rays(camera, width, height) — compute the camera basis vectors and frustum dimensions from a camera array [ox,oy,oz,tx,ty,tz,fov].
+// Returns [forward×3, right×3, up×3, frustum_w, frustum_h] for use in render_tile.
 fn compute_camera_rays(camera, width, height) {
     let forward = vec3_normalize([camera[3] - camera[0], camera[4] - camera[1], camera[5] - camera[2]])
     let right = vec3_normalize(vec3_cross(forward, [0, 1, 0]))
@@ -505,6 +540,8 @@ fn compute_camera_rays(camera, width, height) {
     return [forward[0], forward[1], forward[2], right[0], right[1], right[2], up[0], up[1], up[2], frustum_w, frustum_h]
 }
 
+// render_tile(start_y, end_y, width, height, cam_basis, camera, objects, lights, bvh) — render rows start_y..end_y-1 with 4× MSAA.
+// Returns a flat array of [r, g, b] pixel values for those rows.
 fn render_tile(start_y, end_y, width, height, cam_basis, camera, objects, lights, bvh) {
     let pixels = makeArray((end_y - start_y) * width, null)
     let idx = 0
@@ -566,6 +603,8 @@ fn render_tile(start_y, end_y, width, height, cam_basis, camera, objects, lights
 // PARALLEL RENDERING (Coarse-grained tiles, fixed workers)
 // ============================================================
 
+// render_parallel(width, height, camera, objects, lights, num_workers) — render the full frame using num_workers async tile tasks.
+// Builds the BVH once, splits rows evenly, awaits all tiles, and returns the assembled pixel array.
 fn render_parallel(width, height, camera, objects, lights, num_workers) {
     let tile_h = height / num_workers
     let tasks = makeArray(num_workers, null)
@@ -615,6 +654,7 @@ fn render_parallel(width, height, camera, objects, lights, num_workers) {
 // PPM OUTPUT
 // ============================================================
 
+// write_ppm(filename, width, height, pixels) — write a PPM (P3 ASCII) image file from a flat [r,g,b] pixel array.
 fn write_ppm(filename, width, height, pixels) {
     let lines = makeArray(height, "")
     let idx = 0

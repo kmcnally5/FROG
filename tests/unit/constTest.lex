@@ -5,7 +5,7 @@ const PI = 3.14159
 println(PI)
 
 // Reassignment from same scope is a RuntimeError
-result, err = safe(fn() { PI = 3 })
+let result, err = safe(fn() { PI = 3 })
 println(err.message)
 
 // Reassignment from inner function scope is also blocked

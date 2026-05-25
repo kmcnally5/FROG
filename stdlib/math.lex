@@ -1,4 +1,9 @@
 // stdlib/math.lex — kLex standard math library
+// @module    math
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   kLex standard math library
 //
 // All core math functions (floor, ceil, round, sqrt, abs, pow, exp,
 // log, log2, log10, sin, cos, tan, asin, acos, atan, atan2,
@@ -17,10 +22,12 @@
 // Angle conversion
 // ----------------------------------------------------------------------------
 
+// degrees(rad) — convert radians to degrees. degrees(pi()) → 180.0
 fn degrees(rad) {
     return rad * 180.0 / pi()
 }
 
+// radians(deg) — convert degrees to radians. radians(180.0) → pi()
 fn radians(deg) {
     return deg * pi() / 180.0
 }
@@ -88,7 +95,9 @@ fn logBase(x, base) {
 // Integer utilities
 // ----------------------------------------------------------------------------
 
+// even(n) — return true if integer n is even.
 fn even(n) { return mod(n, 2) == 0 }
+// odd(n) — return true if integer n is odd.
 fn odd(n)  { return mod(n, 2) != 0 }
 
 // factorial returns n! for non-negative integers.

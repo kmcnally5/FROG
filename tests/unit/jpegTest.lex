@@ -26,7 +26,7 @@ fn main() {
     // Collect compressed macroblocks
     let finished = 0
     while finished < 8 {
-        res, ok = recv(bus)
+        let res, ok = recv(bus)
         if ok { 
             finished = finished + 1 
             println("Block chunk " + str(res.worker) + " compressed.")

@@ -256,8 +256,13 @@ func init() {
 	//       println("{row["id"]}  {row["name"]}")
 	//   }
 	Builtins["dbQuery"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) < 2 {
-			return runtimeError("dbQuery expects at least 2 arguments (conn, sql, ?args)", ast.Pos{})
+		// OFI #19b (2026-05-23): upper-bound the arity. sqlBuildArgs
+		// only ever reads args[2] — anything past it was silently
+		// swallowed (e.g. dbQuery(conn, sql, [1,2,3], "extra") used
+		// to succeed and ignore the trailing arg). Now matches the
+		// LSP signature `dbQuery(conn, sql, args?: array)`.
+		if len(args) < 2 || len(args) > 3 {
+			return runtimeError("dbQuery expects 2 or 3 arguments (conn, sql, ?args)", ast.Pos{})
 		}
 		qable, _, errObj := sqlExtract(args[0], "dbQuery")
 		if errObj != nil {
@@ -297,8 +302,9 @@ func init() {
 	//   if row == null { println("not found")  return }
 	//   println(row["name"])
 	Builtins["dbQueryOne"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) < 2 {
-			return runtimeError("dbQueryOne expects at least 2 arguments (conn, sql, ?args)", ast.Pos{})
+		// OFI #19b: see dbQuery for the rationale.
+		if len(args) < 2 || len(args) > 3 {
+			return runtimeError("dbQueryOne expects 2 or 3 arguments (conn, sql, ?args)", ast.Pos{})
 		}
 		qable, _, errObj := sqlExtract(args[0], "dbQueryOne")
 		if errObj != nil {
@@ -355,8 +361,9 @@ func init() {
 	//   if err != null { println(err.message)  return }
 	//   println("{n} row(s) updated")
 	Builtins["dbExec"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) < 2 {
-			return runtimeError("dbExec expects at least 2 arguments (conn, sql, ?args)", ast.Pos{})
+		// OFI #19b: see dbQuery for the rationale.
+		if len(args) < 2 || len(args) > 3 {
+			return runtimeError("dbExec expects 2 or 3 arguments (conn, sql, ?args)", ast.Pos{})
 		}
 		qable, _, errObj := sqlExtract(args[0], "dbExec")
 		if errObj != nil {
@@ -587,8 +594,9 @@ func init() {
 	//       println("{row["id"]}  {row["name"]}")
 	//   }
 	Builtins["dbQueryStream"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) < 2 {
-			return runtimeError("dbQueryStream expects at least 2 arguments (conn, sql, ?args)", ast.Pos{})
+		// OFI #19b: see dbQuery for the rationale.
+		if len(args) < 2 || len(args) > 3 {
+			return runtimeError("dbQueryStream expects 2 or 3 arguments (conn, sql, ?args)", ast.Pos{})
 		}
 		qable, _, errObj := sqlExtract(args[0], "dbQueryStream")
 		if errObj != nil {
@@ -691,8 +699,9 @@ func init() {
 	//   if err != null { println(err.message)  return }
 	//   id = rows[0]["id"]
 	Builtins["dbExecReturning"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) < 2 {
-			return runtimeError("dbExecReturning expects at least 2 arguments (conn, sql, ?args)", ast.Pos{})
+		// OFI #19b: see dbQuery for the rationale.
+		if len(args) < 2 || len(args) > 3 {
+			return runtimeError("dbExecReturning expects 2 or 3 arguments (conn, sql, ?args)", ast.Pos{})
 		}
 		qable, _, errObj := sqlExtract(args[0], "dbExecReturning")
 		if errObj != nil {

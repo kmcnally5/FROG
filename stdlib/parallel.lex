@@ -1,4 +1,9 @@
 // stdlib/parallel.lex — high-performance parallel data processing
+// @module    parallel
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   high-performance parallel data processing
 //
 // Parallel map, filter, reduce with custom merge strategies, and early termination.
 // Built on async Tasks and eager evaluation (collecting final results before returning Stream).
@@ -20,11 +25,13 @@ struct Stream {
 }
 
 
+// pmap(arr, func, numWorkers) — parallel map: apply func to every element of arr using numWorkers async workers.
+// Returns a Stream; collect it with stream.collect(). Element errors propagate through the stream.
 fn pmap(arr, func, numWorkers) {
     if numWorkers <= 0 { numWorkers = 1 }
 
-    chunks = chunk(arr, numWorkers)
-    tasks = makeArray(len(chunks), null)
+    let chunks = chunk(arr, numWorkers)
+    let tasks = makeArray(len(chunks), null)
 
     for chunkIdx in range(len(chunks)) {
         let idx = chunkIdx
@@ -35,7 +42,7 @@ fn pmap(arr, func, numWorkers) {
 
             for elemIdx in range(len(chk)) {
                 let elem = chk[elemIdx]
-                result, callErr = safe(func, elem)
+                let result, callErr = safe(func, elem)
                 if callErr != null {
                     return callErr
                 }
@@ -52,15 +59,15 @@ fn pmap(arr, func, numWorkers) {
         tasks[chunkIdx] = task
     }
 
-    out = channel(64)
-    errCh = channel(1)
+    let out = channel(64)
+    let errCh = channel(1)
 
     async(fn() {
         let finalResults = makeArray(len(chunks), null)
         let myErr = null
 
         for t in range(len(chunks)) {
-            chunkResults = await(tasks[t])
+            let chunkResults = await(tasks[t])
             if isError(chunkResults) {
                 myErr = chunkResults
                 break
@@ -88,6 +95,104 @@ fn pmap(arr, func, numWorkers) {
 }
 
 
+// ========================================
+// pmap_safe(arr, func, numWorkers) -> Stream
+//
+// Error-tolerant variant of pmap (OFI #2). Where `pmap` aborts the
+// ENTIRE stream on the first per-element error — losing every other
+// worker's output — `pmap_safe` catches per-element errors and
+// surfaces them as Error VALUES in the result slot of the failing
+// element. All other elements still produce their normal results.
+//
+// Use this when:
+//   - Inputs are heterogeneous (rare bad ones in a sea of good)
+//   - You'd rather skip the bad ones than abort the whole job
+//   - Failure is an expected mode (e.g. file-parser on a corpus)
+//
+// The stream's errCh always receives null (success). Per-element
+// failures are observable inline:
+//
+//   stream = pmap_safe(files, parseFile, 16)
+//   ok = 0
+//   bad = 0
+//   for result in stream.ch {
+//       if isError(result) { bad = bad + 1 }
+//       else               { ok  = ok  + 1 }
+//   }
+//   // No matter how many files crash parseFile, the loop sees every slot.
+//
+// Same chunking + worker layout as pmap, so throughput is identical.
+fn pmap_safe(arr, func, numWorkers) {
+    if numWorkers <= 0 { numWorkers = 1 }
+
+    let chunks = chunk(arr, numWorkers)
+    let tasks = makeArray(len(chunks), null)
+
+    for chunkIdx in range(len(chunks)) {
+        let idx = chunkIdx
+        let chk = chunks[idx]
+        let task = async(fn() {
+            let results = makeArray(len(chk), null)
+            let resIdx = 0
+
+            for elemIdx in range(len(chk)) {
+                let elem = chk[elemIdx]
+                let result, callErr = safe(func, elem)
+                if callErr != null {
+                    // safe()'s err already IS an Error object — store it
+                    // in the slot. Caller decides what to do with it.
+                    results[resIdx] = callErr
+                } else if isError(result) {
+                    // Func returned a (value, err) tuple and isError on
+                    // the value side caught it. Store the Error.
+                    results[resIdx] = result
+                } else {
+                    results[resIdx] = result
+                }
+                resIdx = resIdx + 1
+            }
+
+            return results
+        })
+        tasks[chunkIdx] = task
+    }
+
+    let out = channel(64)
+    let errCh = channel(1)
+
+    async(fn() {
+        let finalResults = makeArray(len(chunks), null)
+
+        for t in range(len(chunks)) {
+            let chunkResults = await(tasks[t])
+            // chunkResults is always an array (workers don't bail on
+            // per-element errors any more). Even if a CHUNK-LEVEL
+            // failure happened — e.g. the worker function ITSELF
+            // panicked outside an element — it'd be an Error here.
+            // Wrap it as a single-element error chunk so the consumer
+            // still sees something rather than nothing.
+            if isError(chunkResults) {
+                let wrapped = makeArray(1, chunkResults)
+                finalResults[t] = wrapped
+            } else {
+                finalResults[t] = chunkResults
+            }
+        }
+
+        for chunk in finalResults {
+            for item in chunk {
+                if send(out, item) == false {
+                    break
+                }
+            }
+        }
+        send(errCh, null)
+        close(out)
+    })
+
+    return Stream { ch: out, errCh: errCh }
+}
+
 
 // ========================================
 // parallel_filter(arr, func, numWorkers) -> Stream
@@ -99,8 +204,8 @@ fn pmap(arr, func, numWorkers) {
 fn parallel_filter(arr, func, numWorkers) {
     if numWorkers <= 0 { numWorkers = 1 }
 
-    chunks = chunk(arr, numWorkers)
-    tasks = makeArray(len(chunks), null)
+    let chunks = chunk(arr, numWorkers)
+    let tasks = makeArray(len(chunks), null)
 
     for chunkIdx in range(len(chunks)) {
         let idx = chunkIdx
@@ -110,7 +215,7 @@ fn parallel_filter(arr, func, numWorkers) {
             let count = 0
             for elemIdx in range(len(chk)) {
                 let elem = chk[elemIdx]
-                keep, callErr = safe(func, elem)
+                let keep, callErr = safe(func, elem)
                 if callErr != null {
                     return callErr
                 }
@@ -127,7 +232,7 @@ fn parallel_filter(arr, func, numWorkers) {
             let resIdx = 0
             for elemIdx in range(len(chk)) {
                 let elem = chk[elemIdx]
-                keep, callErr = safe(func, elem)
+                let keep, callErr = safe(func, elem)
                 if callErr != null {
                     return callErr
                 }
@@ -145,15 +250,15 @@ fn parallel_filter(arr, func, numWorkers) {
         tasks[chunkIdx] = task
     }
 
-    out = channel(64)
-    errCh = channel(1)
+    let out = channel(64)
+    let errCh = channel(1)
 
     async(fn() {
         let finalResults = makeArray(len(chunks), null)
         let myErr = null
 
         for t in range(len(chunks)) {
-            chunkResults = await(tasks[t])
+            let chunkResults = await(tasks[t])
             if isError(chunkResults) {
                 myErr = chunkResults
                 break
@@ -191,7 +296,7 @@ fn _makeReduceWorker(startIdx, endIdx, arr, init, chunkReduceFn) {
         while i < endIdx {
             let elem = arr[i]
 
-            result, callErr = safe(chunkReduceFn, acc, elem)
+            let result, callErr = safe(chunkReduceFn, acc, elem)
             if callErr != null {
                 return callErr
             }
@@ -279,7 +384,7 @@ fn parallel_reduce(arr, chunkReduceFn, mergeFn, numWorkers, init) {
     while j < numWorkers {
         let pr = partialResults[j]
 
-        mergeResult, mergeErr = safe(mergeFn, merged, pr)
+        let mergeResult, mergeErr = safe(mergeFn, merged, pr)
         if mergeErr != null { return null, mergeErr }
         if isError(mergeResult) { return null, mergeResult }
 
@@ -304,7 +409,7 @@ fn _makeEveryWorker(startIdx, endIdx, arr, func, done) {
             }
 
             let elem = arr[i]
-            result, callErr = safe(func, elem)
+            let result, callErr = safe(func, elem)
 
             if callErr != null {
                 send(done, true)
@@ -400,7 +505,7 @@ fn _makeSomeWorker(startIdx, endIdx, arr, func, done) {
             }
 
             let elem = arr[i]
-            result, callErr = safe(func, elem)
+            let result, callErr = safe(func, elem)
 
             if callErr != null {
                 send(done, true)
@@ -499,7 +604,7 @@ fn _makeFindWorker(startIdx, endIdx, arr, func, done) {
 
             let elem = arr[i]
 
-            result, callErr = safe(func, elem)
+            let result, callErr = safe(func, elem)
             if callErr != null {
                 send(done, true)
                 return null
@@ -580,7 +685,6 @@ fn parallel_find(arr, func, numWorkers) {
 
     return null, null
 }
-
 
 
 // HELPERS - used by functions above

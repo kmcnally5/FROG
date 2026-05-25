@@ -1,7 +1,7 @@
 // enumDestructureTest.lex — enum switch destructuring (short form + full form)
 
-passed = 0
-failed = 0
+let passed = 0
+let failed = 0
 
 fn check(name, got, expected) {
     if got == expected {
@@ -45,7 +45,7 @@ check("Point (no fields)",   describeShape(Shape.Point),             "point")
 
 // ── Bindings are scoped to the case body ─────────────────────────────────────
 
-r = "outer"
+let r = "outer"
 switch Shape.Circle(99.0) {
     case Circle(r) { r = "inner " + str(r) }
 }
@@ -108,7 +108,7 @@ check("binding in expr", doubled(Shape.Circle(7.5)), 15.0)
 // ── Wrong binding count gives clear error ────────────────────────────────────
 
 fn wrongCount() {
-    val, err = safe(fn() {
+    let val, err = safe(fn() {
         switch Shape.Rect(3, 4) {
             case Rect(w) { return w }   // Rect has 2 fields, only 1 bound
         }
@@ -118,7 +118,7 @@ fn wrongCount() {
     return "no error"
 }
 
-result = wrongCount()
+let result = wrongCount()
 check("wrong binding count errors", indexOf(result, "has 2 field") >= 0, true)
 
 // ── Summary ───────────────────────────────────────────────────────────────────

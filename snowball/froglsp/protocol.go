@@ -112,12 +112,22 @@ type CompletionContext struct {
 }
 
 type CompletionItem struct {
-	Label         string `json:"label"`
-	Kind          int    `json:"kind"`
-	Detail        string `json:"detail,omitempty"`
-	Documentation string `json:"documentation,omitempty"`
-	SortText      string `json:"sortText,omitempty"`
+	Label            string         `json:"label"`
+	Kind             int            `json:"kind"`
+	Detail           string         `json:"detail,omitempty"`
+	Documentation    *MarkupContent `json:"documentation,omitempty"`
+	SortText         string         `json:"sortText,omitempty"`
+	FilterText       string         `json:"filterText,omitempty"`
+	InsertText       string         `json:"insertText,omitempty"`
+	InsertTextFormat int            `json:"insertTextFormat,omitempty"`
+	Preselect        bool           `json:"preselect,omitempty"`
 }
+
+// Insert text format constants (LSP)
+const (
+	InsertTextFormatPlainText = 1
+	InsertTextFormatSnippet   = 2
+)
 
 type CompletionList struct {
 	IsIncomplete bool              `json:"isIncomplete"`
@@ -184,20 +194,41 @@ type InitializeParams struct {
 }
 
 type ServerCapabilities struct {
-	HoverProvider                 bool        `json:"hoverProvider"`
-	DefinitionProvider            bool        `json:"definitionProvider"`
-	CompletionProvider            interface{} `json:"completionProvider,omitempty"`
-	DiagnosticProvider            bool        `json:"diagnosticProvider,omitempty"`
-	TextDocumentSyncKind          int         `json:"textDocumentSyncKind"`
-	Workspace                     interface{} `json:"workspace,omitempty"`
-	CodeActionProvider            bool        `json:"codeActionProvider,omitempty"`
-	DocumentFormattingProvider    bool        `json:"documentFormattingProvider,omitempty"`
-	DocumentRangeFormattingProvider bool      `json:"documentRangeFormattingProvider,omitempty"`
+	HoverProvider                   bool        `json:"hoverProvider"`
+	DefinitionProvider              bool        `json:"definitionProvider"`
+	CompletionProvider              interface{} `json:"completionProvider,omitempty"`
+	SignatureHelpProvider           interface{} `json:"signatureHelpProvider,omitempty"`
+	DiagnosticProvider              bool        `json:"diagnosticProvider,omitempty"`
+	DocumentSymbolProvider          bool        `json:"documentSymbolProvider,omitempty"`
+	TextDocumentSyncKind            int         `json:"textDocumentSyncKind"`
+	Workspace                       interface{} `json:"workspace,omitempty"`
+	CodeActionProvider              interface{} `json:"codeActionProvider,omitempty"`
+	DocumentFormattingProvider      bool        `json:"documentFormattingProvider,omitempty"`
+	DocumentRangeFormattingProvider bool        `json:"documentRangeFormattingProvider,omitempty"`
 }
 
 type InitializeResult struct {
 	Capabilities ServerCapabilities `json:"capabilities"`
 	ServerInfo   interface{}        `json:"serverInfo,omitempty"`
+}
+
+// Formatting
+type DocumentFormattingParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Options      FormattingOptions      `json:"options"`
+}
+
+type FormattingOptions struct {
+	TabSize      int  `json:"tabSize"`
+	InsertSpaces bool `json:"insertSpaces"`
+	// Plus arbitrary trailing options the client may send (TrimTrailing-
+	// Whitespace, InsertFinalNewline, etc.). We honour our own canonical
+	// settings rather than respecting these — kLex has one true style.
+}
+
+type TextEdit struct {
+	Range   Range  `json:"range"`
+	NewText string `json:"newText"`
 }
 
 // Document sync kinds
@@ -256,4 +287,91 @@ type SignatureInformation struct {
 type ParameterInformation struct {
 	Label         string `json:"label"`
 	Documentation string `json:"documentation,omitempty"`
+}
+
+// ── Document Symbol (outline view) ────────────────────────────────────
+
+type DocumentSymbolParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+// Symbol kind constants (LSP)
+const (
+	SymbolKindFile          = 1
+	SymbolKindModule        = 2
+	SymbolKindNamespace     = 3
+	SymbolKindPackage       = 4
+	SymbolKindClass         = 5
+	SymbolKindMethod        = 6
+	SymbolKindProperty      = 7
+	SymbolKindField         = 8
+	SymbolKindConstructor   = 9
+	SymbolKindEnum          = 10
+	SymbolKindInterface     = 11
+	SymbolKindFunction      = 12
+	SymbolKindVariable      = 13
+	SymbolKindConstant      = 14
+	SymbolKindString        = 15
+	SymbolKindNumber        = 16
+	SymbolKindBoolean       = 17
+	SymbolKindArray         = 18
+	SymbolKindObject        = 19
+	SymbolKindKey           = 20
+	SymbolKindNull          = 21
+	SymbolKindEnumMember    = 22
+	SymbolKindStruct        = 23
+	SymbolKindEvent         = 24
+	SymbolKindOperator      = 25
+	SymbolKindTypeParameter = 26
+)
+
+// DocumentSymbol is the hierarchical outline element returned by
+// textDocument/documentSymbol. Each entry carries its own range + the
+// "selection range" of just its name (used for the click-to-position
+// behaviour in VS Code's outline view).
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           int              `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+// ── Code Actions ──────────────────────────────────────────────────────
+
+type CodeActionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+	Context      CodeActionContext      `json:"context"`
+}
+
+type CodeActionContext struct {
+	Diagnostics []Diagnostic `json:"diagnostics"`
+	Only        []string     `json:"only,omitempty"`
+	TriggerKind int          `json:"triggerKind,omitempty"`
+}
+
+// Standard kinds used in VS Code's lightbulb menu grouping.
+const (
+	CodeActionKindEmpty             = ""
+	CodeActionKindQuickFix          = "quickfix"
+	CodeActionKindRefactor          = "refactor"
+	CodeActionKindRefactorExtract   = "refactor.extract"
+	CodeActionKindRefactorInline    = "refactor.inline"
+	CodeActionKindRefactorRewrite   = "refactor.rewrite"
+	CodeActionKindSource            = "source"
+	CodeActionKindSourceOrganizeImp = "source.organizeImports"
+)
+
+type CodeAction struct {
+	Title       string        `json:"title"`
+	Kind        string        `json:"kind,omitempty"`
+	Diagnostics []Diagnostic  `json:"diagnostics,omitempty"`
+	IsPreferred bool          `json:"isPreferred,omitempty"`
+	Edit        *WorkspaceEdit `json:"edit,omitempty"`
+}
+
+type WorkspaceEdit struct {
+	Changes map[string][]TextEdit `json:"changes,omitempty"`
 }

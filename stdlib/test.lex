@@ -1,4 +1,9 @@
 // stdlib/test.lex — kLex test framework
+// @module    test
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   kLex test framework
 //
 // Structured describe/it test runner with runtime error isolation,
 // pass/fail tracking, and clean console output.
@@ -22,9 +27,9 @@
 // cleanly without crashing the suite. All assertions within a test run
 // so you see every failure, not just the first.
 
-_passed = 0
-_failed = 0
-_test_failed = false
+let _passed = 0
+let _failed = 0
+let _test_failed = false
 
 // describe groups related tests under a named heading.
 // The suite function is called immediately.
@@ -38,7 +43,7 @@ fn describe(name, suiteFn) {
 // crashing the suite. Prints ✓ or ✗ and updates the pass/fail counters.
 fn it(name, testFn) {
     _test_failed = false
-    result, err = safe(testFn)
+    let result, err = safe(testFn)
     if err != null {
         _failed = _failed + 1
         println("  ✗ " + name)
@@ -111,7 +116,7 @@ fn assertNoError(val) {
 // assertType asserts type(val) == expected.
 // expected: "INTEGER", "STRING", "BOOLEAN", "ARRAY", "HASH", "NULL", "FUNCTION"
 fn assertType(val, expected) {
-    t = type(val)
+    let t = type(val)
     if t == expected { return null }
     _fail("expected type " + expected + " but got " + t)
 }
@@ -124,7 +129,7 @@ fn assertContains(haystack, needle) {
         _fail("expected string to contain " + str(needle))
         return
     }
-    i = 0
+    let i = 0
     while i < len(haystack) {
         if haystack[i] == needle { return null }
         i = i + 1
@@ -140,7 +145,7 @@ fn assertNotContains(haystack, needle) {
         _fail("expected string not to contain " + str(needle))
         return
     }
-    i = 0
+    let i = 0
     while i < len(haystack) {
         if haystack[i] == needle {
             _fail("expected array not to contain " + str(needle))
@@ -176,7 +181,7 @@ fn assertLte(a, b) {
 
 // summary prints totals and returns true if all tests passed, false if any failed.
 fn summary() {
-    total = _passed + _failed
+    let total = _passed + _failed
     println("\n" + str(_passed) + "/" + str(total) + " tests passed")
     if _failed > 0 {
         println(str(_failed) + " failed")

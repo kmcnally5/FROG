@@ -39,9 +39,18 @@ func callInParallel(fn Object, args []Object, snapshotEnv *Environment) (Object,
 			return nil, result
 		}
 		return result, nil
-	default:
-		return nil, typeError(fmt.Sprintf("not callable: %s", fn.Type()), ast.Pos{})
 	}
+	// External callable (e.g. *vm.CompiledFunction). No env-snapshot
+	// is propagated because VM closures carry their own upvalue cells
+	// — the snapshot mechanism is *Function-specific. M2 (audit fix):
+	// ExternalCallable now has a default no-op stub, so no nil-check.
+	if result, dispatched := ExternalCallable(fn, args); dispatched {
+		if isError(result) {
+			return nil, result
+		}
+		return result, nil
+	}
+	return nil, typeError(fmt.Sprintf("not callable: %s — parallel.map/filter/reduce expect a function as the callback, e.g. parallel.map(arr, fn(x) { return x * 2 })", fn.Type()), ast.Pos{})
 }
 
 // snapshotForFn returns a lock-free snapshot env for a *Function.
@@ -86,9 +95,7 @@ func init() {
 		if !ok {
 			return typeError(fmt.Sprintf("parallelArrayUpdate: first argument must be an array, got %s", args[0].Type()), ast.Pos{})
 		}
-		switch args[1].(type) {
-		case *Function, *Builtin:
-		default:
+		if !IsCallable(args[1]) {
 			return typeError(fmt.Sprintf("parallelArrayUpdate: second argument must be a function, got %s", args[1].Type()), ast.Pos{})
 		}
 
@@ -96,6 +103,9 @@ func init() {
 		if n == 0 {
 			return arr
 		}
+
+		// M5 lazy mutex: workers read arr.Elements concurrently.
+		MarkSharedRecursive(arr)
 
 		numWorkers, chunkSize := parallelChunks(n)
 		snapshotEnv := snapshotForFn(args[1])
@@ -152,9 +162,7 @@ func init() {
 		if !ok {
 			return typeError(fmt.Sprintf("parallelArrayMap: first argument must be an array, got %s", args[0].Type()), ast.Pos{})
 		}
-		switch args[1].(type) {
-		case *Function, *Builtin:
-		default:
+		if !IsCallable(args[1]) {
 			return typeError(fmt.Sprintf("parallelArrayMap: second argument must be a function, got %s", args[1].Type()), ast.Pos{})
 		}
 
@@ -163,6 +171,10 @@ func init() {
 		if n == 0 {
 			return &Array{Elements: result}
 		}
+
+		// M5 lazy mutex: workers below read arr.Elements concurrently;
+		// any hashes inside need their mutex on from now on.
+		MarkSharedRecursive(arr)
 
 		numWorkers, chunkSize := parallelChunks(n)
 		snapshotEnv := snapshotForFn(args[1])
@@ -206,12 +218,20 @@ func init() {
 	}}
 
 	// parallelArrayReduce performs a parallel reduction over the array.
-	// fn(accumulator, element) must be ASSOCIATIVE (e.g. add, multiply, max).
-	// Non-associative functions produce undefined results because chunk order
-	// is not guaranteed.
 	//
-	// Each worker reduces its chunk independently starting from `initial`,
-	// then a final serial reduce combines the per-worker partials.
+	// CONSTRAINTS (both required for correct results):
+	//   1. fn(accumulator, element) MUST be ASSOCIATIVE
+	//      (e.g. +, *, max — chunk order is not guaranteed).
+	//   2. `initial` MUST be the IDENTITY for fn
+	//      (0 for +, 1 for *, "" for string concat, [] for array concat).
+	//
+	// Why identity matters: each worker starts its own chunk from `initial`,
+	// and the final serial pass also folds `initial` in once more. If you pass
+	// a non-identity init like 100 for +, you get 100 applied (numWorkers + 1)
+	// times instead of once. The result will not equal a serial reduce.
+	//
+	// For non-identity inits, use stdlib/parallel.lex's parallel_reduce, which
+	// takes a separate mergeFn and applies init exactly once.
 	//
 	//   total = parallelArrayReduce(nums, fn(a, b) { a + b }, 0)
 	Builtins["parallelArrayReduce"] = &Builtin{Fn: func(args []Object) Object {
@@ -222,9 +242,7 @@ func init() {
 		if !ok {
 			return typeError(fmt.Sprintf("parallelArrayReduce: first argument must be an array, got %s", args[0].Type()), ast.Pos{})
 		}
-		switch args[1].(type) {
-		case *Function, *Builtin:
-		default:
+		if !IsCallable(args[1]) {
 			return typeError(fmt.Sprintf("parallelArrayReduce: second argument must be a function, got %s", args[1].Type()), ast.Pos{})
 		}
 		initial := args[2]
@@ -233,6 +251,11 @@ func init() {
 		if n == 0 {
 			return initial
 		}
+
+		// M5 lazy mutex: workers read arr.Elements concurrently;
+		// initial may also be shared between workers as their seed.
+		MarkSharedRecursive(arr)
+		MarkSharedRecursive(initial)
 
 		numWorkers, chunkSize := parallelChunks(n)
 		snapshotEnv := snapshotForFn(args[1])

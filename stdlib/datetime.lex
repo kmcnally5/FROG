@@ -1,4 +1,9 @@
 // datetime.lex
+// @module    datetime
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   Date and time handling for kLex.
 // Date and time handling for kLex.
 //
 // All times are in local time. The unix field is always seconds since
@@ -15,11 +20,11 @@
 //   parsed, err = dt.parse("2024-01-15", dt.DATE)
 
 // Named layout constants — pass these to format() and parse().
-ISO8601  = "2006-01-02T15:04:05Z07:00"
-DATE     = "2006-01-02"
-TIME     = "15:04:05"
-DATETIME = "2006-01-02 15:04:05"
-RFC1123  = "Mon, 02 Jan 2006 15:04:05 MST"
+let ISO8601  = "2006-01-02T15:04:05Z07:00"
+let DATE     = "2006-01-02"
+let TIME     = "15:04:05"
+let DATETIME = "2006-01-02 15:04:05"
+let RFC1123  = "Mon, 02 Jan 2006 15:04:05 MST"
 
 struct DateTime {
     year, month, day, hour, minute, second, unix, weekday
@@ -33,7 +38,7 @@ fn nowNanos() {
 
 // now returns a DateTime representing the current local time.
 fn now() {
-    year, month, day, hour, minute, second, unix, weekday = _timeNow()
+    let year, month, day, hour, minute, second, unix, weekday = _timeNow()
     return DateTime {
         year: year, month: month, day: day,
         hour: hour, minute: minute, second: second,
@@ -43,7 +48,7 @@ fn now() {
 
 // fromUnix converts a unix timestamp (integer seconds) to a DateTime.
 fn fromUnix(unix) {
-    year, month, day, hour, minute, second, weekday = _timeFields(unix)
+    let year, month, day, hour, minute, second, weekday = _timeFields(unix)
     return DateTime {
         year: year, month: month, day: day,
         hour: hour, minute: minute, second: second,
@@ -61,7 +66,7 @@ fn format(dt, layout) {
 // parse parses a time string using a layout string.
 // Returns (DateTime, err). On failure DateTime is null and err is a string.
 fn parse(s, layout) {
-    unix, err = _timeParse(s, layout)
+    let unix, err = _timeParse(s, layout)
     if err != null { return null, err }
     return fromUnix(unix), null
 }

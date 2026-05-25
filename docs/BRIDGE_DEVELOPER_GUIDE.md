@@ -34,6 +34,78 @@ Rules:
 - **stderr is discarded** — the Go implementation sets `cmd.Stderr = nil`. Do not write debug output to stderr; it vanishes silently. Use a log file if you need debugging.
 - Maximum response size: **1 MB**. Responses larger than this will crash the bridge read with `BRIDGE_ERROR`.
 
+### Handshakes
+
+When the subprocess starts, kLex performs two best-effort handshakes before the first user call. Both are silent no-ops for bridges that don't implement them — every legacy bridge keeps working, just without the corresponding kLex-side feature.
+
+**`__hello__` — protocol negotiation (run first):**
+```json
+// kLex → bridge
+{"id": 1, "fn": "__hello__", "args": [{
+    "protocol": 1,
+    "capabilities": ["schema", "binary"],
+    "client": "klex"
+}]}
+
+// bridge → kLex
+{"id": 1, "result": {
+    "protocol": 1,
+    "capabilities": ["schema"],
+    "helper":   "klex_bridge.py/0.7.0",
+    "language": "python",
+    "language_version": "3.12.4"
+}}
+```
+
+`protocol` is a single integer bumped only for incompatible breaking changes. New additive features ship as **capabilities** — strings both sides advertise. The negotiated set is the intersection. Capabilities that have always been on the wire (stream, cancel, backpressure, notif, timeout) are implicit and not advertised.
+
+Currently advertised capability names:
+- `schema` — bridge speaks the schema mini-language; `bridgeSchema()` returns a non-null map
+- `binary` — bridge accepts/produces binary payloads natively (see [Binary payloads](#binary-payloads) below)
+
+A bridge that doesn't implement `__hello__` is treated as protocol 0 with an empty capability set. Inspect the negotiated state with `bridgeInfo(bridge)`.
+
+### Binary payloads
+
+When both sides advertise the `binary` capability, kLex `bytes` values are carried on the wire as a single-entry JSON object:
+
+```json
+{"__bytes__": "<base64-encoded bytes>"}
+```
+
+The walk is recursive — `bytes` embedded inside arrays and hashes round-trip transparently. Helpers (Python and Node) decode the sentinel into native `bytes` / `Buffer` automatically before calling the handler, and encode any returned `bytes` / `Buffer` back to the sentinel on the way out.
+
+```python
+@handler(args=[("data", "bytes")], returns="bytes")
+def echo(data):
+    assert isinstance(data, bytes)
+    return data           # → wire form {"__bytes__": "..."} → kLex bytes
+```
+
+```javascript
+handler({args: [['data', 'bytes']], returns: 'bytes'},
+    (data) => {
+        // data is a real Buffer
+        return Buffer.concat([data, data]);
+    }
+);
+```
+
+Sending `bytes` to a bridge that did NOT negotiate `binary` is a fail-fast error at the call site (rather than after a round-trip):
+
+```
+err.code    == "BRIDGE_BINARY_UNSUPPORTED"
+err.message == "bridgeCall: bridge has not negotiated the 'binary' capability — bytes arguments cannot be sent. ..."
+```
+
+Two ways to work with a legacy bridge:
+1. Pre-encode with `bytesToBase64()` and declare the schema arg as `string` on the bridge side
+2. Upgrade the bridge to use `klex_bridge >= 0.7.0` (Python) or `klex_bridge.js >= 0.7.0` (Node)
+
+The wire form's single-key shape is strict on purpose — a regular hash that happens to contain the key `"__bytes__"` alongside other fields, or with a non-string value, is left untouched. Only the exact `{"__bytes__": "<string>"}` shape decodes back to bytes.
+
+**`__schema__` — handler signatures (run second):** see the [Phase 3 section](#phase-3--schema-declaration--validation) below.
+
 ---
 
 ## kLex API
@@ -103,6 +175,52 @@ if err != null {
     for line in lines { println("  " + line) }
 }
 ```
+
+### `bridgeMetrics(bridge) → hash`
+
+Snapshot the bridge's observability counters and per-function latency percentiles. Tracking is automatic — every `bridgeCall` and `bridgeStream` is recorded with no setup required. Cheap to call repeatedly (one mutex acquisition + a small sort per function), so a dashboard polling once a second adds no measurable overhead.
+
+```frog
+m = bridgeMetrics(bridge)
+// m = {
+//   "calls_total":     N,      // bridgeCall completions (success + error)
+//   "calls_inflight":  M,      // calls currently waiting for a response
+//   "calls_failed":    K,      // bridgeCall results carrying an error
+//   "streams_total":   S,      // bridgeStream submissions
+//   "bytes_sent":      bytesOut,
+//   "bytes_received":  bytesIn,
+//   "errors_by_code":  {"BRIDGE_TIMEOUT": 4, "BRIDGE_SCHEMA_ARG": 8, ...},
+//   "per_function":    {
+//      "add":  {"count": 230, "errors": 2, "p50_ms": 12.0, "p95_ms": 84.0, "p99_ms": 230.0},
+//      "scan": {"count":  47, "errors": 0, "p50_ms":  2.1, "p95_ms":  8.3, "p99_ms":  41.0}
+//   }
+// }
+```
+
+Percentiles come from a 256-sample rolling window per function. With fewer than 256 calls the percentiles use what's available; once the buffer wraps, older samples are overwritten so the percentiles reflect recent behaviour. A slow patch fades from the p99 once 256 normal calls follow.
+
+Schema-rejected calls (`BRIDGE_SCHEMA_ARG`) and capability-gated rejections (`BRIDGE_BINARY_UNSUPPORTED`) count in `calls_total`, `calls_failed`, `errors_by_code`, and the per-function `errors` count — but their latency is the microseconds of validation, not anything that hit the wire. Network errors that taint the bridge (`BRIDGE_CLOSED`, `BRIDGE_TIMEOUT`) all count too.
+
+### `bridgeInfo(bridge) → hash`
+
+Returns the protocol metadata negotiated during the `__hello__` handshake. Useful for verifying that a bridge supports a given capability before exercising features that depend on it.
+
+```frog
+info = bridgeInfo(bridge)
+// info = {
+//   "protocol":         1,
+//   "capabilities":     ["schema"],
+//   "helper":           "klex_bridge.py/0.7.0",
+//   "language":         "python",
+//   "language_version": "3.12.4"
+// }
+
+if info["protocol"] == 0 {
+    println("legacy bridge — pre-handshake")
+}
+```
+
+Legacy bridges that don't implement `__hello__` are reported as protocol 0 with empty capabilities and empty helper/language strings — back-compatible by construction.
 
 ---
 
@@ -228,6 +346,7 @@ Three rules for hand-rolled loops:
 |---|---|---|
 | `BRIDGE_OPTS_INVALID` | Bad value in the `nativeBridge` opts hash | n/a — bridge never started |
 | `BRIDGE_SCHEMA_ARG` | Argument failed kLex-side schema validation (request never hit the wire) | usable |
+| `BRIDGE_SCHEMA_RETURN` | Bridge returned a value that doesn't match its declared return type (kLex-side safety net for bridges that bypass the helper) | usable |
 | `BRIDGE_ERROR` | Protocol or logic error returned by the bridge | usable |
 | `BRIDGE_CLOSED` | Subprocess closed unexpectedly | unusable — close and restart |
 | `BRIDGE_TIMEOUT` | Call exceeded the timeout | tainted — close and restart |
@@ -433,6 +552,90 @@ Handler names stay the same on the wire, so existing kLex code that calls the br
 
 ---
 
+## Phase 3.5 — Return Validation, Structured Errors, Streaming
+
+Three small additions that round out the bridge surface introduced in Phase 3.
+
+### Return-value validation
+
+Phase 3 validated argument types. Phase 3.5 validates return types too. The same schema mini-language is used: a handler declared `returns="int"` that actually returns a string produces a clear error.
+
+Validation runs on both sides:
+
+- **Python side (klex_bridge.serve()):** after the handler returns, `_validate_return` checks the value against the declared type. A mismatch raises `TypeError`, which surfaces to kLex as an ordinary structured error (see below).
+- **kLex side (bridgeCall):** for the small population of hand-rolled bridges that bypass `klex_bridge` but still expose `__schema__`, the same validation runs after the response is unmarshalled. Mismatches surface as `BRIDGE_SCHEMA_RETURN`.
+
+### Structured errors
+
+When a handler raises, the helper sends the Python exception class name and the full traceback alongside the error message — not just `{"error": "msg"}` but `{"error": "msg", "error_type": "ValueError", "traceback": "..."}`.
+
+These flow into kLex's `*Error` object as new fields:
+
+```frog
+r, err = bridgeCall(b, "open_missing", ["/no/such/file"])
+if err != null {
+    println(err.code)        // "BRIDGE_ERROR"
+    println(err.errorType)   // "FileNotFoundError"
+    println(err.message)     // "[Errno 2] No such file or directory: ..."
+    println(err.traceback)   // full Python traceback
+}
+```
+
+For kLex-native errors (anything not crossing a bridge), `errorType` and `traceback` are empty strings — backward-compatible with existing error-handling code that only reads `.code` and `.message`. Legacy hand-rolled bridges that send plain `{"error": "msg"}` also work fine; the new fields stay empty when absent on the wire.
+
+### Streaming responses
+
+A handler can yield items one at a time. kLex consumers receive a channel and drain it with `for item in ch { ... }`. Useful for: progress reporting, chunked downloads, log tail-following, paginated APIs, anything iterative.
+
+**Python side — use `@stream_handler`:**
+
+```python
+from klex_bridge import stream_handler, serve
+
+@stream_handler(args=[("dir", "string")], yields="string")
+def list_files(directory):
+    for entry in os.scandir(directory):
+        yield entry.path
+```
+
+The decorator registers the handler with `stream=True`. The function must return an iterable / be a generator — each `yield` becomes one message on the wire.
+
+**kLex side — call via `bridgeStream`:**
+
+```frog
+ch, err = bridgeStream(b, "list_files", ["/var/log"])
+if err != null { println(err.message)  return }
+
+for item in ch {
+    if type(item) == "ERROR" {
+        println("stream failed: " + item.message)
+        break
+    }
+    println(item)
+}
+```
+
+The channel closes when the bridge sends `stream_end`. Mid-stream errors arrive as a final `*Error` item on the channel — the consumer can detect them with `type(item) == "ERROR"`.
+
+**Wire protocol:**
+
+```
+Request:   {"id": N, "fn": "...", "args": [...], "stream": true}
+
+Responses (multiple, same id):
+  {"id": N, "stream":     item}       — one item per message
+  {"id": N, "stream_end": true}       — clean end of stream
+  {"id": N, "error": "...", ...}      — error mid-stream (terminates the stream)
+```
+
+**Misuse is caught at the boundary:** calling a `@stream_handler` via `bridgeCall` (or vice versa) returns a clear error explaining which API to use.
+
+**v1 limitations:**
+- Cancellation is one-sided. Breaking out of the consumer's `for` loop drops further items but does not currently signal the bridge to stop producing — the bridge runs to completion. A future enhancement will propagate cancellation back to the handler.
+- The channel buffer is 256 items. If a consumer stops reading but doesn't break, items pile up there until the bridge finishes.
+
+---
+
 ## What Phase 1 Hardening Fixed
 
 These were limitations in earlier versions of the bridge; they are no longer constraints.
@@ -471,7 +674,8 @@ Working bridges in the repo to study:
 
 - `stdlib/python/klex_bridge.py` — the helper module itself; read it to see exactly what the dispatch loop and validator do
 - `tests/examples/bridge/python_bridge.py` — minimal arithmetic example using the `@handler` decorator and schemas; ideal starting point
-- `tests/examples/bridge/schemaTest.lex` — exercises `bridgeSchema()` introspection + `BRIDGE_SCHEMA_ARG` validation
+- `tests/examples/bridge/schemaTest.lex` — exercises `bridgeSchema()` introspection, `BRIDGE_SCHEMA_ARG`, return validation, and structured errors (`err.errorType` / `err.traceback`)
+- `tests/examples/bridge/streamTest.lex` — exercises `bridgeStream()`: happy path, mid-stream errors, misuse detection
 - `tests/examples/SecretHunter/yara_bridge.py` — legacy (no-helper) bridge using `load` + `scan_batch`; uses an external Python library (yara-python)
 - `tests/examples/SecretHunter/github_bridge.py` — full-featured: API client, subprocess (git), HTTP downloads, config file management, sensitive-value scrubbing
 - `tests/examples/bridge/robustness_bridge.py` — Phase 1+2 test bridge: timeout, crash, kill, notifications, concurrent echo

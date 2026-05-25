@@ -1,55 +1,53 @@
-// stdlib/encoding.lex — ASCII encoding utilities (printable range 32–126)
+// stdlib/encoding.lex — string ↔ integer-array conversion utilities
+// @module    encoding
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   string ↔ integer-array conversion utilities
+//
+// kLex exposes ord() and chr() as native builtins (see eval/builtins_strings.go).
+// This file provides the array-shaped helpers bytes()/stringFromBytes() that
+// the builtins do not — convenient when you want a kLex Array of ints rather
+// than the *Bytes type returned by strToBytes/bytesToStr.
+//
+// HISTORY: the prior version of this file re-implemented ord/chr in FROG using
+// indexOf on a 95-char ASCII table. That was O(95) per character AND restricted
+// the API to printable ASCII — every non-ASCII rune became "?". The native
+// builtins are O(1), Unicode-aware, and treat the full code-point range as
+// first-class.
 //
 // Usage:
 //   import "stdlib/encoding.lex" as enc
-//   println(enc.ord("A"))    // 65
-//   println(enc.chr(65))     // A
+//   println(enc.bytes("AB"))            // [65, 66]
+//   println(enc.stringFromBytes([72, 73]))  // "HI"
+//
+// For single-character conversion call the builtins directly:
+//   println(ord("A"))    // 65
+//   println(chr(65))     // "A"
 
-START = 32
-
-ASCII_STR = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz\{|}~"
-
-// ord returns the ASCII code of c. Returns 63 ('?') for out-of-range characters.
-fn ord(c) {
-    i = indexOf(ASCII_STR, c)
-    if i == -1 {
-        return 63
-    }
-    return START + i
-}
-
-// chr returns the character for ASCII code n, or null if out of range.
-fn chr(n) {
-    i = n - START
-    if i < 0 { return null }
-    if i >= len(ASCII_STR) { return null }
-    return ASCII_STR[i]
-}
-
-// bytes converts a string to an array of ASCII codes.
+// bytes(s) — return an array of Unicode code points, one per character.
+// Pre-allocates the result so there's no O(n²) push-in-loop.
 fn bytes(s) {
-    out = []
-    i = 0
-    while i < len(s) {
-        out = push(out, ord(s[i]))
+    let n = len(s)
+    let out = makeArray(n, 0)
+    let i = 0
+    while i < n {
+        out[i] = ord(s[i])
         i = i + 1
     }
     return out
 }
 
-// stringFromBytes converts an array of ASCII codes back to a string.
-// Out-of-range codes become '?'.
+// stringFromBytes(arr) — inverse of bytes(): join an array of code points into
+// a string. Pre-allocates the parts buffer and joins once — O(n) instead of the
+// prior O(n²) "out = out + c" loop.
 fn stringFromBytes(arr) {
-    out = ""
-    i = 0
-    while i < len(arr) {
-        c = chr(arr[i])
-        if c == null {
-            out = out + "?"
-        } else {
-            out = out + c
-        }
+    let n = len(arr)
+    let parts = makeArray(n, "")
+    let i = 0
+    while i < n {
+        parts[i] = chr(arr[i])
         i = i + 1
     }
-    return out
+    return join(parts, "")
 }

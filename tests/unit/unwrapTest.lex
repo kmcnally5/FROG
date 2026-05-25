@@ -1,7 +1,7 @@
 // unwrapTest.lex — tests for the postfix ? error-propagation operator
 
-passed = 0
-failed = 0
+let passed = 0
+let failed = 0
 
 fn check(name, got, expected) {
     if got == expected {
@@ -25,19 +25,19 @@ fn errTuple(msg) {
 // ── Unwrap success path ───────────────────────────────────────────────────────
 
 fn testUnwrapInt() {
-    result = okTuple(42)?
+    let result = okTuple(42)?
     return result
 }
 check("? unwraps integer",  testUnwrapInt(),  42)
 
 fn testUnwrapString() {
-    s = okTuple("hello")?
+    let s = okTuple("hello")?
     return s
 }
 check("? unwraps string",  testUnwrapString(),  "hello")
 
 fn testUnwrapBool() {
-    b = okTuple(true)?
+    let b = okTuple(true)?
     return b
 }
 check("? unwraps bool",  testUnwrapBool(),  true)
@@ -54,7 +54,7 @@ fn innerFails() {
 }
 
 fn outerCatches() {
-    val, err = safe(innerFails)    // no extra args — innerFails takes 0 params
+    let val, err = safe(innerFails)    // no extra args — innerFails takes 0 params
     if type(val) == "ERROR" { return val.message }
     if err != null { return err.message }
     return val
@@ -69,7 +69,7 @@ fn innerWithCode() {
 }
 
 fn outerCheckCode() {
-    val, err = safe(innerWithCode)
+    let val, err = safe(innerWithCode)
     if type(val) == "ERROR" { return val.code }
     if err != null { return err.code }
     return "no error"
@@ -78,7 +78,7 @@ check("? preserves error code",  outerCheckCode(),  "TEST_ERR")
 
 // ── Short-circuit: code after ? does not run ──────────────────────────────────
 
-sideEffect = 0
+let sideEffect = 0
 
 fn testNoSideEffect() {
     _ = errTuple("stop")?
@@ -96,8 +96,8 @@ fn step2(v) { return v + "_s2", null }
 fn step3(v) { return v + "_s3", null }
 
 fn chainedSuccess() {
-    a = step1()?
-    b = step2(a)?
+    let a = step1()?
+    let b = step2(a)?
     return step3(b)?
 }
 check("chained ? all succeed",  chainedSuccess(),  "s1_s2_s3")
@@ -105,9 +105,9 @@ check("chained ? all succeed",  chainedSuccess(),  "s1_s2_s3")
 fn step2Fails(v) { return null, error("STEP2_FAIL", "step 2 blew up") }
 
 fn chainedStopsEarly() {
-    val, err = safe(fn() {
-        a = step1()?
-        b = step2Fails(a)?
+    let val, err = safe(fn() {
+        let a = step1()?
+        let b = step2Fails(a)?
         return step3(b)?
     })
     if type(val) == "ERROR" { return val.code }
@@ -119,7 +119,7 @@ check("chained ? stops at failing step",  chainedStopsEarly(),  "STEP2_FAIL")
 // ── TypeError on non-tuple — safe() catches it in err slot ───────────────────
 
 fn unwrapNonTuple() {
-    val, err = safe(fn() {
+    let val, err = safe(fn() {
         _ = 42?
         return "unreachable"
     })
@@ -141,15 +141,15 @@ fn fakeProcess(contents) {
 }
 
 fn pipeline(path) {
-    contents = fakeRead(path)?
-    size     = fakeProcess(contents)?
+    let contents = fakeRead(path)?
+    let size     = fakeProcess(contents)?
     return size
 }
 
 check("? pipeline succeeds",  pipeline("good"),  13)   // "file contents" = 13 chars
 
 fn pipelineFails() {
-    val, err = safe(fn() { return pipeline("bad") })
+    let val, err = safe(fn() { return pipeline("bad") })
     if type(val) == "ERROR" { return val.code }
     if err != null { return err.code }
     return "no error"

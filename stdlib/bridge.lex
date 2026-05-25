@@ -1,4 +1,9 @@
 // stdlib/bridge.lex — ergonomic wrapper for the native bridge system.
+// @module    bridge
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   ergonomic wrapper for the native bridge system.
 //
 // Provides a struct-based API with:
 //   - Dependency checking on startup (check_deps convention)
@@ -81,9 +86,9 @@ struct ResilientBridge {
         }
 
         if timeoutSec > 0 {
-            result, err = bridgeCall(self._bridge, fnName, callArgs, timeoutSec)
+            let result, err = bridgeCall(self._bridge, fnName, callArgs, timeoutSec)
         } else {
-            result, err = bridgeCall(self._bridge, fnName, callArgs)
+            let result, err = bridgeCall(self._bridge, fnName, callArgs)
         }
 
         if err != null {
@@ -96,15 +101,15 @@ struct ResilientBridge {
                         "bridge circuit opened: " + str(self._failures) +
                         " consecutive failures (last: " + err.message + ")")
                 }
-                rerr = self._restart()
+                let rerr = self._restart()
                 if rerr != null {
                     return null, rerr
                 }
                 // One retry after successful restart.
                 if timeoutSec > 0 {
-                    retryResult, retryErr = bridgeCall(self._bridge, fnName, callArgs, timeoutSec)
+                    let retryResult, retryErr = bridgeCall(self._bridge, fnName, callArgs, timeoutSec)
                 } else {
-                    retryResult, retryErr = bridgeCall(self._bridge, fnName, callArgs)
+                    let retryResult, retryErr = bridgeCall(self._bridge, fnName, callArgs)
                 }
                 if retryErr == null { self._failures = 0 }
                 return retryResult, retryErr
@@ -121,13 +126,13 @@ struct ResilientBridge {
 
     fn _restart() {
         bridgeClose(self._bridge)
-        newBridge, err = nativeBridge(self._cmd, self._args, self._opts)
+        let newBridge, err = nativeBridge(self._cmd, self._args, self._opts)
         if err != null { return err }
 
         // Health check — bridges that implement health_check() confirm they
         // are alive. BRIDGE_ERROR with "unknown function" is acceptable (bridge
         // simply doesn't implement the convention). Any other error = restart failed.
-        _, hcErr = bridgeCall(newBridge, "health_check", [], 5)
+        let _, hcErr = bridgeCall(newBridge, "health_check", [], 5)
         if hcErr != null && hcErr.code != "BRIDGE_ERROR" {
             bridgeClose(newBridge)
             return hcErr
@@ -149,28 +154,28 @@ struct ResilientBridge {
 //   require_deps    — if true, calls check_deps() on startup and returns an error
 //                     if the bridge reports missing dependencies (default: false)
 fn newResilient(cmd, args, opts) {
-    maxRetries = 3
-    requireDeps = false
+    let maxRetries = 3
+    let requireDeps = false
     if opts != null {
         if opts["max_retries"] != null  { maxRetries  = opts["max_retries"]  }
         if opts["require_deps"] != null { requireDeps = opts["require_deps"] }
     }
 
-    b, err = nativeBridge(cmd, args, opts)
+    let b, err = nativeBridge(cmd, args, opts)
     if err != null { return null, err }
 
     if requireDeps == true {
-        depsResult, derr = bridgeCall(b, "check_deps", [], 10)
+        let depsResult, derr = bridgeCall(b, "check_deps", [], 10)
         if derr != null {
             bridgeClose(b)
             return null, derr
         }
         if depsResult["ok"] == false {
-            missing = depsResult["missing"]
-            msg = "missing dependencies"
+            let missing = depsResult["missing"]
+            let msg = "missing dependencies"
             if missing != null && len(missing) > 0 {
-                i = 0
-                parts = makeArray(len(missing), "")
+                let i = 0
+                let parts = makeArray(len(missing), "")
                 while i < len(missing) { parts[i] = str(missing[i])  i = i + 1 }
                 msg = "missing dependencies: " + join(parts, ", ")
             }
@@ -179,7 +184,7 @@ fn newResilient(cmd, args, opts) {
         }
     }
 
-    rb = ResilientBridge {
+    let rb = ResilientBridge {
         _cmd:         cmd,
         _args:        args,
         _opts:        opts,
@@ -203,9 +208,9 @@ fn newResilient(cmd, args, opts) {
 //       return bridgeCall(b, "do_work", [input])
 //   })
 fn withBridge(cmd, args, opts, callback) {
-    b, err = nativeBridge(cmd, args, opts)
+    let b, err = nativeBridge(cmd, args, opts)
     if err != null { return null, err }
-    result, cerr = safe(fn() { return callback(b) })
+    let result, cerr = safe(fn() { return callback(b) })
     bridgeClose(b)
     if cerr != null { return null, cerr }
     return result, null

@@ -1,4 +1,9 @@
 // actor.lex — Actor model for kLex
+// @module    actor
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   Actor model for kLex
 //
 // An actor is a goroutine with a typed mailbox (buffered channel) and
 // explicit state threaded between message iterations (Erlang/OTP style).
@@ -59,8 +64,8 @@ struct Actor {
 // internally.
 fn _statefulLoop(behavior, initialState, mailbox) {
     return async(fn() {
-        state = initialState
-        msg, ok = recv(mailbox)
+        let state = initialState
+        let msg, ok = recv(mailbox)
         while ok {
             state = behavior(msg, state)
             msg, ok = recv(mailbox)
@@ -72,7 +77,7 @@ fn _statefulLoop(behavior, initialState, mailbox) {
 // _statelessLoop is the shared message loop for spawnStateless.
 fn _statelessLoop(behavior, mailbox) {
     return async(fn() {
-        msg, ok = recv(mailbox)
+        let msg, ok = recv(mailbox)
         while ok {
             behavior(msg)
             msg, ok = recv(mailbox)
@@ -83,23 +88,23 @@ fn _statelessLoop(behavior, mailbox) {
 // spawn creates a stateful actor with a mailbox capacity of 32.
 // behavior is called as fn(msg, state) and must return the new state.
 fn spawn(behavior, initialState) {
-    mailbox = channel(32)
-    task = _statefulLoop(behavior, initialState, mailbox)
+    let mailbox = channel(32)
+    let task = _statefulLoop(behavior, initialState, mailbox)
     return Actor { mailbox: mailbox, task: task }
 }
 
 // spawnBuffered creates a stateful actor with a caller-defined mailbox capacity.
 // Use when you know your message volume needs a larger or smaller buffer than 32.
 fn spawnBuffered(behavior, initialState, capacity) {
-    mailbox = channel(capacity)
-    task = _statefulLoop(behavior, initialState, mailbox)
+    let mailbox = channel(capacity)
+    let task = _statefulLoop(behavior, initialState, mailbox)
     return Actor { mailbox: mailbox, task: task }
 }
 
 // spawnStateless creates an actor whose behavior takes only the message.
 // Use for side-effectful actors (logging, I/O) that carry no state between messages.
 fn spawnStateless(behavior) {
-    mailbox = channel(32)
-    task = _statelessLoop(behavior, mailbox)
+    let mailbox = channel(32)
+    let task = _statelessLoop(behavior, mailbox)
     return Actor { mailbox: mailbox, task: task }
 }

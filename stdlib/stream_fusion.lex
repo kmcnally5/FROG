@@ -1,6 +1,9 @@
-// ============================================================================
 // stream_fusion.lex — Stream operation fusion and chaining
-// ============================================================================
+// @module    stream_fusion
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   Fused stream operation chains (map, filter, reduce)
 //
 // Provides a way to chain stream operations (map, filter, reduce) efficiently
 // by fusing them into a single pass through the data.
@@ -43,23 +46,23 @@ fn fuse(arr, steps...) {
         return []
     }
 
-    n      = len(arr)
-    nSteps = len(steps)
-    result = makeArray(n, null)
-    resultIdx = 0
+    let n      = len(arr)
+    let nSteps = len(steps)
+    let result = makeArray(n, null)
+    let resultIdx = 0
 
-    i = 0
+    let i = 0
     while i < n {
-        item = arr[i]
-        skip = false
+        let item = arr[i]
+        let skip = false
 
         // Short-circuit once a filter rejects — subsequent steps would be
         // discarded anyway and might do expensive work.
-        j = 0
+        let j = 0
         while j < nSteps && !skip {
-            step     = steps[j]
-            stepType = step["type"]
-            stepFn   = step["fn"]
+            let step     = steps[j]
+            let stepType = step["type"]
+            let stepFn   = step["fn"]
 
             if stepType == "map" {
                 item = stepFn(item)

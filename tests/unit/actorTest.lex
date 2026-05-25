@@ -9,7 +9,7 @@ enum CountMsg {
 
 println("=== stateful counter ===")
 
-a = actor.spawn(fn(msg, count) {
+let a = actor.spawn(fn(msg, count) {
     switch msg {
         case CountMsg.Add(n)  { return count + n }
         case CountMsg.Get(ch) { send(ch, count)  return count }
@@ -20,18 +20,18 @@ a = actor.spawn(fn(msg, count) {
 a.send(CountMsg.Add(5))
 a.send(CountMsg.Add(3))
 
-replyCh = channel(1)
+let replyCh = channel(1)
 a.send(CountMsg.Get(replyCh))
-n, _ = recv(replyCh)
+let n, _ = recv(replyCh)
 println("count after +5+3 = " + str(n))
 
 a.send(CountMsg.Add(10))
-replyCh2 = channel(1)
+let replyCh2 = channel(1)
 a.send(CountMsg.Get(replyCh2))
-n2, _ = recv(replyCh2)
+let n2, _ = recv(replyCh2)
 println("count after +10 = " + str(n2))
 
-final = a.stop()
+let final = a.stop()
 println("final state from stop() = " + str(final))
 
 
@@ -40,7 +40,7 @@ println("final state from stop() = " + str(final))
 println("")
 println("=== stateless logger ===")
 
-log = actor.spawnStateless(fn(msg) {
+let log = actor.spawnStateless(fn(msg) {
     println("log: " + msg)
 })
 
@@ -60,7 +60,7 @@ enum CalcMsg {
     Result(replyTo)
 }
 
-b = actor.spawnBuffered(fn(msg, acc) {
+let b = actor.spawnBuffered(fn(msg, acc) {
     switch msg {
         case CalcMsg.Mul(n)       { return acc * n }
         case CalcMsg.Result(ch)   { send(ch, acc)  return acc }
@@ -72,9 +72,9 @@ b.send(CalcMsg.Mul(3))
 b.send(CalcMsg.Mul(4))
 b.send(CalcMsg.Mul(5))
 
-resCh = channel(1)
+let resCh = channel(1)
 b.send(CalcMsg.Result(resCh))
-r, _ = recv(resCh)
+let r, _ = recv(resCh)
 println("2 * 3 * 4 * 5 = " + str(r))
 b.stop()
 
@@ -86,7 +86,7 @@ println("=== behavior crash ===")
 
 enum BadMsg { Trigger }
 
-bad = actor.spawn(fn(msg, s) {
+let bad = actor.spawn(fn(msg, s) {
     switch msg {
         case BadMsg.Trigger { return 1 + "oops" }
     }
@@ -94,7 +94,7 @@ bad = actor.spawn(fn(msg, s) {
 }, 0)
 
 bad.send(BadMsg.Trigger)
-result, err = safe(fn() { return bad.stop() })
+let result, err = safe(fn() { return bad.stop() })
 if err != null {
     println("actor crashed as expected: " + err.message)
 } else {

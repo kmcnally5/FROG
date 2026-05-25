@@ -1,4 +1,9 @@
 // stdlib/assert.lex — kLex assertion library for writing tests
+// @module    assert
+// @version   1.0.0
+// @since     klex 0.3.35
+// @author    karl
+// @summary   kLex assertion library for writing tests
 //
 // Tracks pass/fail counts across assertions. Call summary() at the end
 // of a test file to print totals and see whether all assertions passed.
@@ -12,8 +17,8 @@
 // Note: assertEqual uses == which is reference equality for arrays and hashes.
 // Two arrays with the same contents are not equal unless they are the same object.
 
-_passed = 0
-_failed = 0
+let _passed = 0
+let _failed = 0
 
 fn _pass() {
     _passed = _passed + 1
@@ -78,10 +83,30 @@ fn assertNotNull(val) {
     _fail("expected a non-null value")
 }
 
+// assertClose asserts that |got - want| < tol. Use for any float
+// comparison where rounding may produce small differences — MPS vs
+// CPU kernel results, transcendental round-trips, accumulated
+// reduction error, etc. NumPy parallel: np.testing.assert_allclose.
+//
+//   assertClose(t.get(c, 0), 32.0, 0.001)
+//
+// `got` and `want` must both be numeric (Integer or Float).
+fn assertClose(got, want, tol) {
+    let d = got - want
+    if d < 0 {
+        d = -d
+    }
+    if d < tol {
+        _pass()
+        return null
+    }
+    _fail("expected " + str(want) + " +/- " + str(tol) + " but got " + str(got) + " (diff " + str(d) + ")")
+}
+
 // assertType asserts that type(val) == expected.
 // expected should be a string: "INTEGER", "STRING", "BOOLEAN", "ARRAY", "HASH", "NULL", "FUNCTION"
 fn assertType(val, expected) {
-    t = type(val)
+    let t = type(val)
     if t == expected {
         _pass()
         return null
@@ -92,7 +117,7 @@ fn assertType(val, expected) {
 // summary prints the total number of passed and failed assertions.
 // Returns true if all assertions passed, false if any failed.
 fn summary() {
-    total = _passed + _failed
+    let total = _passed + _failed
     println(str(_passed) + "/" + str(total) + " assertions passed")
     if _failed > 0 {
         println(str(_failed) + " FAILED")
