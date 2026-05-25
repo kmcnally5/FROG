@@ -51,7 +51,7 @@ The REPL supports multi-line input (automatically detects when blocks are comple
 
 ## Three things that make it different
 
-### 1 — Async and channels in seven lines
+### 1 — Async and channels
 
 ```lex
 let jobs    = channel(200)
@@ -59,13 +59,15 @@ let results = channel(200)
 
 let worker = async(fn() {
     while true {
-        let job = recv(jobs)
-        send(results, process(job))
+        let job, ok = recv(jobs)
+        if ok == false { break }
+        send(results, job + " processed")
     }
 })
 
 send(jobs, "file.txt")
-let result = recv(results)
+let result, ok = recv(results)
+println(result)
 ```
 
 No executors, no event loops. Each `async()` spawns a real goroutine. Channels are typed, bounded, and blocking.
@@ -119,11 +121,16 @@ The built `klex` binary auto-discovers `stdlib/` next to itself, so scripts that
 ```lex
 // Functions are first-class
 fn add(a, b) { return a + b }
+println(add(3, 4))   // 7
 
-// Arrays, hashes, structs
+// Arrays and hashes
 let points = [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+println(points[0]["x"])   // 1
 
-// Parallel processing
+// Parallel processing — fan out work across async tasks
+fn scan(chunk) { return len(chunk) }
+
+let slices = ["alpha", "beta", "gamma"]
 let n      = len(slices)
 let tasks  = makeArray(n, null)
 let i      = 0
@@ -132,10 +139,19 @@ while i < n {
     tasks[i] = async(fn() { return scan(chunk) })
     i = i + 1
 }
+let counts = makeArray(n, null)
+let j = 0
+while j < n {
+    counts[j] = await(tasks[j])
+    j = j + 1
+}
+println(counts)   // [5, 4, 5]
 
 // Error handling — Go-style, no exceptions
-let result, err = safe(riskyCall, [arg])
+fn riskyCall(x) { return x * 2 }
+let result, err = safe(riskyCall, 21)
 if err != null { println(err) }
+println(result)   // 42
 ```
 
 **Types:** integer, float, boolean, string, null, array, hash, tuple, channel, function, struct, enum, task
