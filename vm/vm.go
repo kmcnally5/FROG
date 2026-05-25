@@ -620,6 +620,20 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 			}
 			def.MethodsAny[nameObj.Value] = closure
 
+		case OpLoadScriptArgs:
+			// Runtime-injected identifier `__args__`. The tree-walker
+			// finds it via env.Get because main.go does env.Set
+			// ("__args__", ...) before Eval; the VM gets the same
+			// shape by reading chunk.ScriptArgs (populated by
+			// PropagateScriptArgs on entry) and pushing a fresh
+			// *Array around it. Fresh per-load matches tree-walker
+			// semantics: each read of `__args__` yields a distinct
+			// array value, so a script that does `let a = __args__;
+			// push(a, "x")` doesn't surprise a later `__args__` reader.
+			// Empty slice is fine — Array{Elements: nil} behaves like
+			// a zero-length array for len/index/iteration.
+			stack = append(stack, &eval.Array{Elements: chunk.ScriptArgs})
+
 		case OpUndefinedName:
 			// Deferred-resolution opcode. The compiler emits this when
 			// an identifier couldn't be resolved as a local or upvalue.

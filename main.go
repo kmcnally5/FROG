@@ -251,6 +251,12 @@ func main() {
 		// top-level chunk got ScriptDir set, breaking _scriptDir
 		// for nested closures.
 		vm.PropagateScriptDir(chunk, env.ScriptDir())
+		// Same idea for `__args__`: the tree-walker reads it from
+		// env.Get, but the VM has no env chain — propagate the args
+		// slice onto every reachable chunk so OpLoadScriptArgs (the
+		// compiler-emitted load for free `__args__` references) can
+		// build the array. Mirrors PropagateScriptDir exactly.
+		vm.PropagateScriptArgs(chunk, argsArray)
 		result, rerr := vm.Run(chunk)
 		if rerr != nil {
 			fmt.Fprintf(os.Stderr, "vm/run: %v\n", rerr)

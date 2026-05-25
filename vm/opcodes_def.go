@@ -350,4 +350,21 @@ var opcodeDefs = []opcodeDef{
 		StackIn:     1, // pops the closure
 		StackOut:    0, // def stays on the stack (net +0)
 		Description: "Pop the *CompiledFunction on top and install it as method `name` (constants[nameIdx], a *String) on the *StructDef on the stack below. Leaves the def on the stack. Used by compileStructDecl to give methods proper closure semantics — they capture module-level state the same way top-level functions do."},
+
+	// ── Runtime-injected identifier: __args__ ──────────────────────
+	// Mirrors the _scriptDir intercept pattern, but at load (not
+	// call). The tree-walker sets `__args__` on the entry env so
+	// `len(__args__)`, `__args__[0]`, etc. resolve via env.Get. The
+	// VM has no env chain, so the compiler emits this opcode for any
+	// free reference to `__args__` and the dispatch loop builds a
+	// fresh *Array around the current chunk's ScriptArgs slice. The
+	// slice is propagated to every sub-chunk by PropagateScriptArgs,
+	// so nested functions / closures / methods see the same args.
+	// Allocating the *Array per-load (rather than caching one on the
+	// chunk) matches tree-walker semantics: each read of `__args__`
+	// yields a distinct array value, and mutations to one don't
+	// surprise other readers.
+	{Name: "LoadScriptArgs",
+		StackIn: 0, StackOut: 1,
+		Description: "Push a fresh *Array wrapping the current chunk's ScriptArgs. Emitted by the compiler for free references to `__args__`. Mirrors the tree-walker's env.Get(\"__args__\") path."},
 }

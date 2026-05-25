@@ -98,6 +98,16 @@ type BytecodeChunk struct {
 	// the chunk instead and the OpCallBuiltin dispatch site reads it.
 	ScriptDir string
 
+	// ScriptArgs holds the command-line arguments the entry-point
+	// launcher would have placed on the tree-walker's global env as
+	// `__args__`. The tree-walker resolves `__args__` via env.Get;
+	// VM bytecode has no env chain, so the compiler emits
+	// OpLoadScriptArgs for free references to `__args__` and the
+	// dispatch loop builds a fresh *Array around this slice on each
+	// load (mirrors the _scriptDir intercept pattern, just at load
+	// not call). Propagated to every sub-chunk by PropagateScriptArgs.
+	ScriptArgs []eval.Object
+
 	// TopLevelNames maps every top-level binding name to its slot
 	// index in the Program's local-slot table. M6 (audit follow-up,
 	// 2026-05-22): populated for Program chunks only by
@@ -220,6 +230,35 @@ func PropagateScriptDir(chunk *BytecodeChunk, scriptDir string) {
 		}
 		seen[cc] = true
 		cc.ScriptDir = scriptDir
+		for _, k := range cc.Constants {
+			if cf, ok := k.(*CompiledFunction); ok && cf.Chunk != nil {
+				walk(cf.Chunk)
+			}
+		}
+	}
+	walk(chunk)
+}
+
+// PropagateScriptArgs sets chunk.ScriptArgs on the entry chunk AND
+// recursively on every sub-chunk reachable via constant-pool
+// *CompiledFunction values. Same recipe as PropagateScriptDir — and
+// for the same reason: a nested function/closure that references
+// `__args__` runs against its own chunk, so that chunk must carry
+// the args too. The args slice is shared across chunks (no per-chunk
+// copy), which is fine because the VM never mutates it; each
+// OpLoadScriptArgs builds a fresh *Array around it.
+func PropagateScriptArgs(chunk *BytecodeChunk, args []eval.Object) {
+	if chunk == nil {
+		return
+	}
+	seen := map[*BytecodeChunk]bool{}
+	var walk func(c *BytecodeChunk)
+	walk = func(cc *BytecodeChunk) {
+		if cc == nil || seen[cc] {
+			return
+		}
+		seen[cc] = true
+		cc.ScriptArgs = args
 		for _, k := range cc.Constants {
 			if cf, ok := k.(*CompiledFunction); ok && cf.Chunk != nil {
 				walk(cf.Chunk)
@@ -516,6 +555,20 @@ func (c *Compiler) compileIdent(id *ast.Ident) error {
 	if idx, ok := c.resolveUpvalue(id.Value); ok {
 		c.emitOp(OpGetUpvalue, id.Pos)
 		c.emitU16(idx)
+		return nil
+	}
+	// __args__ intercept. The tree-walker sees `__args__` on the
+	// entry env (main.go does env.Set("__args__", ...) before Eval);
+	// the VM has no env chain, so a free reference here means "load
+	// the command-line args injected by the launcher". Sits AFTER
+	// the locals + upvalues checks so `let __args__ = X` still
+	// shadows the injected binding the way it would in the tree-
+	// walker. Mirrors the _scriptDir intercept at OpCallBuiltin —
+	// just at load instead of call. PropagateScriptArgs copies the
+	// args slice onto every reachable sub-chunk, so nested closures
+	// resolve correctly.
+	if id.Value == "__args__" {
+		c.emitOp(OpLoadScriptArgs, id.Pos)
 		return nil
 	}
 	// Builtin used as a value (not a call) — e.g. `arr |> trim` or

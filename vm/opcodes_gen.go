@@ -62,11 +62,12 @@ const (
 	OpCallMethod
 	OpUndefinedName
 	OpInstallMethod
+	OpLoadScriptArgs
 )
 
 // numOpcodes is the total count — used to size the dispatch
 // and verification tables.
-const numOpcodes = 53
+const numOpcodes = 54
 
 // opcodeNames maps opcode → canonical mnemonic.
 // Used by the disassembler and error messages.
@@ -124,6 +125,7 @@ var opcodeNames = [numOpcodes]string{
 	OpCallMethod:      "CallMethod",
 	OpUndefinedName:   "UndefinedName",
 	OpInstallMethod:   "InstallMethod",
+	OpLoadScriptArgs:  "LoadScriptArgs",
 }
 
 // stackEffect describes how many values an opcode pops and pushes.
@@ -190,6 +192,7 @@ var opcodeStackEffects = [numOpcodes]stackEffect{
 	OpCallMethod:      {In: -1, Out: 1, Variable: true},
 	OpUndefinedName:   {In: 0, Out: 1, Variable: false},
 	OpInstallMethod:   {In: 1, Out: 0, Variable: false},
+	OpLoadScriptArgs:  {In: 0, Out: 1, Variable: false},
 }
 
 // opcodeOperandLayout describes the immediate operands an opcode
@@ -308,6 +311,7 @@ var opcodeOperandLayout = [numOpcodes][]operandDef{
 	OpInstallMethod: {
 		{Name: "nameIdx", Kind: opKindConstIdx},
 	},
+	OpLoadScriptArgs: nil,
 }
 
 // opcodeDescriptions holds the human-readable description of each opcode,
@@ -367,6 +371,7 @@ var opcodeDescriptions = [numOpcodes]string{
 	OpCallMethod:      "Dispatch `receiver.name(args)`. Looks up name in receiver.Def.MethodsAny (VM-compiled methods) first, then receiver.Def.Methods (tree-walker methods via ExternalCallable), then falls back to property-fetch + call (module/hash/closure-in-field). Push the return value.",
 	OpUndefinedName:   "Raise a runtime 'undefined name N' error. The name is read from the constant pool slot N (a *String). Used when the compiler couldn't resolve an identifier at compile time — matches the tree-walker's deferred-resolution semantics.",
 	OpInstallMethod:   "Pop the *CompiledFunction on top and install it as method `name` (constants[nameIdx], a *String) on the *StructDef on the stack below. Leaves the def on the stack. Used by compileStructDecl to give methods proper closure semantics — they capture module-level state the same way top-level functions do.",
+	OpLoadScriptArgs:  "Push a fresh *Array wrapping the current chunk's ScriptArgs. Emitted by the compiler for free references to `__args__`. Mirrors the tree-walker's env.Get(\"__args__\") path.",
 }
 
 // String returns the canonical name of the opcode, or "opcode(NN)" for
