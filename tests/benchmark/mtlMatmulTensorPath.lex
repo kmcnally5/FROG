@@ -1,20 +1,21 @@
-// mtlMatmulTensorPath.lex — verify the Tier 2 win:
-// mtl.matmulMPS(tensor, tensor, ...) should now skip the kLex Array
-// element-by-element marshalling that mtl.matmulMPS(array, array, ...)
-// pays per call.
+// mtlMatmulTensorPath.lex — verify the three clean matmul lanes
+// (post 2026-05-27 FROG-cleanup of the mtl matmul surface):
 //
-// Three paths at the same size + same data:
 //   (A) t.matmul(tensorA, tensorB)
-//       — pure FrogPy, fully typed, fast upload AND fast readback
-//   (B) mtl.matmulMPS(tensorA, tensorB, m, k, n)
-//       — new path: fast upload via _mtlBufferFromTensor; readback
-//         still returns kLex Array (preserves API)
+//       — pure FrogPy, fully typed, direct sync MPS dispatch
+//   (B) mtl.matmulMPSTensor(tensorA, tensorB)
+//       — lower-level tensor entry point: zero-marshalling upload
+//         (_mtlBufferFromTensor) AND zero-allocation readback
+//         (_mtlReadBufferIntoTensor). Same kernel as (A); slight
+//         overhead from the stdlib await-channel hop.
 //   (C) mtl.matmulMPS(arrayA, arrayB, m, k, n)
-//       — legacy path: slow upload + slow readback
+//       — strict Array-only legacy path: per-element upload
+//         conversion + per-element readback marshalling.
 //
-// Expectation: (A) ≈ (B) on the upload side; (B) is slower than (A)
-// by roughly the readback marshalling cost.  (C) is significantly
-// slower than both because of the upload tax.
+// Expectation: (A) ≈ (B) — both do full zero-marshalling on upload
+// AND readback through the same MPS kernel; (B) pays a small
+// channel-hop overhead. (C) is significantly slower than both
+// because of the Array marshalling tax on both sides.
 
 import "stdlib/datetime.lex" as dt
 import "stdlib/tensor.lex" as t
@@ -80,13 +81,13 @@ let nsA = medianRun(runFrogPy, 3, 10)
 println("(A) t.matmul(tensor, tensor)                 median = " +
     str(float(nsA) / 1000000.0) + " ms  (" + str(gflopsAt(N, nsA)) + " GFLOPS)")
 
-// --- (B) mtl.matmulMPS with tensor inputs (new fast upload) ---
+// --- (B) mtl.matmulMPSTensor (zero-marshalling both sides) ---
 fn runMtlT() {
-    let r, _ = mtl.matmulMPS(onesT, onesT, N, N, N)
+    let r, _ = mtl.matmulMPSTensor(onesT, onesT)
     return r
 }
 let nsB = medianRun(runMtlT, 3, 10)
-println("(B) mtl.matmulMPS(tensor, tensor, m,k,n)     median = " +
+println("(B) mtl.matmulMPSTensor(tensor, tensor)      median = " +
     str(float(nsB) / 1000000.0) + " ms  (" + str(gflopsAt(N, nsB)) + " GFLOPS)")
 
 // --- (C) mtl.matmulMPS with Array inputs (legacy slow upload) ---
@@ -100,14 +101,17 @@ println("(C) mtl.matmulMPS(array, array, m,k,n)       median = " +
 
 println("")
 println("Speedups:")
-println("  (B) vs (C) — tensor input fast path        = " + str(float(nsC) / float(nsB)) + "x")
-println("  (A) vs (B) — FrogPy vs mtl tensor path     = " + str(float(nsB) / float(nsA)) + "x (delta = readback marshalling)")
+println("  (B) vs (C) — tensor entry point vs Array   = " + str(float(nsC) / float(nsB)) + "x")
+println("  (A) vs (B) — t.matmul vs mtl tensor entry  = " + str(float(nsB) / float(nsA)) + "x (delta = stdlib await-channel hop)")
 
-// Quick mixed-input sanity: should error cleanly.
-let _v, err = safe(mtl.matmulMPS, onesT, onesArr, N, N, N)
-a.assertTrue(isError(err))
+// Strict-lane sanity checks: each function now rejects the wrong input type.
+let _v1, err1 = safe(mtl.matmulMPS, onesT, onesT, N, N, N)
+a.assertTrue(isError(err1))
+let _v2, err2 = safe(mtl.matmulMPSTensor, onesArr, onesArr)
+a.assertTrue(isError(err2))
 println("")
-println("mixed Array+Tensor input rejected cleanly: OK")
+println("matmulMPS rejects tensor input:        OK")
+println("matmulMPSTensor rejects Array input:   OK")
 
 println("")
 a.summary()

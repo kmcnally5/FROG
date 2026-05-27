@@ -192,39 +192,117 @@ float   klex_tensor_dot_f32(const float* a, const float* b, size_t n);
 double  klex_tensor_dot_f64(const double* a, const double* b, size_t n);
 int64_t klex_tensor_dot_i64(const int64_t* a, const int64_t* b, size_t n);
 
-/* ===== axis-aware reductions (2-D only in v1) =====
+/* ===== axis-aware reductions (N-D) =====
  *
- * Input is row-major [m × n]. axis ∈ {0, 1}:
- *   axis == 0  → reduce rows; output is length n
- *   axis == 1  → reduce columns; output is length m
+ * Input is row-major contiguous of arbitrary rank. The caller flattens
+ * the shape around the reduction axis into three integers:
  *
- * The kernel zeroes / pre-fills the output as needed. Empty axes
- * (m or n == 0) are handled by the Go-side builtin before dispatch.
+ *   prefix    — product of dimensions BEFORE the reduced axis
+ *               (1 if the axis is the leading dimension)
+ *   reduceLen — size of the reduced axis itself
+ *   suffix    — product of dimensions AFTER the reduced axis
+ *               (1 if the axis is the trailing dimension)
  *
- * For min/max/argmin/argmax, the kernel assumes the reduced axis is
- * non-empty (the Go-side check enforces this). Ties in argmin/argmax
- * resolve to the first occurrence (matches the scalar versions).
- */
+ * In flat indexing the input element at (p, r, s) where
+ * 0 <= p < prefix, 0 <= r < reduceLen, 0 <= s < suffix lives at
+ * in[(p * reduceLen + r) * suffix + s]. The kernel collapses the r
+ * dimension; the output has prefix*suffix elements, indexed by
+ * out[p * suffix + s]. The 2-D special cases fall out:
+ *   2-D [m, n] axis 0  →  prefix=1, reduceLen=m, suffix=n  (per-column)
+ *   2-D [m, n] axis 1  →  prefix=m, reduceLen=n, suffix=1  (per-row)
+ *
+ * Two access patterns inside each kernel:
+ *   suffix == 1  → contiguous segment reduce; register-tracked accumulator
+ *   suffix  > 1  → outer accumulate; initialise the suffix-wide output
+ *                  strip from r=0 then fold rows r=1..reduceLen-1 in
+ *                  place. Inner loop walks contiguous memory (good for
+ *                  autovec) at the cost of one extra pass per output
+ *                  cell vs the contiguous case.
+ *
+ * For min/max/argmin/argmax the kernel assumes reduceLen >= 1 (the
+ * Go-side check enforces this). Ties in argmin/argmax resolve to the
+ * first occurrence (matches the scalar versions). */
 
 /* sum: out is same dtype as in */
-void klex_tensor_sum_axis2d_f32(float*   out, const float*   in, size_t m, size_t n, int axis);
-void klex_tensor_sum_axis2d_f64(double*  out, const double*  in, size_t m, size_t n, int axis);
-void klex_tensor_sum_axis2d_i64(int64_t* out, const int64_t* in, size_t m, size_t n, int axis);
+void klex_tensor_sum_axis_f32(float*   out, const float*   in,
+                              size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_sum_axis_f64(double*  out, const double*  in,
+                              size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_sum_axis_i64(int64_t* out, const int64_t* in,
+                              size_t prefix, size_t reduceLen, size_t suffix);
 
 /* min / max: out is same dtype as in */
-void klex_tensor_min_axis2d_f32(float*   out, const float*   in, size_t m, size_t n, int axis);
-void klex_tensor_min_axis2d_f64(double*  out, const double*  in, size_t m, size_t n, int axis);
-void klex_tensor_min_axis2d_i64(int64_t* out, const int64_t* in, size_t m, size_t n, int axis);
-void klex_tensor_max_axis2d_f32(float*   out, const float*   in, size_t m, size_t n, int axis);
-void klex_tensor_max_axis2d_f64(double*  out, const double*  in, size_t m, size_t n, int axis);
-void klex_tensor_max_axis2d_i64(int64_t* out, const int64_t* in, size_t m, size_t n, int axis);
+void klex_tensor_min_axis_f32(float*   out, const float*   in,
+                              size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_min_axis_f64(double*  out, const double*  in,
+                              size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_min_axis_i64(int64_t* out, const int64_t* in,
+                              size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_max_axis_f32(float*   out, const float*   in,
+                              size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_max_axis_f64(double*  out, const double*  in,
+                              size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_max_axis_i64(int64_t* out, const int64_t* in,
+                              size_t prefix, size_t reduceLen, size_t suffix);
 
 /* argmin / argmax: out is int64 (regardless of input dtype) */
-void klex_tensor_argmin_axis2d_f32(int64_t* out, const float*   in, size_t m, size_t n, int axis);
-void klex_tensor_argmin_axis2d_f64(int64_t* out, const double*  in, size_t m, size_t n, int axis);
-void klex_tensor_argmin_axis2d_i64(int64_t* out, const int64_t* in, size_t m, size_t n, int axis);
-void klex_tensor_argmax_axis2d_f32(int64_t* out, const float*   in, size_t m, size_t n, int axis);
-void klex_tensor_argmax_axis2d_f64(int64_t* out, const double*  in, size_t m, size_t n, int axis);
-void klex_tensor_argmax_axis2d_i64(int64_t* out, const int64_t* in, size_t m, size_t n, int axis);
+void klex_tensor_argmin_axis_f32(int64_t* out, const float*   in,
+                                 size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_argmin_axis_f64(int64_t* out, const double*  in,
+                                 size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_argmin_axis_i64(int64_t* out, const int64_t* in,
+                                 size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_argmax_axis_f32(int64_t* out, const float*   in,
+                                 size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_argmax_axis_f64(int64_t* out, const double*  in,
+                                 size_t prefix, size_t reduceLen, size_t suffix);
+void klex_tensor_argmax_axis_i64(int64_t* out, const int64_t* in,
+                                 size_t prefix, size_t reduceLen, size_t suffix);
+
+/* ===== clip =====
+ *
+ * out[i] = clamp(a[i], lo, hi) for i in [0, n).
+ * Aliasing is permitted (out may equal a).
+ * lo <= hi is a caller invariant (not checked here). */
+void klex_tensor_clip_f32(float*   out, const float*   a, float   lo, float   hi, size_t n);
+void klex_tensor_clip_f64(double*  out, const double*  a, double  lo, double  hi, size_t n);
+void klex_tensor_clip_i64(int64_t* out, const int64_t* a, int64_t lo, int64_t hi, size_t n);
+
+/* ===== element-wise comparisons =====
+ *
+ * Each comparison writes 1 into out[i] when the condition holds, 0
+ * otherwise. Output is always int64_t regardless of input dtype.
+ *
+ * Float NaN semantics follow IEEE 754: any comparison involving NaN
+ * returns false (0), so eq/lt/le/gt/ge all produce 0 for NaN inputs;
+ * ne produces 1 (NaN != NaN is true). This matches NumPy.
+ *
+ * Aliasing: out is int64_t, a/b are the source dtype — they cannot
+ * alias by construction (different element sizes), so no aliasing
+ * constraints apply. */
+
+void klex_tensor_eq_f32(int64_t* out, const float*   a, const float*   b, size_t n);
+void klex_tensor_eq_f64(int64_t* out, const double*  a, const double*  b, size_t n);
+void klex_tensor_eq_i64(int64_t* out, const int64_t* a, const int64_t* b, size_t n);
+
+void klex_tensor_ne_f32(int64_t* out, const float*   a, const float*   b, size_t n);
+void klex_tensor_ne_f64(int64_t* out, const double*  a, const double*  b, size_t n);
+void klex_tensor_ne_i64(int64_t* out, const int64_t* a, const int64_t* b, size_t n);
+
+void klex_tensor_lt_f32(int64_t* out, const float*   a, const float*   b, size_t n);
+void klex_tensor_lt_f64(int64_t* out, const double*  a, const double*  b, size_t n);
+void klex_tensor_lt_i64(int64_t* out, const int64_t* a, const int64_t* b, size_t n);
+
+void klex_tensor_le_f32(int64_t* out, const float*   a, const float*   b, size_t n);
+void klex_tensor_le_f64(int64_t* out, const double*  a, const double*  b, size_t n);
+void klex_tensor_le_i64(int64_t* out, const int64_t* a, const int64_t* b, size_t n);
+
+void klex_tensor_gt_f32(int64_t* out, const float*   a, const float*   b, size_t n);
+void klex_tensor_gt_f64(int64_t* out, const double*  a, const double*  b, size_t n);
+void klex_tensor_gt_i64(int64_t* out, const int64_t* a, const int64_t* b, size_t n);
+
+void klex_tensor_ge_f32(int64_t* out, const float*   a, const float*   b, size_t n);
+void klex_tensor_ge_f64(int64_t* out, const double*  a, const double*  b, size_t n);
+void klex_tensor_ge_i64(int64_t* out, const int64_t* a, const int64_t* b, size_t n);
 
 #endif /* KLEX_TENSOR_KERNELS_H */

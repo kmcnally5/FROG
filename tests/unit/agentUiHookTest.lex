@@ -7,8 +7,8 @@
 // interaction headless, so we exercise the plumbing via the
 // `_uiEvent` builtin directly — same code path the widgets use.
 
-import "assert.lex" as t
-import "agent.lex"  as agent
+import "stdlib/assert.lex" as t
+import "stdlib/agent.lex"  as agent
 
 // ── 1. _uiEventActive() reflects registration state ─────────────────────
 agent.clearUiEvent()

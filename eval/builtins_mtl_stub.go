@@ -109,6 +109,10 @@ func init() {
 		_ = args
 		return macStubTuple("_mtlReadBufferU32")
 	}}
+	Builtins["_mtlReadBufferIntoTensor"] = &Builtin{Fn: func(args []Object) Object {
+		_ = args
+		return macStubTuple("_mtlReadBufferIntoTensor")
+	}}
 	Builtins["_mtlBufferRelease"] = &Builtin{Fn: func(args []Object) Object {
 		_ = args
 		return NULL

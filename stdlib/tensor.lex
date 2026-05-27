@@ -227,38 +227,52 @@ fn argmin(t) { return _tensor_argmin(t) }
 // argmax(t) — linear index of the first maximum element. Returns integer. Errors on empty tensor.
 fn argmax(t) { return _tensor_argmax(t) }
 
-// ── axis-aware reductions (2-D only in v1) ──
+// ── axis-aware reductions (N-D) ──
 //
-// Reduces along ONE axis, returning a 1-D tensor instead of a scalar.
-// For 2-D input shape [m, n]:
-//   axis 0 (or -2)  → reduce rows; output shape [n]   (per-column op)
-//   axis 1 (or -1)  → reduce cols; output shape [m]   (per-row op)
+// Reduces along ONE axis, returning a tensor of rank-1 (drop variant)
+// or the same rank with the reduced axis kept at size 1 (keepdims).
+// axis may be negative; -1 is the last axis.
 //
 // Output dtype:
 //   sum_axis, min_axis, max_axis      → same dtype as input
 //   mean_axis                         → always f64 (NumPy parity)
-//   argmin_axis, argmax_axis          → always i64 (index tensor)
+//   argmin_axis, argmax_axis          → i64 (index into the reduced axis)
 //
 // NumPy parallel: np.sum(t, axis=N), np.mean(t, axis=N), etc.
 // Empty-axis policy: sum_axis returns zeros; the other five error.
 //
-// N-D axis reductions and the keepdims=True option are deferred to v2.
+// keepdims variants pair naturally with broadcasting:
 //
-//   col_means = t.mean_axis(matrix, 0)   // per-column mean
+//   row_means = t.mean_axis_keepdims(x, -1)   // shape [B, S, 1]
+//   centred   = t.sub(x, row_means)           // broadcasts cleanly
+//
+//   col_means = t.mean_axis(matrix, 0)        // shape [n]
 //   row_norms_sq = t.sum_axis(t.mul(matrix, matrix), 1)   // per-row ‖·‖²
 
-// sum_axis(t, axis) — reduce along axis returning a 1-D sum tensor. Same dtype as input.
-fn sum_axis(t, axis)    { return _tensor_sum_axis(t, axis) }
-// mean_axis(t, axis) — reduce along axis returning a 1-D mean tensor. Always f64.
-fn mean_axis(t, axis)   { return _tensor_mean_axis(t, axis) }
-// min_axis(t, axis) — reduce along axis returning a 1-D minimum tensor. Same dtype as input.
-fn min_axis(t, axis)    { return _tensor_min_axis(t, axis) }
-// max_axis(t, axis) — reduce along axis returning a 1-D maximum tensor. Same dtype as input.
-fn max_axis(t, axis)    { return _tensor_max_axis(t, axis) }
-// argmin_axis(t, axis) — reduce along axis returning a 1-D i64 tensor of first minimum indices.
-fn argmin_axis(t, axis) { return _tensor_argmin_axis(t, axis) }
-// argmax_axis(t, axis) — reduce along axis returning a 1-D i64 tensor of first maximum indices.
-fn argmax_axis(t, axis) { return _tensor_argmax_axis(t, axis) }
+// sum_axis(t, axis) — sum along axis, drop the reduced dim. Same dtype as input.
+fn sum_axis(t, axis)             { return _tensor_sum_axis(t, axis) }
+// sum_axis_keepdims(t, axis) — sum along axis, keep the reduced dim at size 1. Same dtype as input.
+fn sum_axis_keepdims(t, axis)    { return _tensor_sum_axis_keepdims(t, axis) }
+// mean_axis(t, axis) — mean along axis, drop the reduced dim. Always f64.
+fn mean_axis(t, axis)            { return _tensor_mean_axis(t, axis) }
+// mean_axis_keepdims(t, axis) — mean along axis, keep the reduced dim at size 1. Always f64.
+fn mean_axis_keepdims(t, axis)   { return _tensor_mean_axis_keepdims(t, axis) }
+// min_axis(t, axis) — minimum along axis, drop the reduced dim. Same dtype as input.
+fn min_axis(t, axis)             { return _tensor_min_axis(t, axis) }
+// min_axis_keepdims(t, axis) — minimum along axis, keep the reduced dim at size 1.
+fn min_axis_keepdims(t, axis)    { return _tensor_min_axis_keepdims(t, axis) }
+// max_axis(t, axis) — maximum along axis, drop the reduced dim. Same dtype as input.
+fn max_axis(t, axis)             { return _tensor_max_axis(t, axis) }
+// max_axis_keepdims(t, axis) — maximum along axis, keep the reduced dim at size 1.
+fn max_axis_keepdims(t, axis)    { return _tensor_max_axis_keepdims(t, axis) }
+// argmin_axis(t, axis) — i64 indices of first minimum along axis (drop variant).
+fn argmin_axis(t, axis)          { return _tensor_argmin_axis(t, axis) }
+// argmin_axis_keepdims(t, axis) — argmin along axis, keep the reduced dim at size 1.
+fn argmin_axis_keepdims(t, axis) { return _tensor_argmin_axis_keepdims(t, axis) }
+// argmax_axis(t, axis) — i64 indices of first maximum along axis (drop variant).
+fn argmax_axis(t, axis)          { return _tensor_argmax_axis(t, axis) }
+// argmax_axis_keepdims(t, axis) — argmax along axis, keep the reduced dim at size 1.
+fn argmax_axis_keepdims(t, axis) { return _tensor_argmax_axis_keepdims(t, axis) }
 
 // ── in-place element-wise ops ──
 //
@@ -410,4 +424,151 @@ fn transpose(t) {
 // (verified for the underlying mtl.matmulMPS in stdlib/mtl.lex).
 fn matmul(a, b) {
     return _tensor_matmul(a, b)
+}
+
+// ── Group 1: to_array / clone / cast ────────────────────────────────
+
+// to_array(t) — extract all elements into a flat kLex array.
+//   f32/f64 → array of Float;  i64 → array of Integer.
+//   t.to_array(t.from_array([1, 2, 3], "f64"))  →  [1.0, 2.0, 3.0]
+fn to_array(t) {
+    return _tensor_to_array(t)
+}
+
+// clone(t) — return a fully independent copy of t.
+// Mutations to the clone do not affect t (unlike reshape / flatten views).
+// Cloning a slice view (from t.slice) materialises into a fresh
+// contiguous tensor — same behaviour as t.contiguous on the view.
+fn clone(t) {
+    return _tensor_clone(t)
+}
+
+// cast(t, dtype) — return a new tensor with every element converted to dtype.
+//   t.cast(myF64Tensor, "f32")    // narrow to single precision
+//   t.cast(myI64Tensor, "f64")    // widen integers to double
+// When src and target dtypes are the same this is equivalent to clone.
+fn cast(t, dtype) {
+    return _tensor_cast(t, dtype)
+}
+
+// slice(t, specs) — return a VIEW into t sharing backing data.
+//
+// specs is an array with one entry per axis of t. Each entry is
+// either null (take all of this axis) or a 3-element array
+// [start, stop, step] where any of start/stop/step may itself be
+// null to take the default (0 / dim / 1). Negative start/stop count
+// from the end of the axis. step must be positive in v1.
+//
+//   let big = t.full([1000, 1000], 1.0, "f64")
+//   let middle  = t.slice(big, [[100, 500, 1], [200, 800, 1]])  // [400, 600]
+//   let stride  = t.slice(big, [null, [0, null, 2]])            // every 2nd col
+//   let lastTen = t.slice(big, [[-10, null, 1], null])          // last 10 rows
+//
+// Slices are views — mutations to the slice affect t and vice versa.
+// Inspection ops (shape, dtype, numel, get, to_array, clone) work on
+// views directly. Kernel-based ops (add, matmul, reductions, etc.)
+// require contiguous input — call t.contiguous(view) to materialise
+// before passing a slice to them.
+fn slice(t, specs) {
+    return _tensor_slice(t, specs)
+}
+
+// contiguous(t) — if t is already contiguous, return t unchanged
+// (no copy — matches NumPy ascontiguousarray). If t is a strided
+// view (from t.slice), materialise into a fresh contiguous tensor.
+//
+// Required before passing a slice view to any kernel-based op:
+//
+//   let view  = t.slice(big, [[100, 500, 1], null])
+//   let safe  = t.contiguous(view)
+//   let result = t.add(safe, other)         // kernel runs cleanly
+//
+fn contiguous(t) {
+    return _tensor_contiguous(t)
+}
+
+// ── Group 2: clip / linspace / arange / eye ─────────────────────────
+
+// clip(t, lo, hi) — clamp every element of t to [lo, hi].
+//   lo and hi must be compatible numbers for t's dtype.
+//   lo <= hi is required.
+//   t.clip(scores, 0.0, 1.0)    // saturate to unit range
+fn clip(t, lo, hi) {
+    return _tensor_clip(t, lo, hi)
+}
+
+// linspace(start, stop, n, dtype) — 1-D tensor of n evenly spaced
+// values from start to stop inclusive. n >= 1. stop is always exact.
+//   t.linspace(0.0, 1.0, 5, "f64")   →  [0.0, 0.25, 0.5, 0.75, 1.0]
+fn linspace(start, stop, n, dtype) {
+    return _tensor_linspace(start, stop, n, dtype)
+}
+
+// arange(start, stop, step, dtype) — 1-D tensor of values from start
+// up to (but not including) stop, spaced by step. step must be non-zero.
+//   t.arange(0, 6, 2, "i64")   →  [0, 2, 4]
+//   t.arange(0.0, 1.0, 0.25, "f64")  →  [0.0, 0.25, 0.5, 0.75]
+fn arange(start, stop, step, dtype) {
+    return _tensor_arange(start, stop, step, dtype)
+}
+
+// eye(n, dtype) — n×n identity matrix (1 on diagonal, 0 elsewhere).
+//   t.eye(3, "f64")  →  [[1,0,0],[0,1,0],[0,0,1]]
+fn eye(n, dtype) {
+    return _tensor_eye(n, dtype)
+}
+
+// ── Group 3: comparison ops + where ─────────────────────────────────
+//
+// All comparison ops return an i64 tensor of 0s and 1s (a mask).
+// Both operands may be tensors or scalars (broadcasting applies).
+// Dtypes must match — use cast() to align before comparing.
+//
+// NaN behaviour follows IEEE 754: eq/lt/le/gt/ge return 0 for NaN;
+// ne returns 1 (NaN != NaN is true). Matches NumPy semantics.
+
+// eq(a, b) — element-wise a == b. Returns i64 mask.
+fn eq(a, b) { return _tensor_eq(a, b) }
+// ne(a, b) — element-wise a != b. Returns i64 mask.
+fn ne(a, b) { return _tensor_ne(a, b) }
+// lt(a, b) — element-wise a < b. Returns i64 mask.
+fn lt(a, b) { return _tensor_lt(a, b) }
+// le(a, b) — element-wise a <= b. Returns i64 mask.
+fn le(a, b) { return _tensor_le(a, b) }
+// gt(a, b) — element-wise a > b. Returns i64 mask.
+fn gt(a, b) { return _tensor_gt(a, b) }
+// ge(a, b) — element-wise a >= b. Returns i64 mask.
+fn ge(a, b) { return _tensor_ge(a, b) }
+
+// where(mask, x, y) — element-wise conditional: out[i] = x[i] if
+// mask[i] != 0 else y[i]. mask must be an i64 tensor from a comparison
+// op. x and y must have the same dtype; either may be a scalar.
+//
+//   relu = fn(t) { return where(gt(t, 0.0), t, 0.0) }
+//   safe = where(ne(denom, 0.0), div(num, denom), 0.0)
+fn where(mask, x, y) {
+    return _tensor_where(mask, x, y)
+}
+
+// ── Group 4: concatenate / stack ─────────────────────────────────────
+
+// concatenate(tensors, axis) — join an array of tensors along an
+// existing axis. All tensors must share the same dtype and shape
+// except at `axis`. NumPy equivalent: np.concatenate.
+//
+//   rows = t.concatenate([batchA, batchB], 0)   // stack row batches
+//   cols = t.concatenate([featA, featB], 1)     // join column features
+fn concatenate(tensors, axis) {
+    return _tensor_concatenate(tensors, axis)
+}
+
+// stack(tensors, axis) — join an array of identically-shaped tensors
+// along a NEW axis inserted at position `axis`. All tensors must have
+// the same shape and dtype. Output rank = input rank + 1.
+// NumPy equivalent: np.stack.
+//
+//   batch = t.stack([sample1, sample2, sample3], 0)
+//   // [n] tensors → [3, n] matrix
+fn stack(tensors, axis) {
+    return _tensor_stack(tensors, axis)
 }

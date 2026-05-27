@@ -207,12 +207,14 @@ fn clearUiEvent() {
 //                                              // (bridge crash, JSON unmarshal, etc.)
 //       "error":       null                    // or {"kind": ..., "message": ..., "code": ...}
 //                                              // when ok=false
+//       "user_error":  null                    // or {"kind": ..., "message": ..., "code": ...}
+//                                              // when the remote handler returned a (null, err)
+//                                              // tuple — ok stays true (round-trip succeeded)
 //   }
 //
-// Note: a remote function returning a (null, errorValue) tuple is NOT
-// a bridge-call failure — it's a successful round-trip whose result
-// happens to be a user error. The hook fires with ok=true; inspect
-// the tuple at the call site if you care.
+// Note: ok=false means the bridge transport failed (crash, timeout, etc.).
+// ok=true + user_error != null means the bridge handler threw or returned an
+// error tuple. ok=true + user_error == null means a clean success.
 //
 // Pass null to clear.
 //
@@ -221,6 +223,7 @@ fn clearUiEvent() {
 //   agent.onBridgeCall(fn(evt) {
 //       let icon = "✓"
 //       if !evt["ok"] { icon = "✗" }
+//       if evt["ok"] && evt["user_error"] != null { icon = "✗" }
 //       println("🌉 " + icon + " " + evt["fn"] + "(" + str(evt["argc"]) +
 //               " args) " + str(evt["duration_ms"]) + "ms")
 //   })

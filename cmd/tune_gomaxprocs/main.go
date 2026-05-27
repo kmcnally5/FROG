@@ -81,7 +81,7 @@ func runTest(gomaxprocs int) (float64, float64) {
 }
 
 func main() {
-	os.Setenv("KLEX_PATH", "./stdlib")
+	os.Setenv("KLEX_PATH", ".")
 
 	gomaxprocValues := []int{1, 2, 4, 6, 8, 12, 16}
 

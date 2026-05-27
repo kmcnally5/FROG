@@ -206,50 +206,115 @@ func tensorDotI64(a, b []int64) int64 {
 	panic("tensorDotI64: native kernels not built on this platform")
 }
 
-func tensorSumAxis2DF32(out, in []float32, m, n, axis int) {
-	panic("tensorSumAxis2DF32: native kernels not built on this platform")
+func tensorSumAxisF32(out, in []float32, prefix, reduceLen, suffix int) {
+	panic("tensorSumAxisF32: native kernels not built on this platform")
 }
-func tensorSumAxis2DF64(out, in []float64, m, n, axis int) {
-	panic("tensorSumAxis2DF64: native kernels not built on this platform")
+func tensorSumAxisF64(out, in []float64, prefix, reduceLen, suffix int) {
+	panic("tensorSumAxisF64: native kernels not built on this platform")
 }
-func tensorSumAxis2DI64(out, in []int64, m, n, axis int) {
-	panic("tensorSumAxis2DI64: native kernels not built on this platform")
+func tensorSumAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	panic("tensorSumAxisI64: native kernels not built on this platform")
 }
-func tensorMinAxis2DF32(out, in []float32, m, n, axis int) {
-	panic("tensorMinAxis2DF32: native kernels not built on this platform")
+func tensorMinAxisF32(out, in []float32, prefix, reduceLen, suffix int) {
+	panic("tensorMinAxisF32: native kernels not built on this platform")
 }
-func tensorMinAxis2DF64(out, in []float64, m, n, axis int) {
-	panic("tensorMinAxis2DF64: native kernels not built on this platform")
+func tensorMinAxisF64(out, in []float64, prefix, reduceLen, suffix int) {
+	panic("tensorMinAxisF64: native kernels not built on this platform")
 }
-func tensorMinAxis2DI64(out, in []int64, m, n, axis int) {
-	panic("tensorMinAxis2DI64: native kernels not built on this platform")
+func tensorMinAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	panic("tensorMinAxisI64: native kernels not built on this platform")
 }
-func tensorMaxAxis2DF32(out, in []float32, m, n, axis int) {
-	panic("tensorMaxAxis2DF32: native kernels not built on this platform")
+func tensorMaxAxisF32(out, in []float32, prefix, reduceLen, suffix int) {
+	panic("tensorMaxAxisF32: native kernels not built on this platform")
 }
-func tensorMaxAxis2DF64(out, in []float64, m, n, axis int) {
-	panic("tensorMaxAxis2DF64: native kernels not built on this platform")
+func tensorMaxAxisF64(out, in []float64, prefix, reduceLen, suffix int) {
+	panic("tensorMaxAxisF64: native kernels not built on this platform")
 }
-func tensorMaxAxis2DI64(out, in []int64, m, n, axis int) {
-	panic("tensorMaxAxis2DI64: native kernels not built on this platform")
+func tensorMaxAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	panic("tensorMaxAxisI64: native kernels not built on this platform")
 }
-func tensorArgminAxis2DF32(out []int64, in []float32, m, n, axis int) {
-	panic("tensorArgminAxis2DF32: native kernels not built on this platform")
+func tensorArgminAxisF32(out []int64, in []float32, prefix, reduceLen, suffix int) {
+	panic("tensorArgminAxisF32: native kernels not built on this platform")
 }
-func tensorArgminAxis2DF64(out []int64, in []float64, m, n, axis int) {
-	panic("tensorArgminAxis2DF64: native kernels not built on this platform")
+func tensorArgminAxisF64(out []int64, in []float64, prefix, reduceLen, suffix int) {
+	panic("tensorArgminAxisF64: native kernels not built on this platform")
 }
-func tensorArgminAxis2DI64(out, in []int64, m, n, axis int) {
-	panic("tensorArgminAxis2DI64: native kernels not built on this platform")
+func tensorArgminAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	panic("tensorArgminAxisI64: native kernels not built on this platform")
 }
-func tensorArgmaxAxis2DF32(out []int64, in []float32, m, n, axis int) {
-	panic("tensorArgmaxAxis2DF32: native kernels not built on this platform")
+func tensorArgmaxAxisF32(out []int64, in []float32, prefix, reduceLen, suffix int) {
+	panic("tensorArgmaxAxisF32: native kernels not built on this platform")
 }
-func tensorArgmaxAxis2DF64(out []int64, in []float64, m, n, axis int) {
-	panic("tensorArgmaxAxis2DF64: native kernels not built on this platform")
+func tensorArgmaxAxisF64(out []int64, in []float64, prefix, reduceLen, suffix int) {
+	panic("tensorArgmaxAxisF64: native kernels not built on this platform")
 }
-func tensorArgmaxAxis2DI64(out, in []int64, m, n, axis int) {
-	panic("tensorArgmaxAxis2DI64: native kernels not built on this platform")
+func tensorArgmaxAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	panic("tensorArgmaxAxisI64: native kernels not built on this platform")
+}
+
+func tensorClipF32(out, a []float32, lo, hi float32) {
+	panic("tensorClipF32: native kernels not built on this platform")
+}
+func tensorClipF64(out, a []float64, lo, hi float64) {
+	panic("tensorClipF64: native kernels not built on this platform")
+}
+func tensorClipI64(out, a []int64, lo, hi int64) {
+	panic("tensorClipI64: native kernels not built on this platform")
+}
+
+func tensorEqF32(out []int64, a, b []float32) {
+	panic("tensorEqF32: native kernels not built on this platform")
+}
+func tensorEqF64(out []int64, a, b []float64) {
+	panic("tensorEqF64: native kernels not built on this platform")
+}
+func tensorEqI64(out, a, b []int64) {
+	panic("tensorEqI64: native kernels not built on this platform")
+}
+func tensorNeF32(out []int64, a, b []float32) {
+	panic("tensorNeF32: native kernels not built on this platform")
+}
+func tensorNeF64(out []int64, a, b []float64) {
+	panic("tensorNeF64: native kernels not built on this platform")
+}
+func tensorNeI64(out, a, b []int64) {
+	panic("tensorNeI64: native kernels not built on this platform")
+}
+func tensorLtF32(out []int64, a, b []float32) {
+	panic("tensorLtF32: native kernels not built on this platform")
+}
+func tensorLtF64(out []int64, a, b []float64) {
+	panic("tensorLtF64: native kernels not built on this platform")
+}
+func tensorLtI64(out, a, b []int64) {
+	panic("tensorLtI64: native kernels not built on this platform")
+}
+func tensorLeF32(out []int64, a, b []float32) {
+	panic("tensorLeF32: native kernels not built on this platform")
+}
+func tensorLeF64(out []int64, a, b []float64) {
+	panic("tensorLeF64: native kernels not built on this platform")
+}
+func tensorLeI64(out, a, b []int64) {
+	panic("tensorLeI64: native kernels not built on this platform")
+}
+func tensorGtF32(out []int64, a, b []float32) {
+	panic("tensorGtF32: native kernels not built on this platform")
+}
+func tensorGtF64(out []int64, a, b []float64) {
+	panic("tensorGtF64: native kernels not built on this platform")
+}
+func tensorGtI64(out, a, b []int64) {
+	panic("tensorGtI64: native kernels not built on this platform")
+}
+func tensorGeF32(out []int64, a, b []float32) {
+	panic("tensorGeF32: native kernels not built on this platform")
+}
+func tensorGeF64(out []int64, a, b []float64) {
+	panic("tensorGeF64: native kernels not built on this platform")
+}
+func tensorGeI64(out, a, b []int64) {
+	panic("tensorGeI64: native kernels not built on this platform")
 }
 
 func tensorComputeAvailable() bool { return false }

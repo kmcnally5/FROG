@@ -11,8 +11,8 @@
 //
 // VM only for now. Tree-walker path is a future addition.
 
-import "assert.lex" as t
-import "agent.lex"  as agent
+import "stdlib/assert.lex" as t
+import "stdlib/agent.lex"  as agent
 
 // ── 1. Hook fires on internal error ─────────────────────────────────────
 let captured = null

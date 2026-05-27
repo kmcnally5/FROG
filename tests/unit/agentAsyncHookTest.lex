@@ -12,8 +12,8 @@
 //     isError() = !IsUserError semantics)
 //   - clearAsyncSpawn / clearAsyncDone unregister
 
-import "assert.lex" as t
-import "agent.lex"  as agent
+import "stdlib/assert.lex" as t
+import "stdlib/agent.lex"  as agent
 
 // Hash counters avoid push()'s immutable-array semantics — closures
 // can mutate hash values in place via h["k"] = v.

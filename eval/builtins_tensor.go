@@ -580,9 +580,13 @@ func init() {
 
 	// _tensor_get(t: tensor, idx: int) -> number
 	// Linear element access — treats the tensor as a flat 1-D
-	// view of its data. Used by stdlib/tensor.lex's preview/print
-	// helpers and by users who want a single scalar out without
-	// computing the multi-index. Bounds-checked.
+	// view of its logical data. Used by stdlib/tensor.lex's
+	// preview/print helpers and by users who want a single scalar
+	// out without computing the multi-index. Bounds-checked.
+	//
+	// Works on strided views (from _tensor_slice) too: the flat
+	// index is translated through the tensor's Strides to find the
+	// physical backing-slice offset.
 	Builtins["_tensor_get"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("_tensor_get expects 2 arguments (tensor, idx)", ast.Pos{})
@@ -600,13 +604,17 @@ func init() {
 		if i < 0 || i >= n {
 			return runtimeError(fmt.Sprintf("_tensor_get: index %d out of bounds (numel %d)", i, n), ast.Pos{})
 		}
+		off := i
+		if !t.IsContiguous() {
+			off = stridedOffsetFromFlat(i, t.Shape, t.Strides)
+		}
 		switch t.DType {
 		case DTypeFloat32:
-			return &Float{Value: float64(t.F32[i])}
+			return &Float{Value: float64(t.F32[off])}
 		case DTypeFloat64:
-			return &Float{Value: t.F64[i]}
+			return &Float{Value: t.F64[off]}
 		case DTypeInt64:
-			return intObj(int(t.I64[i]))
+			return intObj(int(t.I64[off]))
 		}
 		return runtimeError("_tensor_get: unreachable dtype", ast.Pos{})
 	}}
@@ -749,202 +757,163 @@ func init() {
 		return runtimeError("_tensor_argmax: unreachable dtype", ast.Pos{})
 	}}
 
-	// ── axis-aware reductions (2-D in v1) ──────────────────────
+	// ── axis-aware reductions (N-D, single-axis collapse) ─────
 	//
 	// Each *_axis builtin takes (tensor, axis) and returns a tensor
-	// of one rank lower. axis ∈ {0, 1} (or -1, -2 negative-indexed).
-	// For 2-D input shape [m, n]:
-	//   axis == 0 → output shape [n]   (reduce rows)
-	//   axis == 1 → output shape [m]   (reduce cols)
+	// with the named axis removed (drop variant) or kept at size 1
+	// (keepdims variant). axis may be negative; negative-indexed
+	// from the end of the shape (-1 = last axis).
 	//
 	// Output dtype:
 	//   sum / min / max → same dtype as input
 	//   mean → always f64 (matches scalar mean's policy)
-	//   argmin / argmax → always i64 (index tensor)
+	//   argmin / argmax → always i64 (index into the reduced axis)
 	//
 	// Empty-axis policy: sum's identity is 0 so empty-axis sum is
-	// allowed. mean / min / max / argmin / argmax error cleanly.
-	// N-D axis reductions deferred to v2 — error cleanly here too.
+	// allowed (returns zeros). mean / min / max / argmin / argmax
+	// error cleanly on empty axis — no defined identity.
+	//
+	// keepdims pairs naturally with broadcasting: the result keeps
+	// the reduced dimension as size 1, so subtracting/dividing the
+	// result back against the original shape works without an
+	// explicit expand_dims call. NumPy parallel: keepdims=True.
 
 	// _tensor_sum_axis(t: tensor, axis: int) → tensor
 	//
-	// Sum along one axis of a 2-D tensor. Output is same dtype as
-	// input. Empty axis returns zeros (sum's identity). NumPy
-	// parallel: np.sum(t, axis=N).
+	// Sum along one axis. Result has rank len(t.shape)-1. Output is
+	// same dtype as input. Empty axis returns zeros (sum's identity).
+	// NumPy parallel: np.sum(t, axis=N).
 	Builtins["_tensor_sum_axis"] = &Builtin{Fn: func(args []Object) Object {
-		t, m, n, axis, errObj := axisReductionPrologue(args, "_tensor_sum_axis", false)
+		info, errObj := axisReductionPrologue(args, "_tensor_sum_axis", false)
 		if errObj != nil {
 			return errObj
 		}
-		var outShape []int
-		if axis == 0 {
-			outShape = []int{n}
-		} else {
-			outShape = []int{m}
+		return doSumAxisOp(info, info.dropShape)
+	}}
+
+	// _tensor_sum_axis_keepdims(t: tensor, axis: int) → tensor
+	//
+	// Same as _tensor_sum_axis but keeps the reduced axis as size 1
+	// in the output shape. Composes cleanly with broadcasting.
+	Builtins["_tensor_sum_axis_keepdims"] = &Builtin{Fn: func(args []Object) Object {
+		info, errObj := axisReductionPrologue(args, "_tensor_sum_axis_keepdims", false)
+		if errObj != nil {
+			return errObj
 		}
-		out := newTensorFromShape(t.DType, outShape)
-		switch t.DType {
-		case DTypeFloat32:
-			tensorSumAxis2DF32(out.F32, t.F32, m, n, axis)
-		case DTypeFloat64:
-			tensorSumAxis2DF64(out.F64, t.F64, m, n, axis)
-		case DTypeInt64:
-			tensorSumAxis2DI64(out.I64, t.I64, m, n, axis)
-		}
-		return out
+		return doSumAxisOp(info, info.keepShape)
 	}}
 
 	// _tensor_mean_axis(t: tensor, axis: int) → tensor
 	//
-	// Mean along one axis of a 2-D tensor. Always returns f64 dtype
-	// (matches scalar mean's policy and NumPy's np.mean on integer
-	// arrays). Empty axis errors cleanly.
+	// Mean along one axis. Always returns f64 dtype (matches scalar
+	// mean's policy and NumPy's np.mean on integer arrays). Empty
+	// axis errors cleanly.
 	Builtins["_tensor_mean_axis"] = &Builtin{Fn: func(args []Object) Object {
-		t, m, n, axis, errObj := axisReductionPrologue(args, "_tensor_mean_axis", true)
+		info, errObj := axisReductionPrologue(args, "_tensor_mean_axis", true)
 		if errObj != nil {
 			return errObj
 		}
-		var outShape []int
-		var reduceSize int
-		if axis == 0 {
-			outShape = []int{n}
-			reduceSize = m
-		} else {
-			outShape = []int{m}
-			reduceSize = n
+		return doMeanAxisOp(info, info.dropShape)
+	}}
+
+	// _tensor_mean_axis_keepdims(t: tensor, axis: int) → tensor
+	//
+	// keepdims variant of _tensor_mean_axis. Reduced axis stays at
+	// size 1; useful for centring (x - mean(x, axis, keepdims=true)).
+	Builtins["_tensor_mean_axis_keepdims"] = &Builtin{Fn: func(args []Object) Object {
+		info, errObj := axisReductionPrologue(args, "_tensor_mean_axis_keepdims", true)
+		if errObj != nil {
+			return errObj
 		}
-		out := newTensorFromShape(DTypeFloat64, outShape)
-		denom := float64(reduceSize)
-		switch t.DType {
-		case DTypeFloat32:
-			tmp := make([]float32, len(out.F64))
-			tensorSumAxis2DF32(tmp, t.F32, m, n, axis)
-			for i, v := range tmp {
-				out.F64[i] = float64(v) / denom
-			}
-		case DTypeFloat64:
-			tensorSumAxis2DF64(out.F64, t.F64, m, n, axis)
-			for i := range out.F64 {
-				out.F64[i] /= denom
-			}
-		case DTypeInt64:
-			tmp := make([]int64, len(out.F64))
-			tensorSumAxis2DI64(tmp, t.I64, m, n, axis)
-			for i, v := range tmp {
-				out.F64[i] = float64(v) / denom
-			}
-		}
-		return out
+		return doMeanAxisOp(info, info.keepShape)
 	}}
 
 	// _tensor_min_axis(t: tensor, axis: int) → tensor
 	//
-	// Minimum along one axis of a 2-D tensor. Output is same dtype
-	// as input. Empty axis errors.
+	// Minimum along one axis. Output is same dtype as input. Empty
+	// axis errors.
 	Builtins["_tensor_min_axis"] = &Builtin{Fn: func(args []Object) Object {
-		t, m, n, axis, errObj := axisReductionPrologue(args, "_tensor_min_axis", true)
+		info, errObj := axisReductionPrologue(args, "_tensor_min_axis", true)
 		if errObj != nil {
 			return errObj
 		}
-		var outShape []int
-		if axis == 0 {
-			outShape = []int{n}
-		} else {
-			outShape = []int{m}
+		return doMinAxisOp(info, info.dropShape)
+	}}
+
+	// _tensor_min_axis_keepdims(t: tensor, axis: int) → tensor
+	Builtins["_tensor_min_axis_keepdims"] = &Builtin{Fn: func(args []Object) Object {
+		info, errObj := axisReductionPrologue(args, "_tensor_min_axis_keepdims", true)
+		if errObj != nil {
+			return errObj
 		}
-		out := newTensorFromShape(t.DType, outShape)
-		switch t.DType {
-		case DTypeFloat32:
-			tensorMinAxis2DF32(out.F32, t.F32, m, n, axis)
-		case DTypeFloat64:
-			tensorMinAxis2DF64(out.F64, t.F64, m, n, axis)
-		case DTypeInt64:
-			tensorMinAxis2DI64(out.I64, t.I64, m, n, axis)
-		}
-		return out
+		return doMinAxisOp(info, info.keepShape)
 	}}
 
 	// _tensor_max_axis(t: tensor, axis: int) → tensor
 	//
-	// Maximum along one axis of a 2-D tensor. Output is same dtype
-	// as input. Empty axis errors.
+	// Maximum along one axis. Output is same dtype as input. Empty
+	// axis errors.
 	Builtins["_tensor_max_axis"] = &Builtin{Fn: func(args []Object) Object {
-		t, m, n, axis, errObj := axisReductionPrologue(args, "_tensor_max_axis", true)
+		info, errObj := axisReductionPrologue(args, "_tensor_max_axis", true)
 		if errObj != nil {
 			return errObj
 		}
-		var outShape []int
-		if axis == 0 {
-			outShape = []int{n}
-		} else {
-			outShape = []int{m}
+		return doMaxAxisOp(info, info.dropShape)
+	}}
+
+	// _tensor_max_axis_keepdims(t: tensor, axis: int) → tensor
+	Builtins["_tensor_max_axis_keepdims"] = &Builtin{Fn: func(args []Object) Object {
+		info, errObj := axisReductionPrologue(args, "_tensor_max_axis_keepdims", true)
+		if errObj != nil {
+			return errObj
 		}
-		out := newTensorFromShape(t.DType, outShape)
-		switch t.DType {
-		case DTypeFloat32:
-			tensorMaxAxis2DF32(out.F32, t.F32, m, n, axis)
-		case DTypeFloat64:
-			tensorMaxAxis2DF64(out.F64, t.F64, m, n, axis)
-		case DTypeInt64:
-			tensorMaxAxis2DI64(out.I64, t.I64, m, n, axis)
-		}
-		return out
+		return doMaxAxisOp(info, info.keepShape)
 	}}
 
 	// _tensor_argmin_axis(t: tensor, axis: int) → tensor
 	//
-	// Index of the minimum element along one axis of a 2-D tensor.
-	// Output is i64 dtype regardless of input. First-occurrence on
-	// ties. Empty axis errors.
+	// Index of the minimum element along one axis. Indices refer to
+	// positions within the reduced axis. Output is i64 dtype
+	// regardless of input. First-occurrence on ties. Empty axis
+	// errors.
 	Builtins["_tensor_argmin_axis"] = &Builtin{Fn: func(args []Object) Object {
-		t, m, n, axis, errObj := axisReductionPrologue(args, "_tensor_argmin_axis", true)
+		info, errObj := axisReductionPrologue(args, "_tensor_argmin_axis", true)
 		if errObj != nil {
 			return errObj
 		}
-		var outShape []int
-		if axis == 0 {
-			outShape = []int{n}
-		} else {
-			outShape = []int{m}
+		return doArgminAxisOp(info, info.dropShape)
+	}}
+
+	// _tensor_argmin_axis_keepdims(t: tensor, axis: int) → tensor
+	Builtins["_tensor_argmin_axis_keepdims"] = &Builtin{Fn: func(args []Object) Object {
+		info, errObj := axisReductionPrologue(args, "_tensor_argmin_axis_keepdims", true)
+		if errObj != nil {
+			return errObj
 		}
-		out := newTensorFromShape(DTypeInt64, outShape)
-		switch t.DType {
-		case DTypeFloat32:
-			tensorArgminAxis2DF32(out.I64, t.F32, m, n, axis)
-		case DTypeFloat64:
-			tensorArgminAxis2DF64(out.I64, t.F64, m, n, axis)
-		case DTypeInt64:
-			tensorArgminAxis2DI64(out.I64, t.I64, m, n, axis)
-		}
-		return out
+		return doArgminAxisOp(info, info.keepShape)
 	}}
 
 	// _tensor_argmax_axis(t: tensor, axis: int) → tensor
 	//
-	// Index of the maximum element along one axis of a 2-D tensor.
-	// Output is i64 dtype regardless of input. First-occurrence on
-	// ties. Empty axis errors.
+	// Index of the maximum element along one axis. Indices refer to
+	// positions within the reduced axis. Output is i64 dtype
+	// regardless of input. First-occurrence on ties. Empty axis
+	// errors.
 	Builtins["_tensor_argmax_axis"] = &Builtin{Fn: func(args []Object) Object {
-		t, m, n, axis, errObj := axisReductionPrologue(args, "_tensor_argmax_axis", true)
+		info, errObj := axisReductionPrologue(args, "_tensor_argmax_axis", true)
 		if errObj != nil {
 			return errObj
 		}
-		var outShape []int
-		if axis == 0 {
-			outShape = []int{n}
-		} else {
-			outShape = []int{m}
+		return doArgmaxAxisOp(info, info.dropShape)
+	}}
+
+	// _tensor_argmax_axis_keepdims(t: tensor, axis: int) → tensor
+	Builtins["_tensor_argmax_axis_keepdims"] = &Builtin{Fn: func(args []Object) Object {
+		info, errObj := axisReductionPrologue(args, "_tensor_argmax_axis_keepdims", true)
+		if errObj != nil {
+			return errObj
 		}
-		out := newTensorFromShape(DTypeInt64, outShape)
-		switch t.DType {
-		case DTypeFloat32:
-			tensorArgmaxAxis2DF32(out.I64, t.F32, m, n, axis)
-		case DTypeFloat64:
-			tensorArgmaxAxis2DF64(out.I64, t.F64, m, n, axis)
-		case DTypeInt64:
-			tensorArgmaxAxis2DI64(out.I64, t.I64, m, n, axis)
-		}
-		return out
+		return doArgmaxAxisOp(info, info.keepShape)
 	}}
 
 	// _tensor_reshape(t: tensor, newShape: array) -> tensor
@@ -1284,49 +1253,193 @@ func reductionPrologue(args []Object, opName string, rejectEmpty bool) (*Tensor,
 	return t, nil
 }
 
-// axisReductionPrologue validates a 2-D axis reduction call:
+// axisReduction holds everything the per-op axis reduction builtins
+// need: the validated tensor + normalised axis, the (prefix, reduceLen,
+// suffix) flattening the C kernels consume, and both candidate output
+// shapes so a single prologue serves the drop-shape and keepdims
+// variants.
+type axisReduction struct {
+	t         *Tensor
+	axis      int   // normalised axis (0 <= axis < rank)
+	prefix    int   // product of dims before axis (1 if axis is leading)
+	reduceLen int   // size of the reduced axis (== t.Shape[axis])
+	suffix    int   // product of dims after axis (1 if axis is trailing)
+	dropShape []int // output shape with the reduced axis removed
+	keepShape []int // output shape with the reduced axis kept at size 1
+}
+
+// axisReductionPrologue validates an N-D axis reduction call:
 //   - args: (tensor, axis)
-//   - tensor must be 2-D, contiguous
-//   - axis is normalised to 0 or 1 (accepts negative: -1 → last, -2 → first)
-//   - if rejectEmpty, errors when the reduction axis is size 0
+//   - tensor must have rank >= 1, be contiguous, and a supported dtype
+//   - axis is normalised to [0, rank); negative values count from end
+//   - if rejectEmpty, errors when t.Shape[axis] == 0
 //
-// Returns (tensor, m, n, normalisedAxis, nil) on success or
-// (nil, 0, 0, 0, *Error) on failure.
-func axisReductionPrologue(args []Object, opName string, rejectEmpty bool) (*Tensor, int, int, int, Object) {
+// Returns an *axisReduction on success or (nil, *Error) on failure.
+func axisReductionPrologue(args []Object, opName string, rejectEmpty bool) (*axisReduction, Object) {
 	if len(args) != 2 {
-		return nil, 0, 0, 0, runtimeError(fmt.Sprintf("%s expects 2 arguments (tensor, axis)", opName), ast.Pos{})
+		return nil, runtimeError(fmt.Sprintf("%s expects 2 arguments (tensor, axis)", opName), ast.Pos{})
 	}
 	t, ok := args[0].(*Tensor)
 	if !ok {
-		return nil, 0, 0, 0, typeError(fmt.Sprintf("%s: first argument must be a tensor, got %s", opName, args[0].Type()), ast.Pos{})
+		return nil, typeError(fmt.Sprintf("%s: first argument must be a tensor, got %s", opName, args[0].Type()), ast.Pos{})
 	}
 	axisObj, ok := args[1].(*Integer)
 	if !ok {
-		return nil, 0, 0, 0, typeError(fmt.Sprintf("%s: axis must be an integer, got %s", opName, args[1].Type()), ast.Pos{})
+		return nil, typeError(fmt.Sprintf("%s: axis must be an integer, got %s", opName, args[1].Type()), ast.Pos{})
 	}
 	if !tensorComputeAvailable() {
-		return nil, 0, 0, 0, runtimeError("tensor ops require macOS or Linux in v1 (Windows support deferred)", ast.Pos{})
+		return nil, runtimeError("tensor ops require macOS or Linux in v1 (Windows support deferred)", ast.Pos{})
 	}
-	if len(t.Shape) != 2 {
-		return nil, 0, 0, 0, runtimeError(fmt.Sprintf("%s: input must be 2-D in v1 (got shape %v); N-D axis reductions deferred to v2", opName, t.Shape), ast.Pos{})
+	rank := len(t.Shape)
+	if rank < 1 {
+		return nil, runtimeError(fmt.Sprintf("%s: input must have rank >= 1 (got scalar tensor)", opName), ast.Pos{})
 	}
 	if !t.IsContiguous() {
-		return nil, 0, 0, 0, runtimeError(fmt.Sprintf("%s: non-contiguous inputs not yet supported", opName), ast.Pos{})
+		return nil, runtimeError(fmt.Sprintf("%s: non-contiguous inputs not yet supported", opName), ast.Pos{})
 	}
 	axis := axisObj.Value
 	if axis < 0 {
-		axis = axis + len(t.Shape)
+		axis = axis + rank
 	}
-	if axis != 0 && axis != 1 {
-		return nil, 0, 0, 0, runtimeError(fmt.Sprintf("%s: axis %d out of range for 2-D tensor (valid: 0, 1, -1, -2)", opName, axisObj.Value), ast.Pos{})
+	if axis < 0 || axis >= rank {
+		return nil, runtimeError(fmt.Sprintf("%s: axis %d out of range for shape %v (valid: [%d, %d])", opName, axisObj.Value, t.Shape, -rank, rank-1), ast.Pos{})
 	}
-	m, n := t.Shape[0], t.Shape[1]
-	if rejectEmpty {
-		if (axis == 0 && m == 0) || (axis == 1 && n == 0) {
-			return nil, 0, 0, 0, runtimeError(fmt.Sprintf("%s: cannot reduce empty axis %d (shape %v)", opName, axis, t.Shape), ast.Pos{})
+	reduceLen := t.Shape[axis]
+	if rejectEmpty && reduceLen == 0 {
+		return nil, runtimeError(fmt.Sprintf("%s: cannot reduce empty axis %d (shape %v)", opName, axis, t.Shape), ast.Pos{})
+	}
+	prefix := 1
+	for i := 0; i < axis; i++ {
+		prefix *= t.Shape[i]
+	}
+	suffix := 1
+	for i := axis + 1; i < rank; i++ {
+		suffix *= t.Shape[i]
+	}
+	dropShape := make([]int, 0, rank-1)
+	for i, s := range t.Shape {
+		if i != axis {
+			dropShape = append(dropShape, s)
 		}
 	}
-	return t, m, n, axis, nil
+	keepShape := make([]int, rank)
+	for i, s := range t.Shape {
+		if i == axis {
+			keepShape[i] = 1
+		} else {
+			keepShape[i] = s
+		}
+	}
+	return &axisReduction{
+		t:         t,
+		axis:      axis,
+		prefix:    prefix,
+		reduceLen: reduceLen,
+		suffix:    suffix,
+		dropShape: dropShape,
+		keepShape: keepShape,
+	}, nil
+}
+
+// doSumAxisOp dispatches the per-dtype sum-along-axis kernel and
+// returns a tensor of the requested output shape (drop or keepdims).
+// Output dtype matches input. Empty axis returns a zero-filled tensor
+// (newTensorFromShape zeros the backing slice).
+func doSumAxisOp(info *axisReduction, outShape []int) Object {
+	out := newTensorFromShape(info.t.DType, outShape)
+	if info.reduceLen == 0 {
+		return out
+	}
+	switch info.t.DType {
+	case DTypeFloat32:
+		tensorSumAxisF32(out.F32, info.t.F32, info.prefix, info.reduceLen, info.suffix)
+	case DTypeFloat64:
+		tensorSumAxisF64(out.F64, info.t.F64, info.prefix, info.reduceLen, info.suffix)
+	case DTypeInt64:
+		tensorSumAxisI64(out.I64, info.t.I64, info.prefix, info.reduceLen, info.suffix)
+	}
+	return out
+}
+
+// doMeanAxisOp computes per-axis mean via the sum kernel + Go-side
+// division. Output is always f64 to match scalar mean's precision
+// policy. Caller's rejectEmpty=true in the prologue guarantees
+// reduceLen >= 1 so denom is never zero.
+func doMeanAxisOp(info *axisReduction, outShape []int) Object {
+	out := newTensorFromShape(DTypeFloat64, outShape)
+	denom := float64(info.reduceLen)
+	switch info.t.DType {
+	case DTypeFloat32:
+		tmp := make([]float32, len(out.F64))
+		tensorSumAxisF32(tmp, info.t.F32, info.prefix, info.reduceLen, info.suffix)
+		for i, v := range tmp {
+			out.F64[i] = float64(v) / denom
+		}
+	case DTypeFloat64:
+		tensorSumAxisF64(out.F64, info.t.F64, info.prefix, info.reduceLen, info.suffix)
+		for i := range out.F64 {
+			out.F64[i] /= denom
+		}
+	case DTypeInt64:
+		tmp := make([]int64, len(out.F64))
+		tensorSumAxisI64(tmp, info.t.I64, info.prefix, info.reduceLen, info.suffix)
+		for i, v := range tmp {
+			out.F64[i] = float64(v) / denom
+		}
+	}
+	return out
+}
+
+func doMinAxisOp(info *axisReduction, outShape []int) Object {
+	out := newTensorFromShape(info.t.DType, outShape)
+	switch info.t.DType {
+	case DTypeFloat32:
+		tensorMinAxisF32(out.F32, info.t.F32, info.prefix, info.reduceLen, info.suffix)
+	case DTypeFloat64:
+		tensorMinAxisF64(out.F64, info.t.F64, info.prefix, info.reduceLen, info.suffix)
+	case DTypeInt64:
+		tensorMinAxisI64(out.I64, info.t.I64, info.prefix, info.reduceLen, info.suffix)
+	}
+	return out
+}
+
+func doMaxAxisOp(info *axisReduction, outShape []int) Object {
+	out := newTensorFromShape(info.t.DType, outShape)
+	switch info.t.DType {
+	case DTypeFloat32:
+		tensorMaxAxisF32(out.F32, info.t.F32, info.prefix, info.reduceLen, info.suffix)
+	case DTypeFloat64:
+		tensorMaxAxisF64(out.F64, info.t.F64, info.prefix, info.reduceLen, info.suffix)
+	case DTypeInt64:
+		tensorMaxAxisI64(out.I64, info.t.I64, info.prefix, info.reduceLen, info.suffix)
+	}
+	return out
+}
+
+func doArgminAxisOp(info *axisReduction, outShape []int) Object {
+	out := newTensorFromShape(DTypeInt64, outShape)
+	switch info.t.DType {
+	case DTypeFloat32:
+		tensorArgminAxisF32(out.I64, info.t.F32, info.prefix, info.reduceLen, info.suffix)
+	case DTypeFloat64:
+		tensorArgminAxisF64(out.I64, info.t.F64, info.prefix, info.reduceLen, info.suffix)
+	case DTypeInt64:
+		tensorArgminAxisI64(out.I64, info.t.I64, info.prefix, info.reduceLen, info.suffix)
+	}
+	return out
+}
+
+func doArgmaxAxisOp(info *axisReduction, outShape []int) Object {
+	out := newTensorFromShape(DTypeInt64, outShape)
+	switch info.t.DType {
+	case DTypeFloat32:
+		tensorArgmaxAxisF32(out.I64, info.t.F32, info.prefix, info.reduceLen, info.suffix)
+	case DTypeFloat64:
+		tensorArgmaxAxisF64(out.I64, info.t.F64, info.prefix, info.reduceLen, info.suffix)
+	case DTypeInt64:
+		tensorArgmaxAxisI64(out.I64, info.t.I64, info.prefix, info.reduceLen, info.suffix)
+	}
+	return out
 }
 
 // ── helpers ──
@@ -1852,4 +1965,1043 @@ func sameShape(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+// ── Group 1: to_array / clone / cast ────────────────────────────────
+
+func init() {
+	// _tensor_to_array(t: tensor) -> array
+	//
+	// Extracts all elements from t into a flat kLex array, in
+	// row-major logical order. Elements are returned as Float for
+	// f32/f64 tensors and as Integer for i64 tensors, matching the
+	// return convention of _tensor_get.
+	//
+	// Works on strided views (from _tensor_slice): the multi-index is
+	// walked through Strides to fetch each element from the right
+	// physical position in the backing slice.
+	Builtins["_tensor_to_array"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("_tensor_to_array expects 1 argument (tensor)", ast.Pos{})
+		}
+		t, ok := args[0].(*Tensor)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_to_array: argument must be a tensor, got %s", args[0].Type()), ast.Pos{})
+		}
+		n := t.Numel()
+		els := make([]Object, n)
+		if t.IsContiguous() {
+			switch t.DType {
+			case DTypeFloat32:
+				for i := range els {
+					els[i] = &Float{Value: float64(t.F32[i])}
+				}
+			case DTypeFloat64:
+				for i := range els {
+					els[i] = &Float{Value: t.F64[i]}
+				}
+			case DTypeInt64:
+				for i := range els {
+					els[i] = intObj(int(t.I64[i]))
+				}
+			}
+		} else {
+			// Strided — materialise once into a contiguous buffer
+			// (avoids per-element stride re-walks while extracting).
+			mat := materialiseStrided(t)
+			switch mat.DType {
+			case DTypeFloat32:
+				for i := range els {
+					els[i] = &Float{Value: float64(mat.F32[i])}
+				}
+			case DTypeFloat64:
+				for i := range els {
+					els[i] = &Float{Value: mat.F64[i]}
+				}
+			case DTypeInt64:
+				for i := range els {
+					els[i] = intObj(int(mat.I64[i]))
+				}
+			}
+		}
+		return &Array{Elements: els}
+	}}
+
+	// _tensor_clone(t: tensor) -> tensor
+	//
+	// Returns a fresh independent copy of t. The backing data is fully
+	// copied — mutations to the result do not affect t and vice versa.
+	// Use this when you need an independent snapshot of a tensor that
+	// may otherwise be aliased by reshape / flatten / expand_dims views,
+	// or to materialise a strided view from _tensor_slice into a fresh
+	// contiguous tensor.
+	Builtins["_tensor_clone"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("_tensor_clone expects 1 argument (tensor)", ast.Pos{})
+		}
+		src, ok := args[0].(*Tensor)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_clone: argument must be a tensor, got %s", args[0].Type()), ast.Pos{})
+		}
+		// Strided view? Walk the multi-index and produce a fresh
+		// contiguous output. Always allocates fresh (vs the no-copy
+		// fast path of _tensor_contiguous).
+		if !src.IsContiguous() {
+			return materialiseStrided(src)
+		}
+		shapeCopy := make([]int, len(src.Shape))
+		copy(shapeCopy, src.Shape)
+		out := &Tensor{DType: src.DType, Shape: shapeCopy}
+		n := src.Numel()
+		switch src.DType {
+		case DTypeFloat32:
+			out.F32 = make([]float32, n)
+			copy(out.F32, src.F32[:n])
+		case DTypeFloat64:
+			out.F64 = make([]float64, n)
+			copy(out.F64, src.F64[:n])
+		case DTypeInt64:
+			out.I64 = make([]int64, n)
+			copy(out.I64, src.I64[:n])
+		}
+		return out
+	}}
+
+	// _tensor_slice(t: tensor, specs: array) -> tensor
+	//
+	// Returns a VIEW into t — a new tensor with its own Shape/Strides
+	// but sharing the same backing data slice. Mutations through the
+	// view affect t and vice versa.
+	//
+	// `specs` is an array with one entry per axis of t (so its length
+	// must equal len(t.shape)). Each entry is either:
+	//
+	//   null                     — take all of this axis (== [null, null, null])
+	//   [start, stop, step]      — start/stop/step like Python slice
+	//                              (each of start/stop/step may itself be null
+	//                              to take the default: 0 / dim / 1)
+	//
+	// Negative start/stop count from the end of the axis. step must be
+	// positive (negative-step / reversed slicing deferred to a later
+	// pass). Out-of-bounds start/stop clamp; if start >= stop after
+	// normalisation the corresponding axis becomes size 0.
+	//
+	// Downstream kernels (add, matmul, reductions, etc.) require
+	// contiguous input — call `_tensor_contiguous(view)` to materialise
+	// before passing a slice to them. _tensor_get, _tensor_to_array,
+	// _tensor_clone, _tensor_shape/dtype/numel all work on views
+	// directly.
+	//
+	// v1 limitations: source tensor must itself be contiguous (no
+	// slicing of slices in one step — call contiguous() in between).
+	Builtins["_tensor_slice"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("_tensor_slice expects 2 arguments (tensor, specs)", ast.Pos{})
+		}
+		src, ok := args[0].(*Tensor)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_slice: first argument must be a tensor, got %s", args[0].Type()), ast.Pos{})
+		}
+		specsArr, ok := args[1].(*Array)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_slice: specs must be an array, got %s", args[1].Type()), ast.Pos{})
+		}
+		if !src.IsContiguous() {
+			return runtimeError("_tensor_slice: source tensor is already a view; call t.contiguous() first to materialise before slicing again", ast.Pos{})
+		}
+		rank := len(src.Shape)
+		if len(specsArr.Elements) != rank {
+			return runtimeError(fmt.Sprintf("_tensor_slice: specs has %d entries but tensor is rank %d (need one spec per axis)", len(specsArr.Elements), rank), ast.Pos{})
+		}
+		if rank == 0 {
+			return runtimeError("_tensor_slice: cannot slice a scalar tensor (rank 0)", ast.Pos{})
+		}
+
+		naturalStrides := computeContiguousStrides(src.Shape)
+		newShape := make([]int, rank)
+		newStrides := make([]int, rank)
+		baseOffset := 0
+		for k, specObj := range specsArr.Elements {
+			dim := src.Shape[k]
+			start, stop, step, errObj := parseSliceSpec(specObj, dim, k)
+			if errObj != nil {
+				return errObj
+			}
+			// Normalise negative.
+			if start < 0 {
+				start += dim
+				if start < 0 {
+					start = 0
+				}
+			}
+			if stop < 0 {
+				stop += dim
+				if stop < 0 {
+					stop = 0
+				}
+			}
+			// Clamp.
+			if start > dim {
+				start = dim
+			}
+			if stop > dim {
+				stop = dim
+			}
+			if start > stop {
+				start = stop
+			}
+			newDim := 0
+			if stop > start {
+				newDim = (stop - start + step - 1) / step
+			}
+			newShape[k] = newDim
+			newStrides[k] = step * naturalStrides[k]
+			baseOffset += start * naturalStrides[k]
+		}
+
+		out := &Tensor{DType: src.DType, Shape: newShape, Strides: newStrides}
+		switch src.DType {
+		case DTypeFloat32:
+			if baseOffset > len(src.F32) {
+				baseOffset = len(src.F32)
+			}
+			out.F32 = src.F32[baseOffset:]
+		case DTypeFloat64:
+			if baseOffset > len(src.F64) {
+				baseOffset = len(src.F64)
+			}
+			out.F64 = src.F64[baseOffset:]
+		case DTypeInt64:
+			if baseOffset > len(src.I64) {
+				baseOffset = len(src.I64)
+			}
+			out.I64 = src.I64[baseOffset:]
+		}
+		return out
+	}}
+
+	// _tensor_contiguous(t: tensor) -> tensor
+	//
+	// If t is already contiguous, returns t unchanged (no allocation —
+	// matches NumPy's np.ascontiguousarray fast path). If t is a
+	// strided view (e.g. produced by _tensor_slice) walks the multi-
+	// index and copies into a fresh contiguous tensor.
+	//
+	// Required before passing a slice view to any kernel-based op
+	// (add, matmul, reductions, etc.) since those assume
+	// contiguous backing layout. Pair with _tensor_slice for the
+	// "view, then materialise" workflow.
+	Builtins["_tensor_contiguous"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("_tensor_contiguous expects 1 argument (tensor)", ast.Pos{})
+		}
+		src, ok := args[0].(*Tensor)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_contiguous: argument must be a tensor, got %s", args[0].Type()), ast.Pos{})
+		}
+		return materialiseStrided(src)
+	}}
+
+	// _tensor_cast(t: tensor, dtype: string) -> tensor
+	//
+	// Returns a new tensor with every element converted to the target dtype.
+	// When src and target dtypes are identical, this is equivalent to clone.
+	//
+	// Conversion rules:
+	//   f32 → f64 : lossless widening
+	//   f64 → f32 : truncating (silent precision loss for large values)
+	//   i64 → f32 : best-effort (exact for |x| ≤ 2^24; silent rounding beyond)
+	//   i64 → f64 : near-lossless (exact for |x| ≤ 2^53)
+	//   f32 → i64 : truncate toward zero (IEEE floor-to-zero)
+	//   f64 → i64 : truncate toward zero
+	Builtins["_tensor_cast"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("_tensor_cast expects 2 arguments (tensor, dtype)", ast.Pos{})
+		}
+		src, ok := args[0].(*Tensor)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_cast: first argument must be a tensor, got %s", args[0].Type()), ast.Pos{})
+		}
+		dtypeStr, ok := args[1].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_cast: dtype must be a string, got %s", args[1].Type()), ast.Pos{})
+		}
+		dt, dok := dtypeFromName(dtypeStr.Value)
+		if !dok {
+			return typeError(fmt.Sprintf("_tensor_cast: unknown dtype %q (want f32/f64/i64)", dtypeStr.Value), ast.Pos{})
+		}
+		if dt == src.DType {
+			// same dtype — return a clone
+			shapeCopy := make([]int, len(src.Shape))
+			copy(shapeCopy, src.Shape)
+			out := &Tensor{DType: src.DType, Shape: shapeCopy}
+			switch src.DType {
+			case DTypeFloat32:
+				out.F32 = make([]float32, len(src.F32))
+				copy(out.F32, src.F32)
+			case DTypeFloat64:
+				out.F64 = make([]float64, len(src.F64))
+				copy(out.F64, src.F64)
+			case DTypeInt64:
+				out.I64 = make([]int64, len(src.I64))
+				copy(out.I64, src.I64)
+			}
+			return out
+		}
+		n := src.Numel()
+		out := newTensorFromShape(dt, src.Shape)
+		switch {
+		case src.DType == DTypeFloat32 && dt == DTypeFloat64:
+			for i := 0; i < n; i++ {
+				out.F64[i] = float64(src.F32[i])
+			}
+		case src.DType == DTypeFloat32 && dt == DTypeInt64:
+			for i := 0; i < n; i++ {
+				out.I64[i] = int64(src.F32[i])
+			}
+		case src.DType == DTypeFloat64 && dt == DTypeFloat32:
+			for i := 0; i < n; i++ {
+				out.F32[i] = float32(src.F64[i])
+			}
+		case src.DType == DTypeFloat64 && dt == DTypeInt64:
+			for i := 0; i < n; i++ {
+				out.I64[i] = int64(src.F64[i])
+			}
+		case src.DType == DTypeInt64 && dt == DTypeFloat32:
+			for i := 0; i < n; i++ {
+				out.F32[i] = float32(src.I64[i])
+			}
+		case src.DType == DTypeInt64 && dt == DTypeFloat64:
+			for i := 0; i < n; i++ {
+				out.F64[i] = float64(src.I64[i])
+			}
+		}
+		return out
+	}}
+}
+
+// ── Group 2: clip / linspace / arange / eye ──────────────────────────
+
+func init() {
+	// _tensor_clip(t: tensor, lo: number, hi: number) -> tensor
+	//
+	// Returns a new tensor with every element clamped to [lo, hi].
+	// lo and hi must be numbers compatible with t's dtype (same rules
+	// as _tensor_full: Float rejects i64; Integer widens to f32/f64).
+	// lo <= hi is required; violating it errors cleanly.
+	Builtins["_tensor_clip"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 3 {
+			return runtimeError("_tensor_clip expects 3 arguments (tensor, lo, hi)", ast.Pos{})
+		}
+		t, ok := args[0].(*Tensor)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_clip: first argument must be a tensor, got %s", args[0].Type()), ast.Pos{})
+		}
+		if !tensorComputeAvailable() {
+			return runtimeError("tensor ops require macOS or Linux in v1 (Windows support deferred)", ast.Pos{})
+		}
+		if !t.IsContiguous() {
+			return runtimeError("_tensor_clip: non-contiguous inputs not yet supported", ast.Pos{})
+		}
+		out := newTensorFromShape(t.DType, t.Shape)
+		switch t.DType {
+		case DTypeFloat32:
+			lo, errO := scalarToF32("_tensor_clip lo", args[1])
+			if errO != nil {
+				return errO
+			}
+			hi, errO := scalarToF32("_tensor_clip hi", args[2])
+			if errO != nil {
+				return errO
+			}
+			if lo > hi {
+				return runtimeError(fmt.Sprintf("_tensor_clip: lo (%g) must be <= hi (%g)", lo, hi), ast.Pos{})
+			}
+			tensorClipF32(out.F32, t.F32, lo, hi)
+		case DTypeFloat64:
+			lo, errO := scalarToF64("_tensor_clip lo", args[1])
+			if errO != nil {
+				return errO
+			}
+			hi, errO := scalarToF64("_tensor_clip hi", args[2])
+			if errO != nil {
+				return errO
+			}
+			if lo > hi {
+				return runtimeError(fmt.Sprintf("_tensor_clip: lo (%g) must be <= hi (%g)", lo, hi), ast.Pos{})
+			}
+			tensorClipF64(out.F64, t.F64, lo, hi)
+		case DTypeInt64:
+			lo, errO := scalarToI64("_tensor_clip lo", args[1])
+			if errO != nil {
+				return errO
+			}
+			hi, errO := scalarToI64("_tensor_clip hi", args[2])
+			if errO != nil {
+				return errO
+			}
+			if lo > hi {
+				return runtimeError(fmt.Sprintf("_tensor_clip: lo (%d) must be <= hi (%d)", lo, hi), ast.Pos{})
+			}
+			tensorClipI64(out.I64, t.I64, lo, hi)
+		}
+		return out
+	}}
+
+	// _tensor_linspace(start: number, stop: number, n: int, dtype: string) -> tensor
+	//
+	// Returns a 1-D tensor of n evenly spaced values from start to stop
+	// inclusive. n must be >= 1. For n == 1 the result is [start].
+	// NumPy equivalent: np.linspace(start, stop, num=n).
+	Builtins["_tensor_linspace"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 4 {
+			return runtimeError("_tensor_linspace expects 4 arguments (start, stop, n, dtype)", ast.Pos{})
+		}
+		dtypeStr, ok := args[3].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_linspace: dtype must be a string, got %s", args[3].Type()), ast.Pos{})
+		}
+		dt, dok := dtypeFromName(dtypeStr.Value)
+		if !dok {
+			return typeError(fmt.Sprintf("_tensor_linspace: unknown dtype %q (want f32/f64/i64)", dtypeStr.Value), ast.Pos{})
+		}
+		nObj, ok := args[2].(*Integer)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_linspace: n must be an integer, got %s", args[2].Type()), ast.Pos{})
+		}
+		n := nObj.Value
+		if n < 1 {
+			return runtimeError(fmt.Sprintf("_tensor_linspace: n must be >= 1, got %d", n), ast.Pos{})
+		}
+		startF, errO := scalarToF64("_tensor_linspace start", args[0])
+		if errO != nil {
+			return errO
+		}
+		stopF, errO := scalarToF64("_tensor_linspace stop", args[1])
+		if errO != nil {
+			return errO
+		}
+		out := newTensorFromShape(dt, []int{n})
+		step := 0.0
+		if n > 1 {
+			step = (stopF - startF) / float64(n-1)
+		}
+		switch dt {
+		case DTypeFloat32:
+			for i := 0; i < n; i++ {
+				out.F32[i] = float32(startF + float64(i)*step)
+			}
+			out.F32[n-1] = float32(stopF) // pin endpoint exactly
+		case DTypeFloat64:
+			for i := 0; i < n; i++ {
+				out.F64[i] = startF + float64(i)*step
+			}
+			out.F64[n-1] = stopF
+		case DTypeInt64:
+			for i := 0; i < n; i++ {
+				out.I64[i] = int64(startF + float64(i)*step)
+			}
+		}
+		return out
+	}}
+
+	// _tensor_arange(start: number, stop: number, step: number, dtype: string) -> tensor
+	//
+	// Returns a 1-D tensor of values from start up to (but not including)
+	// stop, separated by step. step must be non-zero. NumPy equivalent:
+	// np.arange(start, stop, step, dtype=dtype).
+	Builtins["_tensor_arange"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 4 {
+			return runtimeError("_tensor_arange expects 4 arguments (start, stop, step, dtype)", ast.Pos{})
+		}
+		dtypeStr, ok := args[3].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_arange: dtype must be a string, got %s", args[3].Type()), ast.Pos{})
+		}
+		dt, dok := dtypeFromName(dtypeStr.Value)
+		if !dok {
+			return typeError(fmt.Sprintf("_tensor_arange: unknown dtype %q (want f32/f64/i64)", dtypeStr.Value), ast.Pos{})
+		}
+		startF, errO := scalarToF64("_tensor_arange start", args[0])
+		if errO != nil {
+			return errO
+		}
+		stopF, errO := scalarToF64("_tensor_arange stop", args[1])
+		if errO != nil {
+			return errO
+		}
+		stepF, errO := scalarToF64("_tensor_arange step", args[2])
+		if errO != nil {
+			return errO
+		}
+		if stepF == 0 {
+			return runtimeError("_tensor_arange: step must be non-zero", ast.Pos{})
+		}
+		// compute length: ceil((stop - start) / step), clamped to >= 0
+		length := 0
+		if stepF > 0 && stopF > startF {
+			length = int((stopF-startF+stepF*1e-10)/stepF)
+			if length < 0 {
+				length = 0
+			}
+		} else if stepF < 0 && stopF < startF {
+			length = int((startF-stopF-stepF*1e-10)/(-stepF))
+			if length < 0 {
+				length = 0
+			}
+		}
+		out := newTensorFromShape(dt, []int{length})
+		switch dt {
+		case DTypeFloat32:
+			for i := 0; i < length; i++ {
+				out.F32[i] = float32(startF + float64(i)*stepF)
+			}
+		case DTypeFloat64:
+			for i := 0; i < length; i++ {
+				out.F64[i] = startF + float64(i)*stepF
+			}
+		case DTypeInt64:
+			for i := 0; i < length; i++ {
+				out.I64[i] = int64(startF + float64(i)*stepF)
+			}
+		}
+		return out
+	}}
+
+	// _tensor_eye(n: int, dtype: string) -> tensor
+	//
+	// Returns an n×n identity matrix: 1 on the diagonal, 0 elsewhere.
+	// NumPy equivalent: np.eye(n, dtype=dtype).
+	Builtins["_tensor_eye"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("_tensor_eye expects 2 arguments (n, dtype)", ast.Pos{})
+		}
+		nObj, ok := args[0].(*Integer)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_eye: n must be an integer, got %s", args[0].Type()), ast.Pos{})
+		}
+		dtypeStr, ok := args[1].(*String)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_eye: dtype must be a string, got %s", args[1].Type()), ast.Pos{})
+		}
+		n := nObj.Value
+		if n < 0 {
+			return runtimeError(fmt.Sprintf("_tensor_eye: n must be non-negative, got %d", n), ast.Pos{})
+		}
+		dt, dok := dtypeFromName(dtypeStr.Value)
+		if !dok {
+			return typeError(fmt.Sprintf("_tensor_eye: unknown dtype %q (want f32/f64/i64)", dtypeStr.Value), ast.Pos{})
+		}
+		out := newTensorFromShape(dt, []int{n, n})
+		switch dt {
+		case DTypeFloat32:
+			for i := 0; i < n; i++ {
+				out.F32[i*n+i] = 1.0
+			}
+		case DTypeFloat64:
+			for i := 0; i < n; i++ {
+				out.F64[i*n+i] = 1.0
+			}
+		case DTypeInt64:
+			for i := 0; i < n; i++ {
+				out.I64[i*n+i] = 1
+			}
+		}
+		return out
+	}}
+}
+
+// ── Group 3: comparison ops + where ─────────────────────────────────
+
+// comparisonKernel bundles the three dtype-specific kernel pointers for
+// one element-wise comparison op. Output is always i64 (0 or 1).
+type comparisonKernel struct {
+	f32 func(out []int64, a, b []float32)
+	f64 func(out []int64, a, b []float64)
+	i64 func(out, a, b []int64)
+}
+
+// elementWiseComparison is the shared dispatch helper for all six
+// comparison builtins (eq / ne / lt / le / gt / ge). It follows the
+// same broadcasting and scalar-promotion rules as elementWiseBinary
+// but always produces an i64 output tensor (mask of 0/1).
+func elementWiseComparison(args []Object, opName string, k comparisonKernel) Object {
+	if len(args) != 2 {
+		return runtimeError(fmt.Sprintf("%s expects 2 arguments (a, b)", opName), ast.Pos{})
+	}
+	if !tensorComputeAvailable() {
+		return runtimeError("tensor ops require macOS or Linux in v1 (Windows support deferred)", ast.Pos{})
+	}
+	aTen, aIsT := args[0].(*Tensor)
+	bTen, bIsT := args[1].(*Tensor)
+	if !aIsT && !bIsT {
+		return typeError(fmt.Sprintf("%s: at least one argument must be a tensor (got %s and %s)", opName, args[0].Type(), args[1].Type()), ast.Pos{})
+	}
+	var ref *Tensor
+	if aIsT {
+		ref = aTen
+	} else {
+		ref = bTen
+	}
+	if !aIsT {
+		mat, errObj := tensorFromScalar(args[0], ref)
+		if errObj != nil {
+			return errObj
+		}
+		aTen = mat
+	}
+	if !bIsT {
+		mat, errObj := tensorFromScalar(args[1], ref)
+		if errObj != nil {
+			return errObj
+		}
+		bTen = mat
+	}
+	if aTen.DType != bTen.DType {
+		return typeError(fmt.Sprintf("%s: dtype mismatch (%s vs %s); explicit conversion required", opName, aTen.DType, bTen.DType), ast.Pos{})
+	}
+	if !aTen.IsContiguous() || !bTen.IsContiguous() {
+		return runtimeError(fmt.Sprintf("%s: non-contiguous inputs not yet supported", opName), ast.Pos{})
+	}
+	outShape, bcErr := broadcastShape(aTen.Shape, bTen.Shape)
+	if bcErr != "" {
+		return runtimeError(fmt.Sprintf("%s: %s", opName, bcErr), ast.Pos{})
+	}
+	if !sameShape(aTen.Shape, outShape) {
+		aTen = materializeBroadcast(aTen, outShape)
+	}
+	if !sameShape(bTen.Shape, outShape) {
+		bTen = materializeBroadcast(bTen, outShape)
+	}
+	out := newTensorFromShape(DTypeInt64, outShape)
+	switch aTen.DType {
+	case DTypeFloat32:
+		k.f32(out.I64, aTen.F32, bTen.F32)
+	case DTypeFloat64:
+		k.f64(out.I64, aTen.F64, bTen.F64)
+	case DTypeInt64:
+		k.i64(out.I64, aTen.I64, bTen.I64)
+	}
+	return out
+}
+
+func init() {
+	// _tensor_eq(a, b) -> tensor
+	// Element-wise equality: out[i] = 1 if a[i] == b[i] else 0. Output is
+	// always i64 regardless of input dtype. Operands may be tensor+tensor
+	// (broadcast-compatible) or tensor+scalar. NaN follows IEEE 754: any
+	// comparison with NaN is 0 (false). Pair with _tensor_where for
+	// mask-based selection. NumPy parallel: np.equal(a, b) cast to int64.
+	Builtins["_tensor_eq"] = &Builtin{Fn: func(args []Object) Object {
+		return elementWiseComparison(args, "_tensor_eq", comparisonKernel{f32: tensorEqF32, f64: tensorEqF64, i64: tensorEqI64})
+	}}
+	// _tensor_ne(a, b) -> tensor
+	// Element-wise inequality: out[i] = 1 if a[i] != b[i] else 0. Output is
+	// i64. NaN comparisons: NaN != NaN is 1 (matches IEEE 754 and NumPy).
+	// Same broadcasting + scalar rules as _tensor_eq.
+	Builtins["_tensor_ne"] = &Builtin{Fn: func(args []Object) Object {
+		return elementWiseComparison(args, "_tensor_ne", comparisonKernel{f32: tensorNeF32, f64: tensorNeF64, i64: tensorNeI64})
+	}}
+	// _tensor_lt(a, b) -> tensor
+	// Element-wise less-than: out[i] = 1 if a[i] < b[i] else 0. Output is
+	// i64. NaN comparisons return 0. Same broadcasting + scalar rules as
+	// _tensor_eq.
+	Builtins["_tensor_lt"] = &Builtin{Fn: func(args []Object) Object {
+		return elementWiseComparison(args, "_tensor_lt", comparisonKernel{f32: tensorLtF32, f64: tensorLtF64, i64: tensorLtI64})
+	}}
+	// _tensor_le(a, b) -> tensor
+	// Element-wise less-than-or-equal: out[i] = 1 if a[i] <= b[i] else 0.
+	// Output is i64. NaN comparisons return 0. Same broadcasting + scalar
+	// rules as _tensor_eq.
+	Builtins["_tensor_le"] = &Builtin{Fn: func(args []Object) Object {
+		return elementWiseComparison(args, "_tensor_le", comparisonKernel{f32: tensorLeF32, f64: tensorLeF64, i64: tensorLeI64})
+	}}
+	// _tensor_gt(a, b) -> tensor
+	// Element-wise greater-than: out[i] = 1 if a[i] > b[i] else 0. Output
+	// is i64. NaN comparisons return 0. Same broadcasting + scalar rules
+	// as _tensor_eq.
+	Builtins["_tensor_gt"] = &Builtin{Fn: func(args []Object) Object {
+		return elementWiseComparison(args, "_tensor_gt", comparisonKernel{f32: tensorGtF32, f64: tensorGtF64, i64: tensorGtI64})
+	}}
+	// _tensor_ge(a, b) -> tensor
+	// Element-wise greater-than-or-equal: out[i] = 1 if a[i] >= b[i] else 0.
+	// Output is i64. NaN comparisons return 0. Same broadcasting + scalar
+	// rules as _tensor_eq.
+	Builtins["_tensor_ge"] = &Builtin{Fn: func(args []Object) Object {
+		return elementWiseComparison(args, "_tensor_ge", comparisonKernel{f32: tensorGeF32, f64: tensorGeF64, i64: tensorGeI64})
+	}}
+
+	// _tensor_where(mask: tensor, x: tensor|number, y: tensor|number) -> tensor
+	//
+	// Element-wise conditional selection: out[i] = x[i] if mask[i] != 0 else y[i].
+	// mask must be an i64 tensor (typically the output of a comparison op).
+	// x and y must have the same dtype; either may be a scalar number (broadcast
+	// to mask's shape). All shapes must match mask's shape after scalar promotion.
+	// NumPy equivalent: np.where(condition, x, y).
+	Builtins["_tensor_where"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 3 {
+			return runtimeError("_tensor_where expects 3 arguments (mask, x, y)", ast.Pos{})
+		}
+		mask, ok := args[0].(*Tensor)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_where: mask must be a tensor, got %s", args[0].Type()), ast.Pos{})
+		}
+		if mask.DType != DTypeInt64 {
+			return typeError(fmt.Sprintf("_tensor_where: mask must be an i64 tensor (got %s); use a comparison op to produce the mask", mask.DType), ast.Pos{})
+		}
+		if !mask.IsContiguous() {
+			return runtimeError("_tensor_where: non-contiguous mask not yet supported", ast.Pos{})
+		}
+		// Determine reference dtype from whichever of x/y is a tensor.
+		var xTen, yTen *Tensor
+		var refDType DType
+		if xt, ok := args[1].(*Tensor); ok {
+			xTen = xt
+			refDType = xt.DType
+		}
+		if yt, ok := args[2].(*Tensor); ok {
+			yTen = yt
+			if xTen != nil && xTen.DType != yt.DType {
+				return typeError(fmt.Sprintf("_tensor_where: x dtype (%s) != y dtype (%s)", xTen.DType, yt.DType), ast.Pos{})
+			}
+			refDType = yt.DType
+		}
+		if xTen == nil && yTen == nil {
+			return typeError("_tensor_where: at least one of x or y must be a tensor", ast.Pos{})
+		}
+		// promote scalars
+		refShape := mask.Shape
+		if xTen == nil {
+			refT := &Tensor{DType: refDType, Shape: refShape}
+			switch refDType {
+			case DTypeFloat32:
+				refT.F32 = make([]float32, mask.Numel())
+			case DTypeFloat64:
+				refT.F64 = make([]float64, mask.Numel())
+			case DTypeInt64:
+				refT.I64 = make([]int64, mask.Numel())
+			}
+			mat, errObj := tensorFromScalar(args[1], refT)
+			if errObj != nil {
+				return errObj
+			}
+			xTen = mat
+		}
+		if yTen == nil {
+			refT := &Tensor{DType: refDType, Shape: refShape}
+			switch refDType {
+			case DTypeFloat32:
+				refT.F32 = make([]float32, mask.Numel())
+			case DTypeFloat64:
+				refT.F64 = make([]float64, mask.Numel())
+			case DTypeInt64:
+				refT.I64 = make([]int64, mask.Numel())
+			}
+			mat, errObj := tensorFromScalar(args[2], refT)
+			if errObj != nil {
+				return errObj
+			}
+			yTen = mat
+		}
+		if !sameShape(mask.Shape, xTen.Shape) || !sameShape(mask.Shape, yTen.Shape) {
+			return runtimeError(fmt.Sprintf("_tensor_where: mask shape %v, x shape %v, y shape %v must all match (broadcasting across mask not yet supported)", mask.Shape, xTen.Shape, yTen.Shape), ast.Pos{})
+		}
+		if !xTen.IsContiguous() || !yTen.IsContiguous() {
+			return runtimeError("_tensor_where: non-contiguous x or y not yet supported", ast.Pos{})
+		}
+		n := mask.Numel()
+		out := newTensorFromShape(refDType, mask.Shape)
+		switch refDType {
+		case DTypeFloat32:
+			for i := 0; i < n; i++ {
+				if mask.I64[i] != 0 {
+					out.F32[i] = xTen.F32[i]
+				} else {
+					out.F32[i] = yTen.F32[i]
+				}
+			}
+		case DTypeFloat64:
+			for i := 0; i < n; i++ {
+				if mask.I64[i] != 0 {
+					out.F64[i] = xTen.F64[i]
+				} else {
+					out.F64[i] = yTen.F64[i]
+				}
+			}
+		case DTypeInt64:
+			for i := 0; i < n; i++ {
+				if mask.I64[i] != 0 {
+					out.I64[i] = xTen.I64[i]
+				} else {
+					out.I64[i] = yTen.I64[i]
+				}
+			}
+		}
+		return out
+	}}
+}
+
+// ── Group 4: concatenate / stack ─────────────────────────────────────
+
+// tensorConcatenateGo joins a slice of validated same-dtype tensors along
+// axis. All validation (rank, shape compatibility, dtype match) is done
+// by the _tensor_concatenate builtin before calling this. The helper uses
+// a prefix/suffix copy strategy so each copy is a single contiguous block:
+//
+//	prefix = product(shape[0 .. axis-1])   — number of outer blocks
+//	suffix = product(shape[axis+1 .. R-1]) — elements per axis slice
+//
+// For each outer block, copy axisSize*suffix elements from each tensor
+// in sequence. This runs at near-memcpy speed.
+func tensorConcatenateGo(tensors []*Tensor, axis int) *Tensor {
+	dtype := tensors[0].DType
+	rank := len(tensors[0].Shape)
+	outShape := make([]int, rank)
+	copy(outShape, tensors[0].Shape)
+	for i := 1; i < len(tensors); i++ {
+		outShape[axis] += tensors[i].Shape[axis]
+	}
+	out := newTensorFromShape(dtype, outShape)
+	prefix := 1
+	for i := 0; i < axis; i++ {
+		prefix *= outShape[i]
+	}
+	suffix := 1
+	for i := axis + 1; i < rank; i++ {
+		suffix *= outShape[i]
+	}
+	dstAxisOff := 0
+	for _, t := range tensors {
+		axisSize := t.Shape[axis]
+		blockLen := axisSize * suffix
+		for p := 0; p < prefix; p++ {
+			srcOff := p * axisSize * suffix
+			dstOff := p*outShape[axis]*suffix + dstAxisOff*suffix
+			switch dtype {
+			case DTypeFloat32:
+				copy(out.F32[dstOff:dstOff+blockLen], t.F32[srcOff:srcOff+blockLen])
+			case DTypeFloat64:
+				copy(out.F64[dstOff:dstOff+blockLen], t.F64[srcOff:srcOff+blockLen])
+			case DTypeInt64:
+				copy(out.I64[dstOff:dstOff+blockLen], t.I64[srcOff:srcOff+blockLen])
+			}
+		}
+		dstAxisOff += axisSize
+	}
+	return out
+}
+
+func init() {
+	// _tensor_concatenate(tensors: array, axis: int) -> tensor
+	//
+	// Joins an array of tensors along an existing axis. All tensors must:
+	//   - have the same dtype
+	//   - have the same rank
+	//   - have identical shapes on every axis except `axis`
+	// NumPy equivalent: np.concatenate([t1, t2, ...], axis=N).
+	Builtins["_tensor_concatenate"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("_tensor_concatenate expects 2 arguments (tensors, axis)", ast.Pos{})
+		}
+		arr, ok := args[0].(*Array)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_concatenate: first argument must be an array of tensors, got %s", args[0].Type()), ast.Pos{})
+		}
+		axisObj, ok := args[1].(*Integer)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_concatenate: axis must be an integer, got %s", args[1].Type()), ast.Pos{})
+		}
+		if len(arr.Elements) == 0 {
+			return runtimeError("_tensor_concatenate: tensors array must not be empty", ast.Pos{})
+		}
+		tensors := make([]*Tensor, len(arr.Elements))
+		for i, el := range arr.Elements {
+			t, ok := el.(*Tensor)
+			if !ok {
+				return typeError(fmt.Sprintf("_tensor_concatenate: element %d must be a tensor, got %s", i, el.Type()), ast.Pos{})
+			}
+			if !t.IsContiguous() {
+				return runtimeError(fmt.Sprintf("_tensor_concatenate: tensor at index %d is non-contiguous (not yet supported)", i), ast.Pos{})
+			}
+			tensors[i] = t
+		}
+		ref := tensors[0]
+		rank := len(ref.Shape)
+		axis := axisObj.Value
+		if axis < 0 {
+			axis = axis + rank
+		}
+		if axis < 0 || axis >= rank {
+			return runtimeError(fmt.Sprintf("_tensor_concatenate: axis %d out of range for rank-%d tensors", axisObj.Value, rank), ast.Pos{})
+		}
+		for i := 1; i < len(tensors); i++ {
+			t := tensors[i]
+			if t.DType != ref.DType {
+				return typeError(fmt.Sprintf("_tensor_concatenate: dtype mismatch at index %d (%s vs %s)", i, t.DType, ref.DType), ast.Pos{})
+			}
+			if len(t.Shape) != rank {
+				return runtimeError(fmt.Sprintf("_tensor_concatenate: rank mismatch at index %d (%d vs %d)", i, len(t.Shape), rank), ast.Pos{})
+			}
+			for d := 0; d < rank; d++ {
+				if d != axis && t.Shape[d] != ref.Shape[d] {
+					return runtimeError(fmt.Sprintf("_tensor_concatenate: shape mismatch at index %d dimension %d (%d vs %d)", i, d, t.Shape[d], ref.Shape[d]), ast.Pos{})
+				}
+			}
+		}
+		return tensorConcatenateGo(tensors, axis)
+	}}
+
+	// _tensor_stack(tensors: array, axis: int) -> tensor
+	//
+	// Joins an array of tensors along a NEW axis. All tensors must have
+	// identical shapes. The output has rank = input_rank + 1, with the
+	// new axis of size len(tensors) inserted at position `axis`.
+	// NumPy equivalent: np.stack([t1, t2, ...], axis=N).
+	Builtins["_tensor_stack"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("_tensor_stack expects 2 arguments (tensors, axis)", ast.Pos{})
+		}
+		arr, ok := args[0].(*Array)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_stack: first argument must be an array of tensors, got %s", args[0].Type()), ast.Pos{})
+		}
+		axisObj, ok := args[1].(*Integer)
+		if !ok {
+			return typeError(fmt.Sprintf("_tensor_stack: axis must be an integer, got %s", args[1].Type()), ast.Pos{})
+		}
+		if len(arr.Elements) == 0 {
+			return runtimeError("_tensor_stack: tensors array must not be empty", ast.Pos{})
+		}
+		tensors := make([]*Tensor, len(arr.Elements))
+		for i, el := range arr.Elements {
+			t, ok := el.(*Tensor)
+			if !ok {
+				return typeError(fmt.Sprintf("_tensor_stack: element %d must be a tensor, got %s", i, el.Type()), ast.Pos{})
+			}
+			if !t.IsContiguous() {
+				return runtimeError(fmt.Sprintf("_tensor_stack: tensor at index %d is non-contiguous (not yet supported)", i), ast.Pos{})
+			}
+			tensors[i] = t
+		}
+		ref := tensors[0]
+		rank := len(ref.Shape)
+		axis := axisObj.Value
+		if axis < 0 {
+			axis = axis + rank + 1
+		}
+		if axis < 0 || axis > rank {
+			return runtimeError(fmt.Sprintf("_tensor_stack: axis %d out of range for rank-%d tensors (valid: -%d to %d)", axisObj.Value, rank, rank+1, rank), ast.Pos{})
+		}
+		for i := 1; i < len(tensors); i++ {
+			t := tensors[i]
+			if t.DType != ref.DType {
+				return typeError(fmt.Sprintf("_tensor_stack: dtype mismatch at index %d (%s vs %s)", i, t.DType, ref.DType), ast.Pos{})
+			}
+			if !sameShape(t.Shape, ref.Shape) {
+				return runtimeError(fmt.Sprintf("_tensor_stack: shape mismatch at index %d (%v vs %v); all tensors must have identical shapes", i, t.Shape, ref.Shape), ast.Pos{})
+			}
+		}
+		// expand each tensor at axis to add the new dimension, then concatenate
+		expanded := make([]*Tensor, len(tensors))
+		for i, t := range tensors {
+			newShape := make([]int, rank+1)
+			copy(newShape[:axis], t.Shape[:axis])
+			newShape[axis] = 1
+			copy(newShape[axis+1:], t.Shape[axis:])
+			expanded[i] = &Tensor{DType: t.DType, Shape: newShape, F32: t.F32, F64: t.F64, I64: t.I64}
+		}
+		return tensorConcatenateGo(expanded, axis)
+	}}
+}
+
+// ── scalar extraction helpers (used by clip, linspace, arange) ───────
+
+// scalarToF32 extracts a float32 from a kLex Integer or Float.
+// opName is used in the error message. Returns (0, *Error) on failure.
+func scalarToF32(opName string, v Object) (float32, Object) {
+	switch x := v.(type) {
+	case *Integer:
+		return float32(x.Value), nil
+	case *Float:
+		return float32(x.Value), nil
+	}
+	return 0, typeError(fmt.Sprintf("%s: expected a number, got %s", opName, v.Type()), ast.Pos{})
+}
+
+// scalarToF64 extracts a float64 from a kLex Integer or Float.
+func scalarToF64(opName string, v Object) (float64, Object) {
+	switch x := v.(type) {
+	case *Integer:
+		return float64(x.Value), nil
+	case *Float:
+		return x.Value, nil
+	}
+	return 0, typeError(fmt.Sprintf("%s: expected a number, got %s", opName, v.Type()), ast.Pos{})
+}
+
+// scalarToI64 extracts an int64 from a kLex Integer. Rejects Float
+// (consistent with kLex's strict i64 policy — convert explicitly).
+func scalarToI64(opName string, v Object) (int64, Object) {
+	switch x := v.(type) {
+	case *Integer:
+		return int64(x.Value), nil
+	case *Float:
+		return 0, typeError(fmt.Sprintf("%s: cannot use a float for an i64 tensor parameter (use an integer)", opName), ast.Pos{})
+	}
+	return 0, typeError(fmt.Sprintf("%s: expected an integer, got %s", opName, v.Type()), ast.Pos{})
+}
+
+// parseSliceSpec parses one axis's spec for _tensor_slice. Returns
+// (start, stop, step) or an *Error.
+//
+// Accepts:
+//
+//	null            — equivalent to [null, null, null] (full axis)
+//	[a, b, c]       — start=a, stop=b, step=c; any element may be
+//	                  null to take its default (0 / dim / 1)
+//
+// Start/stop are returned WITHOUT negative-index normalisation —
+// the caller adjusts after parsing, since axis bounds-clamping is
+// also a caller responsibility.
+//
+// step must be >= 1 (negative-step slicing deferred).
+func parseSliceSpec(spec Object, dim, axis int) (int, int, int, Object) {
+	if spec == NULL {
+		return 0, dim, 1, nil
+	}
+	arr, ok := spec.(*Array)
+	if !ok {
+		return 0, 0, 0, typeError(fmt.Sprintf("_tensor_slice: spec for axis %d must be null or [start, stop, step], got %s", axis, spec.Type()), ast.Pos{})
+	}
+	if len(arr.Elements) != 3 {
+		return 0, 0, 0, runtimeError(fmt.Sprintf("_tensor_slice: spec for axis %d must be a 3-element [start, stop, step], got length %d", axis, len(arr.Elements)), ast.Pos{})
+	}
+	start := 0
+	if arr.Elements[0] != NULL {
+		si, ok := arr.Elements[0].(*Integer)
+		if !ok {
+			return 0, 0, 0, typeError(fmt.Sprintf("_tensor_slice: axis %d start must be integer or null, got %s", axis, arr.Elements[0].Type()), ast.Pos{})
+		}
+		start = si.Value
+	}
+	stop := dim
+	if arr.Elements[1] != NULL {
+		si, ok := arr.Elements[1].(*Integer)
+		if !ok {
+			return 0, 0, 0, typeError(fmt.Sprintf("_tensor_slice: axis %d stop must be integer or null, got %s", axis, arr.Elements[1].Type()), ast.Pos{})
+		}
+		stop = si.Value
+	}
+	step := 1
+	if arr.Elements[2] != NULL {
+		si, ok := arr.Elements[2].(*Integer)
+		if !ok {
+			return 0, 0, 0, typeError(fmt.Sprintf("_tensor_slice: axis %d step must be integer or null, got %s", axis, arr.Elements[2].Type()), ast.Pos{})
+		}
+		step = si.Value
+	}
+	if step <= 0 {
+		return 0, 0, 0, runtimeError(fmt.Sprintf("_tensor_slice: axis %d step must be positive (negative-step slicing not yet supported), got %d", axis, step), ast.Pos{})
+	}
+	return start, stop, step, nil
 }

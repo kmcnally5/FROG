@@ -403,6 +403,67 @@ func hoverForIdentifier(doc *DocumentState, name string) *Hover {
 	return nil
 }
 
+// resolveModuleSymbol resolves alias.property to the library file, its source text,
+// and the Symbol entry for property. Returns ("", "", nil, false) when the alias
+// is not an import or the property is not defined in that module.
+// Shared by hover and goto-definition so both use identical path resolution.
+func resolveModuleSymbol(doc *DocumentState, alias, property string) (libFile, libContent string, sym *Symbol, ok bool) {
+	var importPath string
+	for _, stmt := range doc.AST.Statements {
+		if imp, isImp := stmt.(*ast.ImportStmt); isImp && imp.Alias == alias {
+			importPath = imp.Path
+			break
+		}
+	}
+	if importPath == "" {
+		return "", "", nil, false
+	}
+
+	docDir := filepath.Dir(URIToPath(doc.URI))
+	libFileName := importPath
+	if !strings.HasSuffix(libFileName, ".lex") {
+		libFileName += ".lex"
+	}
+
+	candidates := []string{
+		filepath.Join(docDir, libFileName),
+		filepath.Join(filepath.Dir(filepath.Dir(docDir)), "stdlib", libFileName),
+		filepath.Join(filepath.Dir(docDir), "stdlib", libFileName),
+	}
+	ancestor := docDir
+	for i := 0; i < 8; i++ {
+		candidates = append(candidates, filepath.Join(ancestor, libFileName))
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			break
+		}
+		ancestor = parent
+	}
+
+	var resolved string
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			resolved = c
+			break
+		}
+	}
+	if resolved == "" {
+		return "", "", nil, false
+	}
+
+	content, libAST, libSymbols := getParsedFile(resolved)
+	if content == "" || libAST == nil {
+		return "", "", nil, false
+	}
+
+	s, found := libSymbols.Symbols[property]
+	if !found {
+		return "", "", nil, false
+	}
+
+	return resolved, content, s, true
+}
+
 // hoverForDotExpr handles hover for expressions like lib.invokeFunc or instance.field
 func hoverForDotExpr(doc *DocumentState, dotExpr *ast.DotExpr, pos Position) *Hover {
 	// Extract name from left side
@@ -440,107 +501,23 @@ func hoverForDotExpr(doc *DocumentState, dotExpr *ast.DotExpr, pos Position) *Ho
 	}
 
 	// Otherwise, treat as module access (lib.function)
-	// Find the import statement for this module
-	var importPath string
-	for _, stmt := range doc.AST.Statements {
-		if importStmt, ok := stmt.(*ast.ImportStmt); ok {
-			if importStmt.Alias == leftName {
-				importPath = importStmt.Path
-				break
-			}
-		}
-	}
-
-	if importPath == "" {
-		LogMessage("HOVER DotExpr: no import found for alias '%s'", leftName)
+	libFile, libContent, sym, resolved := resolveModuleSymbol(doc, leftName, propertyName)
+	if !resolved {
+		LogMessage("HOVER DotExpr: could not resolve '%s.%s'", leftName, propertyName)
 		return nil
 	}
+	LogMessage("HOVER DotExpr: found '%s.%s' at %s:%d", leftName, propertyName, libFile, sym.DefPos.Line)
 
-	LogMessage("HOVER DotExpr: alias='%s' property='%s' importPath='%s'", leftName, propertyName, importPath)
+	fileLink := fmt.Sprintf("\n\n---\n*Source: [%s](%s) — line %d*",
+		filepath.Base(libFile), PathToURI(libFile), sym.DefPos.Line)
 
-	// Resolve the import to a file path
-	docURI := URIToPath(doc.URI)
-	docDir := filepath.Dir(docURI)
-
-	// Add .lex extension if not already present
-	libFileName := importPath
-	if !strings.HasSuffix(libFileName, ".lex") {
-		libFileName = libFileName + ".lex"
-	}
-
-	// Try multiple locations: same dir, stdlib, and project-root-relative paths.
-	// Imports like "projects/frogBroker/broker_auth.lex" are relative to the
-	// project root, not to the importing file's directory. Walk up ancestor
-	// directories until the file is found or we run out of parents.
-	var libFile string
-	candidates := []string{
-		filepath.Join(docDir, libFileName),                                            // same directory
-		filepath.Join(filepath.Dir(filepath.Dir(docDir)), "stdlib", libFileName),      // stdlib (2 up)
-		filepath.Join(filepath.Dir(docDir), "stdlib", libFileName),                    // stdlib (1 up)
-	}
-
-	// Walk up from docDir trying the import path relative to each ancestor
-	ancestor := docDir
-	for i := 0; i < 8; i++ {
-		candidates = append(candidates, filepath.Join(ancestor, libFileName))
-		parent := filepath.Dir(ancestor)
-		if parent == ancestor {
-			break
-		}
-		ancestor = parent
-	}
-
-	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
-			libFile = candidate
-			break
-		}
-	}
-
-	if libFile == "" {
-		LogMessage("HOVER DotExpr: could not resolve '%s' — tried %d candidates from docDir='%s'", libFileName, len(candidates), docDir)
-		return nil
-	}
-	LogMessage("HOVER DotExpr: resolved to '%s'", libFile)
-
-	// Cache-keyed read + parse. parsed_cache.go returns the most recent
-	// (content, AST, symbols) for libFile, re-parsing only when the file's
-	// mtime changes. Bound by an LRU cap so this can't grow unbounded.
-	libContent, libAST, libSymbols := getParsedFile(libFile)
-	if libContent == "" || libAST == nil {
-		return nil
-	}
-
-	// Look up the symbol in the library
-	sym, ok := libSymbols.Symbols[propertyName]
-	if !ok {
-		LogMessage("HOVER DotExpr: symbol '%s' not found in '%s' (available: %v)", propertyName, libFile, func() []string {
-			keys := make([]string, 0, len(libSymbols.Symbols))
-			for k := range libSymbols.Symbols {
-				keys = append(keys, k)
-			}
-			return keys
-		}())
-		return nil
-	}
-	LogMessage("HOVER DotExpr: found symbol '%s' at line %d", propertyName, sym.DefPos.Line)
-
-	// Extract comments from the library file
 	comments := extractCommentsAboveSymbol(libContent, sym.DefPos.Line)
+	body := renderSymbolHover(sym) + fileLink
 	if comments != "" {
-		return &Hover{
-			Contents: MarkupContent{
-				Kind:  "markdown",
-				Value: comments + "\n\n" + renderSymbolHover(sym),
-			},
-		}
+		body = comments + "\n\n" + body
 	}
-
 	return &Hover{
-		Contents: MarkupContent{
-			Kind:  "markdown",
-			Value: renderSymbolHover(sym),
-		},
+		Contents: MarkupContent{Kind: "markdown", Value: body},
 	}
 }
 

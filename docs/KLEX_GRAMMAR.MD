@@ -7,6 +7,20 @@ This document is the authoritative source of truth for kLex syntax. Before addin
 **Derived from:** `lexer/lexer.go` and `parser/parser.go`  
 **Keep in sync:** whenever either file is changed.
 
+**Execution backends.** kLex programs run on one of two backends:
+
+* **Tree-walker (default).** Reference implementation. Every construct
+  in this grammar is supported; semantics here describe the tree-walker.
+* **Bytecode VM (`--vm`, experimental).** A second backend that compiles
+  the AST to bytecode for tighter dispatch loops. Most of the language
+  works under `--vm`, but some advanced constructs (e.g. enum patterns
+  require a switch subject and exactly one value per case; certain
+  async + select patterns) are still being brought up — they fall back
+  to a clear `"VM unimplemented: ..."` error rather than misbehaving.
+  Treat `--vm` as a performance opt-in, not the canonical path. If a
+  program runs on the tree-walker but fails under `--vm`, that is a VM
+  bring-up gap, not a language ambiguity.
+
 ---
 
 ## NOTATION
@@ -57,10 +71,12 @@ true  false  null
 Source of truth: `keywords` map in `lexer/lexer.go`. Identifiers that match any
 of these tokenise to the corresponding keyword instead of `IDENT`.
 
-**IMPORTANT:** `fn` is a reserved keyword and cannot be used as a parameter name
-or variable name. Using `fn` as a parameter causes the parser to miscount the
-function's arity, leading to "expects N argument(s), got M" errors. Use alternative
-names: `func`, `f`, `callback`, `fn_arg`, etc.
+**Reserved keywords cannot be used as parameter names.** This applies to every
+keyword in the table above (`fn`, `if`, `else`, `case`, `let`, etc.). The parser
+rejects them at function-definition time with a clear error pointing at the
+offending name — e.g. `invalid parameter name 'fn': reserved keywords cannot be
+used as parameter names`. Pick an alternative: `func`, `f`, `callback`,
+`item`, `tc`, etc.
 
 ### Numeric Literals
 
@@ -192,7 +208,24 @@ while_stmt   = "while" expression block
 
 for_stmt     = "for" IDENT [ "," IDENT ] "in" expression block
                (* first IDENT: element (arrays/channels) or key (hashes)
-                  second IDENT: value — only meaningful when iterating a hash *)
+                  second IDENT: value — only meaningful when iterating a hash
+
+                  kLex deliberately has NO C-style numeric form
+                  (for (i = 0; i < n; i++) { ... }) and NO ++ / --
+                  operators. Numeric loops are written explicitly:
+
+                      let i = 0
+                      while i < n {
+                          ...
+                          i = i + 1
+                      }
+
+                  This is the same "explicit over implicit" line that
+                  rules out `i++` (hides the mutation) and rules out
+                  a C-style for header (interleaves three different
+                  statement kinds — init, condition, step — into one
+                  syntactic slot). The for/in form is reserved for
+                  iterating real collections. *)
 
 switch_stmt  = "switch" [ expression ] "{"
                  { "case" case_pattern { "," case_pattern } block }
@@ -207,17 +240,33 @@ case_pattern = enum_pattern
              (* enum_pattern is only valid in a value switch (with subject);
                 expression switch cases must be boolean expressions *)
 
-enum_pattern = dot_expr "(" IDENT { "," IDENT } ")"
-             (* Destructuring pattern: case Shape.Circle(r) { } or Shape.Rect(w, h) { }
-                dot_expr must resolve to an enum variant at runtime.
+enum_pattern = ( dot_expr | IDENT ) "(" IDENT { "," IDENT } ")"
+             (* Destructuring pattern. Two forms:
+                  full:  case Shape.Circle(r) { ... }   -- dot_expr function
+                  short: case Circle(r) { ... }         -- bare Ident function
+                Pattern target must resolve to an enum variant at runtime.
                 Each IDENT is a new local variable bound positionally to the
                 variant's declared fields for the duration of the case body.
                 Binding count must exactly match the variant's field count;
                 a mismatch is a RuntimeError.
                 Bindings are local to the case arm and do not affect the outer scope.
                 Zero-field variants use the plain expression form — no parentheses.
-                Recognised at parse time: a CallExpr where the function is a DotExpr
-                and every argument is a bare Ident is rewritten to enum_pattern. *)
+
+                Parse-time rewriting: a CallExpr whose function is either a
+                DotExpr or a bare Ident, AND whose arguments are all bare
+                Idents, is rewritten to enum_pattern. This means the parser
+                CANNOT distinguish an enum-variant pattern from an ordinary
+                function-call pattern at the syntactic level — e.g.
+
+                    case foo(r) { ... }
+
+                where `foo` happens to be a function (not an enum variant)
+                parses identically to a real enum pattern. The variant
+                check happens at match time and surfaces a clean
+                RuntimeError ("X is not an enum variant"), not a silent
+                failure. Catching this at parse time would require a
+                semantic-analysis pass kLex deliberately does not have;
+                the runtime catch is the explicit tradeoff. *)
 
 select_stmt  = "select" "{"
                  { "case" select_case block }
@@ -244,8 +293,26 @@ select_case  = "send" "(" expression "," expression ")"
                 outer-scope variables rather than creating new local ones *)
 
 return_stmt  = "return" [ expression { "," expression } ]
-               (* bare "return" yields null
-                  "return a, b" yields a Tuple — must be received with multi-assign *)
+               (* bare "return"     yields null
+                  return a          yields a single value
+                  return a, b       yields a 2-element Tuple
+                  return a, b, c    yields a 3-element Tuple, etc.
+
+                  Multi-element returns must be received with a
+                  multi_assign_stmt; assigning the whole Tuple to one
+                  name with `t = fn()` leaves t as a *Tuple value
+                  whose elements can only be accessed by destructuring.
+
+                  TUPLE SEMANTICS — kLex has NO tuple literal syntax.
+                  `(a, b)` is just grouping (a single expression).
+                  Tuple VALUES are produced only by:
+                    * multi-element return statements
+                    * builtins that explicitly document a tuple return
+                      (e.g. recv, safe, parallel_reduce, dbQuery)
+                  Tuples are a runtime multi-return mechanism, not a
+                  user-constructable composite type. If you want a
+                  user-constructable ordered tuple-like value, use an
+                  Array; for a named record, use a struct. *)
 
 break_stmt   = "break"
 continue_stmt= "continue"
@@ -318,8 +385,24 @@ assign_stmt       = IDENT "=" expression
                        walks the scope chain via Assign() if it already exists *)
 
 multi_assign_stmt = IDENT "," IDENT { "," IDENT } "=" expression
-                    (* right-hand side must evaluate to a Tuple with exactly
-                       the same number of elements as the left-hand side *)
+                    (* Right-hand side must evaluate to a Tuple with EXACTLY
+                       the same number of elements as the left-hand side. Any
+                       mismatch (too few or too many) is a RuntimeError:
+                       "multi-assign expected N values, got M". kLex does not
+                       silently truncate or pad — be explicit about how many
+                       elements the producer returns.
+
+                       Discard slots: any of the IDENTs may be `_` to discard
+                       the corresponding tuple element. Multiple `_` in the
+                       same statement are independent (they do NOT shadow
+                       each other). E.g. `_, err = safe(fn)` keeps only the
+                       error; `val, _, _ = threeReturns()` keeps only the
+                       first.
+
+                       `let` form: `let a, b = expr` declares both names in
+                       the current scope; the bare form `a, b = expr` walks
+                       the scope chain via Assign() to update existing
+                       bindings where they live. *)
 
 index_assign_stmt = expression "[" expression "]" "=" expression
                     (* mutates the array or hash in place *)
@@ -1009,28 +1092,56 @@ FrogPy is kLex's NumPy-equivalent: contiguous N-D numeric arrays backed by Go + 
 * `_tensor_zeros(shape: ARRAY, dtype: STRING)` → `TENSOR` — fresh contiguous zero-filled tensor with the given shape.
 * `_tensor_full(shape: ARRAY, value: NUMBER, dtype: STRING)` → `TENSOR` — fresh tensor with every element set to `value`. NumPy parallel: `np.full`. i64 rejects Float values.
 * `_tensor_random(shape: ARRAY, dtype: STRING, seed: INTEGER)` → `TENSOR` — pseudo-random tensor. Floats: uniform [0,1) (NumPy `np.random.rand`). i64: full int63 range. `seed > 0` deterministic; `seed == 0` time-seeded. Go `math/rand`; not cryptographic.
+* `_tensor_linspace(start: NUMBER, stop: NUMBER, n: INTEGER, dtype: STRING)` → `TENSOR` — 1-D tensor of n evenly spaced values from start to stop inclusive. n must be ≥ 1. NumPy parallel: `np.linspace`.
+* `_tensor_arange(start: NUMBER, stop: NUMBER, step: NUMBER, dtype: STRING)` → `TENSOR` — 1-D tensor of values from start up to (but not including) stop, separated by step. step must be non-zero. NumPy parallel: `np.arange`.
+* `_tensor_eye(n: INTEGER, dtype: STRING)` → `TENSOR` — n×n identity matrix: 1 on the diagonal, 0 elsewhere. NumPy parallel: `np.eye`.
 * `_tensor_dtype(t: TENSOR)` → `STRING` — returns `"f32"`, `"f64"`, or `"i64"`.
 * `_tensor_shape(t: TENSOR)` → `ARRAY` — fresh kLex array of integers describing t's shape.
 * `_tensor_numel(t: TENSOR)` → `INTEGER` — total element count (product of shape).
-* `_tensor_get(t: TENSOR, idx: INTEGER)` → number — linear element access (treats t as a flat 1-D view); bounds-checked.
+* `_tensor_get(t: TENSOR, idx: INTEGER)` → number — linear element access (treats t as a flat 1-D view in row-major logical order); bounds-checked. Works on strided views — the flat index is translated through Strides.
+* `_tensor_to_array(t: TENSOR)` → `ARRAY` — extract all elements into a flat kLex array, row-major logical order. f32/f64 elements come back as Float; i64 as Integer. Works on strided views.
 
-**Shape operations** (all view-based — share backing storage with input)
+**Materialisation & conversion**
+
+* `_tensor_clone(t: TENSOR)` → `TENSOR` — fresh independent contiguous copy. Mutations to the result do not affect t. On a strided view, materialises through stride math (same as `_tensor_contiguous`).
+* `_tensor_cast(t: TENSOR, dtype: STRING)` → `TENSOR` — fresh tensor with every element converted to the target dtype. Same conversion rules as `_tensor_from_array`: f32↔f64 lossless widening / truncating; i64 → float is best-effort (exact up to 2^24 / 2^53); float → i64 truncates toward zero.
+
+**Shape operations** (view-based — share backing storage with input)
 
 * `_tensor_reshape(t: TENSOR, newShape: ARRAY)` → `TENSOR` — NumPy-style reshape view. `product(newShape)` must equal `numel(t)`. Contiguous inputs only in v1.
 * `_tensor_squeeze(t: TENSOR)` → `TENSOR` — remove all size-1 dimensions; all-1s shape collapses to 0-D scalar. NumPy parallel: `np.squeeze`.
 * `_tensor_expand_dims(t: TENSOR, axis: INTEGER)` → `TENSOR` — insert a new size-1 dimension at `axis`. Negative axis OK (counts from end). NumPy parallel: `np.expand_dims`.
+
+**Slicing** (view-based)
+
+* `_tensor_slice(t: TENSOR, specs: ARRAY)` → `TENSOR` — strided view sharing t's backing data. `specs` is an array with one entry per axis of t; each entry is either `null` (full axis) or `[start, stop, step]` (any of start/stop/step may itself be `null` for the default 0/dim/1). Negative start/stop count from end. step must be positive in v1. Output Shape/Strides reflect the slice; mutations through the view affect t and vice versa. Source must itself be contiguous in v1 (slice-of-slice requires `_tensor_contiguous` in between).
+* `_tensor_contiguous(t: TENSOR)` → `TENSOR` — if t is contiguous, returns t unchanged (no-op fast path, NumPy `ascontiguousarray` semantics). If t is a strided view, materialises into a fresh contiguous tensor by walking the multi-index through Strides. Required before passing a slice view to any kernel-based op (add, matmul, reductions, etc.).
 
 **Pure element-wise ops** (allocate a fresh result tensor — NumPy semantics with full broadcasting)
 
 * `_tensor_abs(a)` `_tensor_neg(a)` `_tensor_exp(a)` `_tensor_log(a)` `_tensor_sqrt(a)` `_tensor_sin(a)` `_tensor_cos(a)` → `TENSOR` — unary element-wise; float-only for `exp`/`log`/`sqrt`/`sin`/`cos`.
 * `_tensor_pow(a, b)` → `TENSOR` — element-wise pow with broadcasting.
 * `_tensor_add(a, b)` `_tensor_sub(a, b)` `_tensor_mul(a, b)` `_tensor_div(a, b)` → `TENSOR` — binary element-wise with **NumPy-style broadcasting**: either operand may be a scalar (Integer or Float) or a tensor with a broadcast-compatible shape (e.g. `(m,n) op (n,)` for per-column op; `(m,1) op (1,n)` for outer-style). Dtype must match across tensor operands. `_tensor_div` follows IEEE 754 for f32/f64 (n/0 = ±Inf, 0/0 = NaN); i64 rejects zero divisors pre-kernel with the offending index.
+* `_tensor_clip(t: TENSOR, lo: NUMBER, hi: NUMBER)` → `TENSOR` — clamp every element to [lo, hi]. lo and hi must be numbers compatible with t's dtype. `lo <= hi` is required.
 
 **In-place ops** (mutate the LHS tensor, return it; use when the caller owns the LHS)
 
 * `_tensor_abs_inplace(a)` `_tensor_neg_inplace(a)` `_tensor_exp_inplace(a)` `_tensor_log_inplace(a)` `_tensor_sqrt_inplace(a)` `_tensor_sin_inplace(a)` `_tensor_cos_inplace(a)` → `TENSOR` — in-place unary.
 * `_tensor_pow_inplace(a, exp)` → `TENSOR` — in-place pow.
 * `_tensor_add_inplace(a, b)` `_tensor_sub_inplace(a, b)` `_tensor_mul_inplace(a, b)` `_tensor_div_inplace(a, b)` → `TENSOR` — in-place binary. **Strict shape match — no broadcasting** (so the LHS isn't silently resized).
+
+**Comparisons** (output is always i64 — a 0/1 mask)
+
+* `_tensor_eq(a, b)` `_tensor_ne(a, b)` `_tensor_lt(a, b)` `_tensor_le(a, b)` `_tensor_gt(a, b)` `_tensor_ge(a, b)` → `TENSOR` — element-wise comparison with same broadcasting + scalar promotion as binary element-wise ops. Output dtype is always i64 (0 or 1) regardless of input dtype. NaN comparisons follow IEEE 754: any comparison with NaN returns 0 except `ne` which returns 1.
+
+**Selection**
+
+* `_tensor_where(mask: TENSOR, x: TENSOR | NUMBER, y: TENSOR | NUMBER)` → `TENSOR` — element-wise conditional: `out[i] = x[i] if mask[i] != 0 else y[i]`. mask must be i64 (typically from a comparison op). x and y must have the same dtype; either may be a scalar (broadcast to mask's shape). Shapes must match mask's shape after scalar promotion. NumPy parallel: `np.where`.
+
+**Joining**
+
+* `_tensor_concatenate(tensors: ARRAY, axis: INTEGER)` → `TENSOR` — join an array of tensors along an existing axis. All tensors must have the same dtype, same rank, and identical shapes on every axis except `axis`. NumPy parallel: `np.concatenate`.
+* `_tensor_stack(tensors: ARRAY, axis: INTEGER)` → `TENSOR` — join along a NEW axis. All tensors must have identical shapes. Output rank = input rank + 1, with the new axis of size `len(tensors)` inserted at position `axis`. NumPy parallel: `np.stack`.
 
 **Full reductions** (produce a scalar from a tensor)
 
@@ -1039,14 +1150,18 @@ FrogPy is kLex's NumPy-equivalent: contiguous N-D numeric arrays backed by Go + 
 * `_tensor_max(t)` `_tensor_min(t)` → number — extreme values; return type matches t's dtype.
 * `_tensor_argmax(t)` `_tensor_argmin(t)` → `INTEGER` — index of the extreme element in the flat 1-D view; first occurrence wins on ties.
 
-**Axis-aware reductions** (collapse one axis of a 2-D tensor → 1-D tensor; v1 is 2-D only)
+**Axis-aware reductions** (collapse one axis of an N-D tensor → result of rank N−1)
 
 * `_tensor_sum_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — sum along one axis. Output dtype matches input. Empty axis returns zeros (sum's identity). NumPy parallel: `np.sum(t, axis=N)`.
-* `_tensor_mean_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — mean along one axis. Output is always f64 dtype (matches scalar mean's policy). Empty axis errors.
+* `_tensor_mean_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — mean along one axis. Output is always f64 dtype. Empty axis errors.
 * `_tensor_min_axis(t: TENSOR, axis: INTEGER)` `_tensor_max_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — extreme values along one axis. Output dtype matches input. Empty axis errors.
-* `_tensor_argmin_axis(t: TENSOR, axis: INTEGER)` `_tensor_argmax_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — index of extreme element along one axis. Output is i64 dtype regardless of input. First-occurrence on ties. Empty axis errors.
+* `_tensor_argmin_axis(t: TENSOR, axis: INTEGER)` `_tensor_argmax_axis(t: TENSOR, axis: INTEGER)` → `TENSOR` — index of extreme element along one axis (indices refer to positions within the reduced axis). Output is i64 regardless of input dtype. First-occurrence on ties. Empty axis errors.
 
-axis accepts 0/1 (or -1/-2 negative-indexed). For input shape `[m, n]`: axis 0 → output shape `[n]`; axis 1 → output shape `[m]`.
+axis may be negative (-1 is the last axis). For input shape `[d0, ..., dk, ..., dn-1]` reducing axis k: drop-variant output shape is `[d0, ..., dk-1, dk+1, ..., dn-1]`.
+
+**Keepdims reductions** (same as axis reductions, but the reduced axis is kept at size 1 in the output instead of dropped — composes cleanly with broadcasting)
+
+* `_tensor_sum_axis_keepdims(t, axis)` `_tensor_mean_axis_keepdims(t, axis)` `_tensor_min_axis_keepdims(t, axis)` `_tensor_max_axis_keepdims(t, axis)` `_tensor_argmin_axis_keepdims(t, axis)` `_tensor_argmax_axis_keepdims(t, axis)` → `TENSOR` — for input shape `[d0, ..., dk, ..., dn-1]` the output shape is `[d0, ..., 1, ..., dn-1]`. Empty-axis policy identical to the drop variants. NumPy parallel: `keepdims=True`.
 
 **Linear algebra**
 
@@ -1293,6 +1408,7 @@ Most users will reach for `stdlib/mtl.lex` which wraps these. Cross-platform scr
 * `_mtlBufferAllocU32(count: INTEGER)` → `(handle, error)` — N zeroed uint32
 * `_mtlReadBuffer(handle)` → `(ARRAY<FLOAT>, error)`
 * `_mtlReadBufferU32(handle)` → `(ARRAY<INTEGER>, error)`
+* `_mtlReadBufferIntoTensor(handle, t: TENSOR)` → `(null, error)` — zero-allocation readback: copies an f32 MTLBuffer's contents directly into a pre-allocated f32 contiguous tensor's `[]float32` slice. Skips the per-element `*Float` construction that `_mtlReadBuffer` pays. Tensor must be DType f32, contiguous, and sized exactly to the buffer's element count.
 * `_mtlBufferRelease(handle)` — free
 
 **Dispatch:**

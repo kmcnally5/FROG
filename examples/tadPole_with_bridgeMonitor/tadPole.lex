@@ -24,7 +24,6 @@ import "stdlib/ai/ai_common.lex"  as ai
 import "stdlib/mcp.lex"           as mcp
 import "stdlib/retry.lex"         as retry
 import "stdlib/mtl_fx.lex"        as fx
-import "stdlib/bridgeMonitor.lex" as monitor
 
 
 // Retry policy applied to every Claude/Ollama call. The default classifier
@@ -210,7 +209,6 @@ if !hasBinary {
     bridgeClose(bridge)
     _osExit(1)
 }
-async(fn() { monitor.watch(bridge) })
 let backendLabel, _ = bridgeCall(bridge, "backend", [])
 let providerIds,   _ = bridgeCall(bridge, "providers", [])
 // Local Stable Diffusion is a pure-kLex provider — no bridge involvement.

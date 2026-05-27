@@ -770,7 +770,7 @@ func dispatchBridgeLine(b *Bridge, resp *bridgeResponse) {
 // cached after the first lookup.
 //
 // Search order (first match wins):
-//  1. $KLEX_PATH/python                (when KLEX_PATH points at stdlib)
+//  1. $KLEX_PATH/stdlib/python         (KLEX_PATH = directory containing stdlib/)
 //  2. $CWD/stdlib/python               (running from a project checkout)
 //  3. <exe-dir>/stdlib/python          (binary install)
 //  4. <exe-parent>/stdlib/python       (bin/klex-style install)
@@ -789,7 +789,7 @@ var (
 // sentinel file. Caches its result in dest under the supplied sync.Once.
 //
 // Search order (first match wins) mirrors kLex's overall path resolution:
-//   1. $KLEX_PATH/<lang>           (KLEX_PATH points at stdlib)
+//   1. $KLEX_PATH/stdlib/<lang>    (KLEX_PATH = directory containing stdlib/)
 //   2. $CWD/stdlib/<lang>          (running from a project checkout)
 //   3. <exe-dir>/stdlib/<lang>     (binary install)
 //   4. <exe-parent>/stdlib/<lang>  (bin/klex-style install)
@@ -797,7 +797,7 @@ func klexHelperPath(once *sync.Once, dest *string, lang, sentinel string) string
 	once.Do(func() {
 		candidates := []string{}
 		if kp := os.Getenv("KLEX_PATH"); kp != "" {
-			candidates = append(candidates, filepath.Join(kp, lang))
+			candidates = append(candidates, filepath.Join(kp, "stdlib", lang))
 		}
 		if cwd, err := os.Getwd(); err == nil {
 			candidates = append(candidates, filepath.Join(cwd, "stdlib", lang))
@@ -1267,8 +1267,8 @@ func init() {
 			// FireBridgeCallHook gates internally on whether a hook is
 			// registered (no allocation when off) and inspects result
 			// for *Error to populate ok/error fields. User errors come
-			// through as a (null, err) tuple — those don't mark the
-			// call itself as failed.
+			// through as a (null, err) tuple — ok stays true but the
+			// user_error field is populated so hook handlers can detect them.
 			FireBridgeCallHook(fnName, len(callArgs.Elements), elapsedNs, result)
 		}()
 

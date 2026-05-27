@@ -16,7 +16,7 @@
 // outer-scope name stays bare. So we do not test rust-style shadowing
 // inside `if {}` here — that's not the language's contract.
 
-import "assert.lex" as t
+import "stdlib/assert.lex" as t
 
 fn pair() {
     return 1, 2

@@ -14,8 +14,8 @@
       "name": "agent",
       "path": "stdlib/agent.lex",
       "version": "0.1.0",
-      "hash": "sha256:d4a471ce7eff5842a35dc24385c53a4fbeaad2ae8431cf208ca8685aa32fd9ac",
-      "size": 9015
+      "hash": "sha256:3e34971bde743f4281e7c866d2defa3b6d66125278f1ffd7b76daebca524d0c8",
+      "size": 9345
     },
     {
       "name": "ai_common",
@@ -65,6 +65,12 @@
       "version": "1.0.0",
       "hash": "sha256:3a239400accc0fdfc289757df54611141b0372f78935db90e7982bf6f994960b",
       "size": 8977
+    },
+    {
+      "name": "bridgeMonitor",
+      "path": "stdlib/bridgeMonitor.lex",
+      "hash": "sha256:0d938ff0600666606f1cccb1f928866f1cc3bf37305c4f7a13046f7b0135a907",
+      "size": 10587
     },
     {
       "name": "cache",
@@ -238,8 +244,8 @@
       "name": "mtl",
       "path": "stdlib/mtl.lex",
       "version": "0.2.0",
-      "hash": "sha256:eb7a24282e4d7c7169f79bf833a6a9f078f90993e58cae2b6484e383ca68a0e2",
-      "size": 41766
+      "hash": "sha256:575549c4646707a37c84918caecbafc4d2d9a8d3f50b284f306e3f6ce2ea7a81",
+      "size": 44396
     },
     {
       "name": "mtl_fx",
@@ -363,8 +369,8 @@
       "name": "tensor",
       "path": "stdlib/tensor.lex",
       "version": "0.1.0",
-      "hash": "sha256:a4dee4af330a0dd24a3564a377ee512d6990fefc117a706738f82d77a6028938",
-      "size": 16885
+      "hash": "sha256:d6c0c1537e14d72171997b7981587b6fd0071acd7f77674edd5da8a4ea5e9721",
+      "size": 24157
     },
     {
       "name": "test",

@@ -775,12 +775,10 @@ fn matmul(a, b, m, k, n) {
 // hard-coded figures here, since MPS continues to be tuned across
 // macOS releases.
 //
-// IMPORTANT — for tensor-shaped workloads, prefer
-// `stdlib/tensor.lex`'s `t.matmul` over this function. matmulMPS
-// detects tensor inputs and routes through a zero-marshalling fast
-// path (~5× faster at 1024³ as of 2026-05); for kLex Array inputs it
-// stays on the slower per-element conversion path. If you can switch
-// from Array to Tensor inputs, t.matmul is the most direct API.
+// STRICT Array-only. For tensor inputs use `matmulMPSTensor` (this
+// file) or the higher-level `t.matmul` in stdlib/tensor.lex. Three
+// clean lanes by design — each function takes one shape of input and
+// returns one shape of output. No silent polymorphism on return type.
 fn matmulMPS(a, b, m, k, n) {
     if !isAvailable() {
         return null, error("MTL_UNAVAILABLE", "Metal unavailable on this platform")
@@ -788,45 +786,25 @@ fn matmulMPS(a, b, m, k, n) {
     if m <= 0 || k <= 0 || n <= 0 {
         return null, error("MTL_BAD_ARGS", "matmulMPS: m, k, n must be positive")
     }
-
-    // Tensor inputs take the zero-marshalling upload path
-    // (_mtlBufferFromTensor); kLex Arrays take the per-element
-    // conversion path (_mtlBuffer). Mixing the two is rejected —
-    // the caller almost certainly didn't mean it.
-    let aIsTensor = type(a) == "TENSOR"
-    let bIsTensor = type(b) == "TENSOR"
-    if aIsTensor != bIsTensor {
+    if type(a) != "ARRAY" {
         return null, error("MTL_BAD_ARGS",
-            "matmulMPS: a and b must be the same kind (both Array or both Tensor)")
+            "matmulMPS: a must be an array — use matmulMPSTensor for tensor inputs (got " + type(a) + ")")
+    }
+    if type(b) != "ARRAY" {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPS: b must be an array — use matmulMPSTensor for tensor inputs (got " + type(b) + ")")
+    }
+    if len(a) != m * k {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPS: a has " + str(len(a)) + " elements, expected m*k = " + str(m*k))
+    }
+    if len(b) != k * n {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPS: b has " + str(len(b)) + " elements, expected k*n = " + str(k*n))
     }
 
-    let aBuf = 0
-    let bBuf = 0
-    let buferr = null
-
-    if aIsTensor {
-        aBuf, buferr = _mtlBufferFromTensor(a)
-        if buferr != null {
-            return null, error("MTL_BUFFER", "matmulMPS: a (tensor): " + buferr)
-        }
-        bBuf, buferr = _mtlBufferFromTensor(b)
-        if buferr != null {
-            _mtlBufferRelease(aBuf)
-            return null, error("MTL_BUFFER", "matmulMPS: b (tensor): " + buferr)
-        }
-    } else {
-        if len(a) != m * k {
-            return null, error("MTL_BAD_ARGS",
-                "matmulMPS: a has " + str(len(a)) + " elements, expected m*k = " + str(m*k))
-        }
-        if len(b) != k * n {
-            return null, error("MTL_BAD_ARGS",
-                "matmulMPS: b has " + str(len(b)) + " elements, expected k*n = " + str(k*n))
-        }
-        aBuf, _ = _mtlBuffer(a)
-        bBuf, _ = _mtlBuffer(b)
-    }
-
+    let aBuf, _ = _mtlBuffer(a)
+    let bBuf, _ = _mtlBuffer(b)
     let cBuf, _ = _mtlBufferAllocF32(m * n)
 
     let _, derr = await(_mtlMatmulMPS(aBuf, bBuf, cBuf, m, k, n))
@@ -837,9 +815,6 @@ fn matmulMPS(a, b, m, k, n) {
         return null, error("MTL_DISPATCH", "matmulMPS: " + derr)
     }
 
-    // Readback stays as kLex Array regardless of input type — preserves
-    // the existing API contract. Tensor-in callers who want a tensor
-    // back should use stdlib/tensor.lex's t.matmul instead.
     let result, rerr = _mtlReadBuffer(cBuf)
     _mtlBufferRelease(aBuf)
     _mtlBufferRelease(bBuf)
@@ -848,6 +823,103 @@ fn matmulMPS(a, b, m, k, n) {
         return null, error("MTL_READ", "matmulMPS: readback: " + rerr)
     }
     return result, null
+}
+
+
+// matmulMPSTensor is the tensor-in/tensor-out MPS matmul. Shape is
+// inferred from the inputs — a must be 2-D [m, k], b must be 2-D
+// [k, n]; the result is a fresh f32 tensor of shape [m, n].
+//
+// Uses zero-marshalling upload (_mtlBufferFromTensor) AND
+// zero-allocation readback (_mtlReadBufferIntoTensor) — neither side
+// pays the per-element *Float conversion tax that the Array path
+// does. Closes the ~7 ms/million-cells readback gap.
+//
+// This is the lower-level tensor entry point for callers who need to
+// manage MPS buffer lifecycle themselves (batching, reuse). For most
+// cases `t.matmul` in stdlib/tensor.lex is the recommended API — it
+// routes to the same MPS kernel under the hood with simpler ergonomics
+// and a CPU fallback when MPS isn't available.
+//
+// Requirements (each errors cleanly):
+//   - both inputs must be tensors
+//   - both must be rank-2
+//   - inner dimensions must match (a.shape[1] == b.shape[0])
+//   - both must be f32 (the MPS bridge is f32-only)
+fn matmulMPSTensor(a, b) {
+    if !isAvailable() {
+        return null, error("MTL_UNAVAILABLE", "Metal unavailable on this platform")
+    }
+    if type(a) != "TENSOR" {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPSTensor: a must be a tensor, got " + type(a))
+    }
+    if type(b) != "TENSOR" {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPSTensor: b must be a tensor, got " + type(b))
+    }
+
+    let shapeA = _tensor_shape(a)
+    let shapeB = _tensor_shape(b)
+    if len(shapeA) != 2 {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPSTensor: a must be 2-D, got " + str(len(shapeA)) + "-D")
+    }
+    if len(shapeB) != 2 {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPSTensor: b must be 2-D, got " + str(len(shapeB)) + "-D")
+    }
+    let m = shapeA[0]
+    let k = shapeA[1]
+    let n = shapeB[1]
+    if shapeB[0] != k {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPSTensor: a is [" + str(m) + ", " + str(k) +
+            "] but b is [" + str(shapeB[0]) + ", " + str(n) +
+            "] — inner dimensions must match")
+    }
+    if _tensor_dtype(a) != "f32" {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPSTensor: a must be f32, got " + _tensor_dtype(a))
+    }
+    if _tensor_dtype(b) != "f32" {
+        return null, error("MTL_BAD_ARGS",
+            "matmulMPSTensor: b must be f32, got " + _tensor_dtype(b))
+    }
+
+    let aBuf, aerr = _mtlBufferFromTensor(a)
+    if aerr != null {
+        return null, error("MTL_BUFFER", "matmulMPSTensor: a upload: " + aerr)
+    }
+    let bBuf, berr = _mtlBufferFromTensor(b)
+    if berr != null {
+        _mtlBufferRelease(aBuf)
+        return null, error("MTL_BUFFER", "matmulMPSTensor: b upload: " + berr)
+    }
+    let cBuf, cerr = _mtlBufferAllocF32(m * n)
+    if cerr != null {
+        _mtlBufferRelease(aBuf)
+        _mtlBufferRelease(bBuf)
+        return null, error("MTL_BUFFER", "matmulMPSTensor: c alloc: " + cerr)
+    }
+
+    let _, derr = await(_mtlMatmulMPS(aBuf, bBuf, cBuf, m, k, n))
+    if derr != null {
+        _mtlBufferRelease(aBuf)
+        _mtlBufferRelease(bBuf)
+        _mtlBufferRelease(cBuf)
+        return null, error("MTL_DISPATCH", "matmulMPSTensor: " + derr)
+    }
+
+    let out = _tensor_zeros([m, n], "f32")
+    let _, rerr = _mtlReadBufferIntoTensor(cBuf, out)
+    _mtlBufferRelease(aBuf)
+    _mtlBufferRelease(bBuf)
+    _mtlBufferRelease(cBuf)
+    if rerr != null {
+        return null, error("MTL_READ", "matmulMPSTensor: readback: " + rerr)
+    }
+    return out, null
 }
 
 

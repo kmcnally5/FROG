@@ -1972,6 +1972,11 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Documentation: "Read a uint32 MTLBuffer's contents back into a kLex int array.",
 		Params:        []string{"handle"},
 	},
+	"_mtlReadBufferIntoTensor": {
+		Signature:     "_mtlReadBufferIntoTensor(handle: int, t: tensor) -> (null, error)",
+		Documentation: "Zero-allocation readback: copies a float32 MTLBuffer directly into a pre-allocated f32 FrogPy tensor's underlying []float32 slice. Skips the per-element Float construction _mtlReadBuffer pays — ~7ms saved per 1M cells. Tensor must be f32, contiguous, and sized exactly to the buffer's element count.",
+		Params:        []string{"handle", "t"},
+	},
 	"_mtlBufferRelease": {
 		Signature:     "_mtlBufferRelease(handle: int) -> null",
 		Documentation: "Free an MTLBuffer. Idempotent — safe with unknown handles. Phase-F buffer pool recycles same-size buffers internally; release pushes the buffer back into the pool rather than freeing it outright.",
@@ -2131,7 +2136,7 @@ var builtinSignatures = map[string]BuiltinInfo{
 
 	"_setBridgeCallHook": {
 		Signature:     "_setBridgeCallHook(hookFn: fn | null) -> null",
-		Documentation: "Phase 3 agentic hook primitive. Registers `hookFn` (or null to clear) as the on_bridge_call handler. Fires once per `_bridgeCall` AFTER the round-trip completes (bridge calls are synchronous from kLex's view).\n\nEvent hash shape:\n  {\n    \"fn\":          \"enhance_prompt\",      // remote function name\n    \"argc\":        2,                     // arg count\n    \"duration_ms\": 1342,                  // wall-clock round-trip\n    \"ok\":          true,                  // false if the call itself failed (bridge crash, JSON unmarshal, etc.)\n    \"error\":       null                   // or {\"kind\": ..., \"message\": ..., \"code\": ...} when ok=false\n  }\n\nA remote function returning a (null, errorValue) tuple is NOT a bridge-call failure — that's a successful round-trip whose result happens to be a user error. The hook fires with ok=true; inspect the tuple at the call site.\n\nPrefer agent.onBridgeCall(hookFn) instead of calling this directly.",
+		Documentation: "Phase 3 agentic hook primitive. Registers `hookFn` (or null to clear) as the on_bridge_call handler. Fires once per `_bridgeCall` AFTER the round-trip completes (bridge calls are synchronous from kLex's view).\n\nEvent hash shape:\n  {\n    \"fn\":          \"enhance_prompt\",      // remote function name\n    \"argc\":        2,                     // arg count\n    \"duration_ms\": 1342,                  // wall-clock round-trip\n    \"ok\":          true,                  // false if the bridge transport failed (crash, timeout, etc.)\n    \"error\":       null                   // or {\"kind\": ..., \"message\": ..., \"code\": ...} when ok=false\n    \"user_error\":  null                   // or {\"kind\": ..., \"message\": ..., \"code\": ...} when the\n                                          // remote handler threw / returned a (null, err) tuple;\n                                          // ok stays true — the round-trip itself succeeded\n  }\n\nok=false = bridge transport failure. ok=true + user_error != null = handler returned an error. ok=true + user_error == null = clean success.\n\nPrefer agent.onBridgeCall(hookFn) instead of calling this directly.",
 		Params:        []string{"hookFn"},
 	},
 
@@ -2277,8 +2282,18 @@ var builtinSignatures = map[string]BuiltinInfo{
 	},
 	"_tensor_get": {
 		Signature:     "_tensor_get(t: tensor, idx: int) -> number",
-		Documentation: "Linear element access — treats the tensor as a flat 1-D view of its data. Used by stdlib/tensor.lex's preview/print helpers and by users who want a single scalar out without computing the multi-index. Bounds-checked.",
+		Documentation: "Linear element access — treats the tensor as a flat 1-D view of its logical data. Used by stdlib/tensor.lex's preview/print helpers and by users who want a single scalar out without computing the multi-index. Bounds-checked. Works on strided views (from _tensor_slice) — the flat index is translated through Strides to the physical backing position.",
 		Params:        []string{"t", "idx"},
+	},
+	"_tensor_slice": {
+		Signature:     "_tensor_slice(t: tensor, specs: array) -> tensor",
+		Documentation: "Returns a VIEW into t — a new tensor with its own Shape/Strides but sharing t's backing data slice. specs is an array with one entry per axis: each entry is null (full axis) or [start, stop, step]. Negative start/stop count from the end; any of start/stop/step may itself be null for the default (0/dim/1). step must be positive in v1 (no reversed slicing yet).\n\nViews share storage — mutations propagate. Kernel ops (add, matmul, reductions) require contiguous input — call _tensor_contiguous(view) before passing to a kernel. Inspection ops (get, to_array, shape, dtype, numel, clone) work on views directly.\n\nSource must be contiguous in v1 — slicing-a-slice requires t.contiguous() in between.",
+		Params:        []string{"t", "specs"},
+	},
+	"_tensor_contiguous": {
+		Signature:     "_tensor_contiguous(t: tensor) -> tensor",
+		Documentation: "If t is already contiguous returns t unchanged (no copy — matches NumPy ascontiguousarray fast path). If t is a strided view (from _tensor_slice) walks the multi-index and copies the logical data into a fresh contiguous tensor. Required before passing a slice view to any kernel-based op.",
+		Params:        []string{"t"},
 	},
 	"_tensor_from_array": {
 		Signature:     "_tensor_from_array(data: array, dtype: string) -> tensor",
@@ -2332,32 +2347,142 @@ var builtinSignatures = map[string]BuiltinInfo{
 	},
 	"_tensor_sum_axis": {
 		Signature:     "_tensor_sum_axis(t: tensor, axis: int) -> tensor",
-		Documentation: "Sum along one axis of a 2-D tensor. axis 0 (or -2) reduces rows → output shape [n]; axis 1 (or -1) reduces cols → output shape [m]. Output is same dtype as input. Empty axis returns zeros (sum identity). N-D deferred to v2.",
+		Documentation: "Sum along one axis of any-rank tensor. Output has rank len(t.shape)-1 with the reduced axis dropped. axis may be negative (-1 = last). Output is same dtype as input. Empty axis returns zeros (sum identity). NumPy parallel: np.sum(t, axis=N).",
+		Params:        []string{"t", "axis"},
+	},
+	"_tensor_sum_axis_keepdims": {
+		Signature:     "_tensor_sum_axis_keepdims(t: tensor, axis: int) -> tensor",
+		Documentation: "Same as _tensor_sum_axis but the output keeps the reduced axis at size 1 instead of dropping it. Composes cleanly with broadcasting. NumPy parallel: np.sum(t, axis=N, keepdims=True).",
 		Params:        []string{"t", "axis"},
 	},
 	"_tensor_mean_axis": {
 		Signature:     "_tensor_mean_axis(t: tensor, axis: int) -> tensor",
-		Documentation: "Mean along one axis of a 2-D tensor. Output is always f64 dtype (matches scalar mean's policy and NumPy's np.mean on integer arrays). Empty axis errors cleanly. axis accepts 0/1 or -2/-1.",
+		Documentation: "Mean along one axis of any-rank tensor. Output rank is len(t.shape)-1 with the reduced axis dropped. Output is always f64 dtype (matches scalar mean's policy and NumPy's np.mean on integer arrays). Empty axis errors cleanly. axis may be negative.",
+		Params:        []string{"t", "axis"},
+	},
+	"_tensor_mean_axis_keepdims": {
+		Signature:     "_tensor_mean_axis_keepdims(t: tensor, axis: int) -> tensor",
+		Documentation: "keepdims variant of _tensor_mean_axis — the reduced axis stays at size 1 in the output. Output is always f64. Useful for centring (x - mean(x, -1, keepdims=true)).",
 		Params:        []string{"t", "axis"},
 	},
 	"_tensor_min_axis": {
 		Signature:     "_tensor_min_axis(t: tensor, axis: int) -> tensor",
-		Documentation: "Minimum along one axis of a 2-D tensor. Output is same dtype as input. Empty axis errors. axis 0/1 or -2/-1.",
+		Documentation: "Minimum along one axis of any-rank tensor. Output has rank len(t.shape)-1. Same dtype as input. Empty axis errors. axis may be negative.",
+		Params:        []string{"t", "axis"},
+	},
+	"_tensor_min_axis_keepdims": {
+		Signature:     "_tensor_min_axis_keepdims(t: tensor, axis: int) -> tensor",
+		Documentation: "keepdims variant of _tensor_min_axis — reduced axis kept at size 1 in the output.",
 		Params:        []string{"t", "axis"},
 	},
 	"_tensor_max_axis": {
 		Signature:     "_tensor_max_axis(t: tensor, axis: int) -> tensor",
-		Documentation: "Maximum along one axis of a 2-D tensor. Output is same dtype as input. Empty axis errors. axis 0/1 or -2/-1.",
+		Documentation: "Maximum along one axis of any-rank tensor. Output has rank len(t.shape)-1. Same dtype as input. Empty axis errors. axis may be negative.",
+		Params:        []string{"t", "axis"},
+	},
+	"_tensor_max_axis_keepdims": {
+		Signature:     "_tensor_max_axis_keepdims(t: tensor, axis: int) -> tensor",
+		Documentation: "keepdims variant of _tensor_max_axis — reduced axis kept at size 1 in the output.",
 		Params:        []string{"t", "axis"},
 	},
 	"_tensor_argmin_axis": {
 		Signature:     "_tensor_argmin_axis(t: tensor, axis: int) -> tensor",
-		Documentation: "Index of the minimum element along one axis of a 2-D tensor. Output is i64 dtype regardless of input. First-occurrence on ties. Empty axis errors. axis 0/1 or -2/-1.",
+		Documentation: "Index of the minimum element along one axis of any-rank tensor. Indices refer to positions within the reduced axis. Output is i64 regardless of input dtype. First-occurrence on ties. Empty axis errors. axis may be negative.",
+		Params:        []string{"t", "axis"},
+	},
+	"_tensor_argmin_axis_keepdims": {
+		Signature:     "_tensor_argmin_axis_keepdims(t: tensor, axis: int) -> tensor",
+		Documentation: "keepdims variant of _tensor_argmin_axis — reduced axis kept at size 1 in the output. Output is i64.",
 		Params:        []string{"t", "axis"},
 	},
 	"_tensor_argmax_axis": {
 		Signature:     "_tensor_argmax_axis(t: tensor, axis: int) -> tensor",
-		Documentation: "Index of the maximum element along one axis of a 2-D tensor. Output is i64 dtype regardless of input. First-occurrence on ties. Empty axis errors. axis 0/1 or -2/-1.",
+		Documentation: "Index of the maximum element along one axis of any-rank tensor. Indices refer to positions within the reduced axis. Output is i64 regardless of input dtype. First-occurrence on ties. Empty axis errors. axis may be negative.",
 		Params:        []string{"t", "axis"},
+	},
+	"_tensor_argmax_axis_keepdims": {
+		Signature:     "_tensor_argmax_axis_keepdims(t: tensor, axis: int) -> tensor",
+		Documentation: "keepdims variant of _tensor_argmax_axis — reduced axis kept at size 1 in the output. Output is i64.",
+		Params:        []string{"t", "axis"},
+	},
+	"_tensor_arange": {
+		Signature:     "_tensor_arange(start: number, stop: number, step: number, dtype: string) -> tensor",
+		Documentation: "Returns a 1-D tensor of values from start up to (but not including) stop, separated by step. step must be non-zero. NumPy equivalent: np.arange(start, stop, step, dtype=dtype).",
+		Params:        []string{"start", "stop", "step", "dtype"},
+	},
+	"_tensor_cast": {
+		Signature:     "_tensor_cast(t: tensor, dtype: string) -> tensor",
+		Documentation: "Returns a new tensor with every element converted to the target dtype. When src and target dtypes are identical, this is equivalent to clone. Conversion rules: f32→f64 lossless widening; f64→f32 truncating; i64→f32 best-effort (exact for |x|≤2^24); i64→f64 near-lossless (exact for |x|≤2^53); f32/f64→i64 truncate toward zero.",
+		Params:        []string{"t", "dtype"},
+	},
+	"_tensor_clip": {
+		Signature:     "_tensor_clip(t: tensor, lo: number, hi: number) -> tensor",
+		Documentation: "Returns a new tensor with every element clamped to [lo, hi]. lo and hi must be numbers compatible with t's dtype (same rules as _tensor_full: Float rejects i64; Integer widens to f32/f64). lo <= hi is required.",
+		Params:        []string{"t", "lo", "hi"},
+	},
+	"_tensor_clone": {
+		Signature:     "_tensor_clone(t: tensor) -> tensor",
+		Documentation: "Returns a fresh independent copy of t. The backing data is fully copied — mutations to the result do not affect t and vice versa. Use this when you need an independent snapshot of a tensor that may otherwise be aliased by reshape / flatten / expand_dims views, or to materialise a strided view from _tensor_slice into a fresh contiguous tensor.",
+		Params:        []string{"t"},
+	},
+	"_tensor_concatenate": {
+		Signature:     "_tensor_concatenate(tensors: array, axis: int) -> tensor",
+		Documentation: "Joins an array of tensors along an existing axis. All tensors must have the same dtype, the same rank, and identical shapes on every axis except `axis`. NumPy equivalent: np.concatenate([t1, t2, ...], axis=N).",
+		Params:        []string{"tensors", "axis"},
+	},
+	"_tensor_eq": {
+		Signature:     "_tensor_eq(a, b) -> tensor",
+		Documentation: "Element-wise equality: out[i] = 1 if a[i] == b[i] else 0. Output is always i64 regardless of input dtype. Operands may be tensor+tensor (broadcast-compatible) or tensor+scalar. NaN follows IEEE 754: any comparison with NaN is 0. Pair with _tensor_where for mask-based selection. NumPy parallel: np.equal(a, b) cast to int64.",
+		Params:        []string{"a", "b"},
+	},
+	"_tensor_ne": {
+		Signature:     "_tensor_ne(a, b) -> tensor",
+		Documentation: "Element-wise inequality: out[i] = 1 if a[i] != b[i] else 0. Output is i64. NaN comparisons: NaN != NaN is 1 (matches IEEE 754 and NumPy). Same broadcasting + scalar rules as _tensor_eq.",
+		Params:        []string{"a", "b"},
+	},
+	"_tensor_lt": {
+		Signature:     "_tensor_lt(a, b) -> tensor",
+		Documentation: "Element-wise less-than: out[i] = 1 if a[i] < b[i] else 0. Output is i64. NaN comparisons return 0. Same broadcasting + scalar rules as _tensor_eq.",
+		Params:        []string{"a", "b"},
+	},
+	"_tensor_le": {
+		Signature:     "_tensor_le(a, b) -> tensor",
+		Documentation: "Element-wise less-than-or-equal: out[i] = 1 if a[i] <= b[i] else 0. Output is i64. NaN comparisons return 0. Same broadcasting + scalar rules as _tensor_eq.",
+		Params:        []string{"a", "b"},
+	},
+	"_tensor_gt": {
+		Signature:     "_tensor_gt(a, b) -> tensor",
+		Documentation: "Element-wise greater-than: out[i] = 1 if a[i] > b[i] else 0. Output is i64. NaN comparisons return 0. Same broadcasting + scalar rules as _tensor_eq.",
+		Params:        []string{"a", "b"},
+	},
+	"_tensor_ge": {
+		Signature:     "_tensor_ge(a, b) -> tensor",
+		Documentation: "Element-wise greater-than-or-equal: out[i] = 1 if a[i] >= b[i] else 0. Output is i64. NaN comparisons return 0. Same broadcasting + scalar rules as _tensor_eq.",
+		Params:        []string{"a", "b"},
+	},
+	"_tensor_eye": {
+		Signature:     "_tensor_eye(n: int, dtype: string) -> tensor",
+		Documentation: "Returns an n×n identity matrix: 1 on the diagonal, 0 elsewhere. NumPy equivalent: np.eye(n, dtype=dtype).",
+		Params:        []string{"n", "dtype"},
+	},
+	"_tensor_linspace": {
+		Signature:     "_tensor_linspace(start: number, stop: number, n: int, dtype: string) -> tensor",
+		Documentation: "Returns a 1-D tensor of n evenly spaced values from start to stop inclusive. n must be >= 1. For n == 1 the result is [start]. NumPy equivalent: np.linspace(start, stop, num=n).",
+		Params:        []string{"start", "stop", "n", "dtype"},
+	},
+	"_tensor_stack": {
+		Signature:     "_tensor_stack(tensors: array, axis: int) -> tensor",
+		Documentation: "Joins an array of tensors along a NEW axis. All tensors must have identical shapes. The output has rank = input_rank + 1, with the new axis of size len(tensors) inserted at position `axis`. NumPy equivalent: np.stack([t1, t2, ...], axis=N).",
+		Params:        []string{"tensors", "axis"},
+	},
+	"_tensor_to_array": {
+		Signature:     "_tensor_to_array(t: tensor) -> array",
+		Documentation: "Extracts all elements from t into a flat kLex array, in row-major logical order. f32/f64 elements come back as Float; i64 as Integer. Works on strided views (from _tensor_slice) — the multi-index is walked through Strides to fetch each element from the right physical backing position.",
+		Params:        []string{"t"},
+	},
+	"_tensor_where": {
+		Signature:     "_tensor_where(mask: tensor, x: tensor|number, y: tensor|number) -> tensor",
+		Documentation: "Element-wise conditional selection: out[i] = x[i] if mask[i] != 0 else y[i]. mask must be an i64 tensor (typically the output of a comparison op). x and y must have the same dtype; either may be a scalar number (broadcast to mask's shape). All shapes must match mask's shape after scalar promotion. NumPy equivalent: np.where(condition, x, y).",
+		Params:        []string{"mask", "x", "y"},
 	},
 }

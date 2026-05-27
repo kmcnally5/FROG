@@ -13,8 +13,8 @@
 // happens implicitly during tadPole demos where the FrogTooth
 // telemetry registers onBridgeCall and we observe Python calls.
 
-import "assert.lex" as t
-import "agent.lex"  as agent
+import "stdlib/assert.lex" as t
+import "stdlib/agent.lex"  as agent
 
 // ── 1. Register / clear basics ─────────────────────────────────────────
 let callCount = 0

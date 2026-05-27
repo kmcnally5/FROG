@@ -11,7 +11,7 @@
 // for Phase 1 of VM defaults. Non-constant defaults (e.g. `arr = []`)
 // remain a compile-time error with a clear migration message.
 
-import "assert.lex" as t
+import "stdlib/assert.lex" as t
 
 // ── 1. null default — the case that broke tadPole ──────────────────────
 fn withNullDefault(a, b = null) {

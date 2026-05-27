@@ -314,8 +314,8 @@ fn main() {
                         }
 
                         let result = {"matches": total_matches, "line_count": total_lines}
-                        }
                     }
+                }
 
                 file_meta, ok = recv(file_ch)
             }
@@ -333,4 +333,7 @@ fn main() {
     }
 }
 
+main()
+main()
+main()
 main()

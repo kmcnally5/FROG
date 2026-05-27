@@ -703,165 +703,168 @@ func tensorDotI64(a, b []int64) int64 {
 	))
 }
 
-// ── axis-aware reductions (2-D, axis 0 or 1) ──
+// ── axis-aware reductions (N-D, single-axis collapse) ──
 //
-// 18 wrappers covering (sum / min / max / argmin / argmax / and mean
-// via sum) × 3 dtypes. Mean is computed in Go as `sum_axis / reduce_size`
-// so no dedicated kernel — same precision policy as scalar mean.
-// argmin/argmax write into int64 output regardless of input dtype.
+// 15 wrappers covering (sum / min / max / argmin / argmax) × 3 dtypes.
+// Mean is computed in Go as `sum_axis / reduce_size` so no dedicated
+// kernel — same precision policy as scalar mean. argmin/argmax write
+// into int64 output regardless of input dtype.
+//
+// Caller flattens the surrounding tensor shape into (prefix, reduceLen,
+// suffix) — see tensor_kernels.h for the contract.
 
-func tensorSumAxis2DF32(out, in []float32, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorSumAxisF32(out, in []float32, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_sum_axis2d_f32(
+	C.klex_tensor_sum_axis_f32(
 		(*C.float)(unsafe.Pointer(&out[0])),
 		(*C.float)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorSumAxis2DF64(out, in []float64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorSumAxisF64(out, in []float64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_sum_axis2d_f64(
+	C.klex_tensor_sum_axis_f64(
 		(*C.double)(unsafe.Pointer(&out[0])),
 		(*C.double)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorSumAxis2DI64(out, in []int64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorSumAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_sum_axis2d_i64(
+	C.klex_tensor_sum_axis_i64(
 		(*C.int64_t)(unsafe.Pointer(&out[0])),
 		(*C.int64_t)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
 
-func tensorMinAxis2DF32(out, in []float32, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorMinAxisF32(out, in []float32, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_min_axis2d_f32(
+	C.klex_tensor_min_axis_f32(
 		(*C.float)(unsafe.Pointer(&out[0])),
 		(*C.float)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorMinAxis2DF64(out, in []float64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorMinAxisF64(out, in []float64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_min_axis2d_f64(
+	C.klex_tensor_min_axis_f64(
 		(*C.double)(unsafe.Pointer(&out[0])),
 		(*C.double)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorMinAxis2DI64(out, in []int64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorMinAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_min_axis2d_i64(
+	C.klex_tensor_min_axis_i64(
 		(*C.int64_t)(unsafe.Pointer(&out[0])),
 		(*C.int64_t)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
 
-func tensorMaxAxis2DF32(out, in []float32, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorMaxAxisF32(out, in []float32, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_max_axis2d_f32(
+	C.klex_tensor_max_axis_f32(
 		(*C.float)(unsafe.Pointer(&out[0])),
 		(*C.float)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorMaxAxis2DF64(out, in []float64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorMaxAxisF64(out, in []float64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_max_axis2d_f64(
+	C.klex_tensor_max_axis_f64(
 		(*C.double)(unsafe.Pointer(&out[0])),
 		(*C.double)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorMaxAxis2DI64(out, in []int64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorMaxAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_max_axis2d_i64(
+	C.klex_tensor_max_axis_i64(
 		(*C.int64_t)(unsafe.Pointer(&out[0])),
 		(*C.int64_t)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
 
-func tensorArgminAxis2DF32(out []int64, in []float32, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorArgminAxisF32(out []int64, in []float32, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_argmin_axis2d_f32(
+	C.klex_tensor_argmin_axis_f32(
 		(*C.int64_t)(unsafe.Pointer(&out[0])),
 		(*C.float)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorArgminAxis2DF64(out []int64, in []float64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorArgminAxisF64(out []int64, in []float64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_argmin_axis2d_f64(
+	C.klex_tensor_argmin_axis_f64(
 		(*C.int64_t)(unsafe.Pointer(&out[0])),
 		(*C.double)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorArgminAxis2DI64(out, in []int64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorArgminAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_argmin_axis2d_i64(
+	C.klex_tensor_argmin_axis_i64(
 		(*C.int64_t)(unsafe.Pointer(&out[0])),
 		(*C.int64_t)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
 
-func tensorArgmaxAxis2DF32(out []int64, in []float32, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorArgmaxAxisF32(out []int64, in []float32, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_argmax_axis2d_f32(
+	C.klex_tensor_argmax_axis_f32(
 		(*C.int64_t)(unsafe.Pointer(&out[0])),
 		(*C.float)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorArgmaxAxis2DF64(out []int64, in []float64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorArgmaxAxisF64(out []int64, in []float64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_argmax_axis2d_f64(
+	C.klex_tensor_argmax_axis_f64(
 		(*C.int64_t)(unsafe.Pointer(&out[0])),
 		(*C.double)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
-func tensorArgmaxAxis2DI64(out, in []int64, m, n, axis int) {
-	if m == 0 || n == 0 {
+func tensorArgmaxAxisI64(out, in []int64, prefix, reduceLen, suffix int) {
+	if prefix == 0 || reduceLen == 0 || suffix == 0 {
 		return
 	}
-	C.klex_tensor_argmax_axis2d_i64(
+	C.klex_tensor_argmax_axis_i64(
 		(*C.int64_t)(unsafe.Pointer(&out[0])),
 		(*C.int64_t)(unsafe.Pointer(&in[0])),
-		C.size_t(m), C.size_t(n), C.int(axis),
+		C.size_t(prefix), C.size_t(reduceLen), C.size_t(suffix),
 	)
 }
 
@@ -869,4 +872,185 @@ func tensorArgmaxAxis2DI64(out, in []int64, m, n, axis int) {
 // on this build. Used by the tensor builtins for a clean error
 // path. Always true under the cgo build tag; the stub file's
 // matching false definition kicks in on Windows.
+// ── clip wrappers ──
+//
+// Scalar lo/hi are passed by value — cgo handles the C scalar parameter
+// convention for float/double/int64_t without any pointer indirection.
+
+func tensorClipF32(out, a []float32, lo, hi float32) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_clip_f32(
+		(*C.float)(unsafe.Pointer(&out[0])),
+		(*C.float)(unsafe.Pointer(&a[0])),
+		C.float(lo), C.float(hi),
+		C.size_t(n),
+	)
+}
+
+func tensorClipF64(out, a []float64, lo, hi float64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_clip_f64(
+		(*C.double)(unsafe.Pointer(&out[0])),
+		(*C.double)(unsafe.Pointer(&a[0])),
+		C.double(lo), C.double(hi),
+		C.size_t(n),
+	)
+}
+
+func tensorClipI64(out, a []int64, lo, hi int64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_clip_i64(
+		(*C.int64_t)(unsafe.Pointer(&out[0])),
+		(*C.int64_t)(unsafe.Pointer(&a[0])),
+		C.int64_t(lo), C.int64_t(hi),
+		C.size_t(n),
+	)
+}
+
+// ── comparison wrappers ──
+//
+// Output is always []int64 (0 or 1), inputs are the source dtype.
+// Because out and a/b have different element sizes they cannot alias.
+
+func tensorEqF32(out []int64, a, b []float32) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_eq_f32((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.float)(unsafe.Pointer(&a[0])), (*C.float)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorEqF64(out []int64, a, b []float64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_eq_f64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.double)(unsafe.Pointer(&a[0])), (*C.double)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorEqI64(out, a, b []int64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_eq_i64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.int64_t)(unsafe.Pointer(&a[0])), (*C.int64_t)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+
+func tensorNeF32(out []int64, a, b []float32) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_ne_f32((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.float)(unsafe.Pointer(&a[0])), (*C.float)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorNeF64(out []int64, a, b []float64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_ne_f64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.double)(unsafe.Pointer(&a[0])), (*C.double)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorNeI64(out, a, b []int64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_ne_i64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.int64_t)(unsafe.Pointer(&a[0])), (*C.int64_t)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+
+func tensorLtF32(out []int64, a, b []float32) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_lt_f32((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.float)(unsafe.Pointer(&a[0])), (*C.float)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorLtF64(out []int64, a, b []float64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_lt_f64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.double)(unsafe.Pointer(&a[0])), (*C.double)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorLtI64(out, a, b []int64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_lt_i64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.int64_t)(unsafe.Pointer(&a[0])), (*C.int64_t)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+
+func tensorLeF32(out []int64, a, b []float32) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_le_f32((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.float)(unsafe.Pointer(&a[0])), (*C.float)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorLeF64(out []int64, a, b []float64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_le_f64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.double)(unsafe.Pointer(&a[0])), (*C.double)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorLeI64(out, a, b []int64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_le_i64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.int64_t)(unsafe.Pointer(&a[0])), (*C.int64_t)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+
+func tensorGtF32(out []int64, a, b []float32) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_gt_f32((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.float)(unsafe.Pointer(&a[0])), (*C.float)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorGtF64(out []int64, a, b []float64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_gt_f64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.double)(unsafe.Pointer(&a[0])), (*C.double)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorGtI64(out, a, b []int64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_gt_i64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.int64_t)(unsafe.Pointer(&a[0])), (*C.int64_t)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+
+func tensorGeF32(out []int64, a, b []float32) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_ge_f32((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.float)(unsafe.Pointer(&a[0])), (*C.float)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorGeF64(out []int64, a, b []float64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_ge_f64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.double)(unsafe.Pointer(&a[0])), (*C.double)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+func tensorGeI64(out, a, b []int64) {
+	n := len(out)
+	if n == 0 {
+		return
+	}
+	C.klex_tensor_ge_i64((*C.int64_t)(unsafe.Pointer(&out[0])), (*C.int64_t)(unsafe.Pointer(&a[0])), (*C.int64_t)(unsafe.Pointer(&b[0])), C.size_t(n))
+}
+
 func tensorComputeAvailable() bool { return true }

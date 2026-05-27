@@ -836,6 +836,62 @@ func init() {
 		return &Tuple{Elements: []Object{&Array{Elements: elems}, NULL}}
 	}}
 
+	// _mtlReadBufferIntoTensor(buffer, tensor) → (null, err)
+	//
+	// Zero-allocation readback: copies a float32 MTLBuffer's contents
+	// directly into a pre-allocated FrogPy f32 tensor's underlying
+	// []float32 slice. Skips the per-element *Float construction that
+	// _mtlReadBuffer pays — for 1M cells that's ~7 ms saved on every
+	// readback. Pair with _mtlBufferAllocF32 / _mtlBufferFromTensor for
+	// a fully zero-marshalling round-trip through MPS or compute
+	// kernels.
+	//
+	// Tensor must be:
+	//   - dtype f32 (the buffer's element type)
+	//   - contiguous (Strides == nil); strided views error cleanly
+	//   - sized exactly to the buffer's element count
+	//
+	// Same synchronisation contract as _mtlReadBuffer: caller is
+	// responsible for ensuring any GPU work that writes to the buffer
+	// has finished before calling this.
+	Builtins["_mtlReadBufferIntoTensor"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 2 {
+			return runtimeError("_mtlReadBufferIntoTensor expects (buffer, tensor)", ast.Pos{})
+		}
+		b, ok := args[0].(*Integer)
+		if !ok {
+			return typeError("_mtlReadBufferIntoTensor expects (buffer: int, tensor: tensor)", ast.Pos{})
+		}
+		tn, ok := args[1].(*Tensor)
+		if !ok {
+			return typeError(fmt.Sprintf("_mtlReadBufferIntoTensor: argument 2 must be a tensor, got %s", args[1].Type()), ast.Pos{})
+		}
+		if tn.DType != DTypeFloat32 {
+			return &Tuple{Elements: []Object{NULL, &String{Value: "_mtlReadBufferIntoTensor: tensor dtype must be f32"}}}
+		}
+		if !tn.IsContiguous() {
+			return &Tuple{Elements: []Object{NULL, &String{Value: "_mtlReadBufferIntoTensor: tensor must be contiguous"}}}
+		}
+		count := int(C.mtl_buffer_count_f32(C.int64_t(b.Value)))
+		if count < 0 {
+			return &Tuple{Elements: []Object{NULL, &String{Value: "_mtlReadBufferIntoTensor: unknown buffer handle"}}}
+		}
+		if len(tn.F32) != count {
+			return &Tuple{Elements: []Object{NULL, &String{Value: fmt.Sprintf("_mtlReadBufferIntoTensor: tensor has %d elements, buffer has %d", len(tn.F32), count)}}}
+		}
+		if count == 0 {
+			return &Tuple{Elements: []Object{NULL, NULL}}
+		}
+		errBuf := make([]C.char, 256)
+		rc := C.mtl_buffer_read_f32(C.int64_t(b.Value),
+			(*C.float)(unsafe.Pointer(&tn.F32[0])), C.int(count),
+			(*C.char)(unsafe.Pointer(&errBuf[0])), C.size_t(len(errBuf)))
+		if rc != 0 {
+			return &Tuple{Elements: []Object{NULL, &String{Value: C.GoString(&errBuf[0])}}}
+		}
+		return &Tuple{Elements: []Object{NULL, NULL}}
+	}}
+
 	// _mtlBufferRelease(buffer) → null
 	//
 	// Drops the bridge's retain. Idempotent.

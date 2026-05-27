@@ -141,21 +141,15 @@ assertArraysEqual(tensorToArray(centred),
 
 // ── error cases ──────────────────────────────────────────────────
 
-// non-2D input
-let oneD = t.from_array([1.0, 2.0, 3.0], "f64")
-let _v, err = safe(t.sum_axis, oneD, 0)
-a.assertTrue(isError(err))
-println("sum_axis rejects 1-D input: OK")
+// 1-D input now reduces to a scalar tensor (covered further down)
+// — the old 2-D-only restriction was lifted in the N-D rewrite.
+let _v = null
+let err = null
 
-let threeD = t.reshape(t.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], "f64"), [2, 2, 2])
-_v, err = safe(t.sum_axis, threeD, 0)
-a.assertTrue(isError(err))
-println("sum_axis rejects 3-D input (v1 = 2-D only): OK")
-
-// axis out of range
+// axis out of range for 2-D
 _v, err = safe(t.sum_axis, mF64, 2)
 a.assertTrue(isError(err))
-println("sum_axis rejects axis 2 (only 0, 1 valid for 2-D): OK")
+println("sum_axis rejects axis 2 (out of range for 2-D shape): OK")
 
 _v, err = safe(t.sum_axis, mF64, -3)
 a.assertTrue(isError(err))
@@ -176,6 +170,132 @@ println("mean_axis rejects empty reduction axis: OK")
 let emptySum = t.sum_axis(empty, 0)
 assertArraysEqual(t.shape(emptySum), [3], "sum_axis empty axis returns shape [3]")
 assertArraysEqual(tensorToArray(emptySum), [0.0, 0.0, 0.0], "sum_axis empty axis returns zeros")
+
+// ── N-D coverage ───────────────────────────────────────────────
+//
+// Reference 3-D tensor shape [2, 2, 3], values 1..12 row-major:
+//
+//   [[[ 1,  2,  3],
+//     [ 4,  5,  6]],
+//    [[ 7,  8,  9],
+//     [10, 11, 12]]]
+//
+// Per-axis expected sums:
+//   axis 0 → shape [2, 3], flat [8, 10, 12, 14, 16, 18]
+//   axis 1 → shape [2, 3], flat [5, 7, 9, 17, 19, 21]
+//   axis 2 → shape [2, 2], flat [6, 15, 24, 33]
+println("")
+println("── N-D axis reductions ──")
+
+let m3 = t.reshape(t.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0], "f64"), [2, 2, 3])
+
+let s0 = t.sum_axis(m3, 0)
+assertArraysEqual(t.shape(s0), [2, 3], "3-D sum_axis axis 0 shape [2, 3]")
+assertArraysEqual(tensorToArray(s0), [8.0, 10.0, 12.0, 14.0, 16.0, 18.0], "3-D sum_axis axis 0 values")
+
+let s1 = t.sum_axis(m3, 1)
+assertArraysEqual(t.shape(s1), [2, 3], "3-D sum_axis axis 1 shape [2, 3]")
+assertArraysEqual(tensorToArray(s1), [5.0, 7.0, 9.0, 17.0, 19.0, 21.0], "3-D sum_axis axis 1 values")
+
+let s2 = t.sum_axis(m3, 2)
+assertArraysEqual(t.shape(s2), [2, 2], "3-D sum_axis axis 2 shape [2, 2]")
+assertArraysEqual(tensorToArray(s2), [6.0, 15.0, 24.0, 33.0], "3-D sum_axis axis 2 values")
+
+// Negative axis: -1 == axis 2 (last); -3 == axis 0 (first)
+let sNeg1 = t.sum_axis(m3, -1)
+assertArraysEqual(tensorToArray(sNeg1), tensorToArray(s2), "3-D sum_axis axis -1 == axis 2")
+let sNeg3 = t.sum_axis(m3, -3)
+assertArraysEqual(tensorToArray(sNeg3), tensorToArray(s0), "3-D sum_axis axis -3 == axis 0")
+
+// mean: same shape, divided by reduceLen. axis 2 reduces over 3 elements.
+let me2 = t.mean_axis(m3, 2)
+assertArraysEqual(t.shape(me2), [2, 2], "3-D mean_axis axis 2 shape [2, 2]")
+assertArraysEqual(tensorToArray(me2), [2.0, 5.0, 8.0, 11.0], "3-D mean_axis axis 2 values (sum/3)")
+
+// min/max along axis 2: per-row min is row[0]; per-row max is row[2]
+let mn2 = t.min_axis(m3, 2)
+assertArraysEqual(tensorToArray(mn2), [1.0, 4.0, 7.0, 10.0], "3-D min_axis axis 2 values")
+let mx2 = t.max_axis(m3, 2)
+assertArraysEqual(tensorToArray(mx2), [3.0, 6.0, 9.0, 12.0], "3-D max_axis axis 2 values")
+
+// argmin/argmax along axis 2: positions within the reduced axis.
+// Every row is sorted ascending, so argmin=0 and argmax=2 for all output cells.
+let am2 = t.argmin_axis(m3, 2)
+assertArraysEqual(tensorToArray(am2), [0, 0, 0, 0], "3-D argmin_axis axis 2 values")
+let ax2 = t.argmax_axis(m3, 2)
+assertArraysEqual(tensorToArray(ax2), [2, 2, 2, 2], "3-D argmax_axis axis 2 values")
+
+// argmin/argmax along axis 0: index 0 is always the smaller block.
+let am0 = t.argmin_axis(m3, 0)
+assertArraysEqual(t.shape(am0), [2, 3], "3-D argmin_axis axis 0 shape")
+assertArraysEqual(tensorToArray(am0), [0, 0, 0, 0, 0, 0], "3-D argmin_axis axis 0 (all 0)")
+let ax0 = t.argmax_axis(m3, 0)
+assertArraysEqual(tensorToArray(ax0), [1, 1, 1, 1, 1, 1], "3-D argmax_axis axis 0 (all 1)")
+
+// ── keepdims variants ──────────────────────────────────────────
+println("")
+println("── keepdims variants ──")
+
+let sk2 = t.sum_axis_keepdims(m3, 2)
+assertArraysEqual(t.shape(sk2), [2, 2, 1], "sum_axis_keepdims axis 2 shape [2, 2, 1]")
+assertArraysEqual(tensorToArray(sk2), [6.0, 15.0, 24.0, 33.0], "sum_axis_keepdims axis 2 values match drop")
+
+let sk0 = t.sum_axis_keepdims(m3, 0)
+assertArraysEqual(t.shape(sk0), [1, 2, 3], "sum_axis_keepdims axis 0 shape [1, 2, 3]")
+assertArraysEqual(tensorToArray(sk0), [8.0, 10.0, 12.0, 14.0, 16.0, 18.0], "sum_axis_keepdims axis 0 values match drop")
+
+let mek2 = t.mean_axis_keepdims(m3, 2)
+assertArraysEqual(t.shape(mek2), [2, 2, 1], "mean_axis_keepdims axis 2 shape")
+assertArraysEqual(tensorToArray(mek2), [2.0, 5.0, 8.0, 11.0], "mean_axis_keepdims axis 2 values")
+
+let mnk1 = t.min_axis_keepdims(m3, 1)
+assertArraysEqual(t.shape(mnk1), [2, 1, 3], "min_axis_keepdims axis 1 shape")
+let mxk1 = t.max_axis_keepdims(m3, 1)
+assertArraysEqual(t.shape(mxk1), [2, 1, 3], "max_axis_keepdims axis 1 shape")
+
+let amk2 = t.argmin_axis_keepdims(m3, 2)
+assertArraysEqual(t.shape(amk2), [2, 2, 1], "argmin_axis_keepdims axis 2 shape")
+let axk2 = t.argmax_axis_keepdims(m3, 2)
+assertArraysEqual(t.shape(axk2), [2, 2, 1], "argmax_axis_keepdims axis 2 shape")
+
+// The whole point of keepdims: broadcast back without expand_dims.
+// Centring along the last axis (layer-norm style).
+let centred = t.sub(m3, mek2)
+// Row [1, 2, 3] minus its mean 2 → [-1, 0, 1]
+// Row [4, 5, 6] minus its mean 5 → [-1, 0, 1]
+// All four rows produce the same pattern.
+assertArraysEqual(tensorToArray(centred), [-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0], "x - mean(x, -1, keepdims) broadcasts cleanly")
+
+// ── 1-D edge case ──────────────────────────────────────────────
+let v = t.from_array([3.0, 1.0, 4.0, 1.0, 5.0], "f64")
+let vsum = t.sum_axis(v, 0)
+assertArraysEqual(t.shape(vsum), [], "1-D sum_axis axis 0 → scalar tensor (shape [])")
+a.assertEqual(t.get(vsum, 0), 14.0)
+println("1-D sum_axis axis 0 == 14: OK")
+
+let vsumKd = t.sum_axis_keepdims(v, 0)
+assertArraysEqual(t.shape(vsumKd), [1], "1-D sum_axis_keepdims axis 0 → shape [1]")
+a.assertEqual(t.get(vsumKd, 0), 14.0)
+println("1-D sum_axis_keepdims axis 0 == 14: OK")
+
+// ── i64 N-D ────────────────────────────────────────────────────
+let i3 = t.reshape(t.from_array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "i64"), [2, 2, 3])
+let isum2 = t.sum_axis(i3, 2)
+assertArraysEqual(tensorToArray(isum2), [6, 15, 24, 33], "i64 3-D sum_axis axis 2")
+
+// ── f32 N-D ────────────────────────────────────────────────────
+let f3 = t.reshape(t.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0], "f32"), [2, 2, 3])
+let fsum2 = t.sum_axis(f3, 2)
+assertArraysEqual(tensorToArray(fsum2), [6.0, 15.0, 24.0, 33.0], "f32 3-D sum_axis axis 2")
+
+// ── N-D out-of-range axis errors cleanly ───────────────────────
+_v, err = safe(t.sum_axis, m3, 3)
+a.assertTrue(isError(err))
+println("3-D sum_axis rejects axis 3 (rank 3, valid [-3, 2]): OK")
+
+_v, err = safe(t.sum_axis, m3, -4)
+a.assertTrue(isError(err))
+println("3-D sum_axis rejects axis -4: OK")
 
 println("")
 a.summary()

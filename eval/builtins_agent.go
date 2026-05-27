@@ -374,7 +374,8 @@ func SetBridgeCallHook(fn Object) { bridgeCallHook.set(fn) }
 // timing + success info. `result` may be an *Error to signal the call
 // failed (e.g. bridge crashed, JSON unmarshal failed); user-error
 // values from the remote process come back as a (null, error) tuple
-// and don't mark the call itself as failed.
+// and don't mark the call itself as failed — ok stays true, but the
+// user_error field is populated so handlers can tell them apart.
 //
 // Single-event design (no spawn/done split) — bridge calls block the
 // caller, so the agent's hook fires once per call at the natural
@@ -402,6 +403,24 @@ func FireBridgeCallHook(fnName string, argc int, durationNanos int64, result Obj
 	h.Pairs[HashKey{Type: STRING_OBJ, Value: "error"}] = HashPair{
 		Key:   &String{Value: "error"},
 		Value: errInfo,
+	}
+
+	// user_error: non-null when the bridge handler returned a (null, err)
+	// tuple with a user error (e.g. the remote handler threw an exception).
+	// ok stays true — the round-trip itself succeeded.
+	var userErrInfo Object = NULL
+	if t, isTuple := result.(*Tuple); isTuple && len(t.Elements) == 2 {
+		if e, isErr := t.Elements[1].(*Error); isErr && e.IsUserError {
+			ueH := &Hash{Pairs: make(map[HashKey]HashPair)}
+			putString(ueH, "kind", string(e.Kind))
+			putString(ueH, "message", e.Message)
+			putString(ueH, "code", e.Code)
+			userErrInfo = ueH
+		}
+	}
+	h.Pairs[HashKey{Type: STRING_OBJ, Value: "user_error"}] = HashPair{
+		Key:   &String{Value: "user_error"},
+		Value: userErrInfo,
 	}
 	eventID := nextEventID()
 	parentID := currentParentID()

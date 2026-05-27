@@ -28,7 +28,7 @@ package() {
     # Create wrapper script that sets KLEX_PATH for stdlib
     install -Dm755 /dev/stdin "$pkgdir/usr/bin/klex" <<'EOF'
 #!/bin/bash
-export KLEX_PATH="/usr/share/klex/stdlib"
+export KLEX_PATH="/usr/share/klex"
 exec /usr/lib/klex/klex "$@"
 EOF
 
@@ -48,5 +48,5 @@ EOF
 
     # Install examples
     mkdir -p "$pkgdir/usr/share/doc/$pkgname/examples"
-    cp -r tests/examples/* "$pkgdir/usr/share/doc/$pkgname/examples/"
+    cp -r examples/* "$pkgdir/usr/share/doc/$pkgname/examples/"
 }

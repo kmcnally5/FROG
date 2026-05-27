@@ -1693,7 +1693,7 @@ fn may be a user-defined function or any built-in function.
 
 ### Tensors — FrogPy (numeric arrays)
 
-FrogPy is kLex's NumPy-equivalent: contiguous N-D numeric arrays with element-wise operations and reductions, all backed by Go + cgo C kernels. Use the `tensor.lex` stdlib wrapper:
+FrogPy is kLex's NumPy-equivalent: dense N-dimensional numeric arrays with element-wise operations, broadcasting, axis reductions, slicing, and matmul — all backed by Go + cgo C kernels (with MPSMatrixMultiplication for f32 matmul on macOS). Use the `tensor.lex` stdlib wrapper:
 
 ```lex
 import "tensor.lex" as t
@@ -1701,13 +1701,19 @@ import "tensor.lex" as t
 
 The underlying primitives (all `_tensor_*` builtins) are listed in the Private Builtins section. The surface:
 
-- **Constructors** — `_tensor_zeros(shape, dtype)` allocates an N-D zero-filled tensor; `_tensor_full(shape, value, dtype)` fills with a constant; `_tensor_random(shape, dtype, seed)` fills with uniform values in [0,1) for floats (NumPy's `np.random.rand`-style; seed > 0 deterministic, seed == 0 time-seeded); `_tensor_from_array(data, dtype)` builds a 1-D tensor from a flat kLex array (`dtype` is `"f32"` / `"f64"` / `"i64"`).
-- **Inspection** — `_tensor_dtype(t)`, `_tensor_shape(t)`, `_tensor_numel(t)`, `_tensor_get(t, i)`.
-- **Shape ops** (all view-based — share backing data) — `_tensor_reshape(t, newShape)`, `_tensor_squeeze(t)` removes size-1 dims, `_tensor_expand_dims(t, axis)` inserts a size-1 dim (negative axis OK).
-- **Pure element-wise ops** (`_tensor_add`, `_tensor_mul`, `_tensor_exp`, …) — allocate a fresh result tensor. Support **NumPy-style broadcasting**: either operand may be a scalar (`_tensor_add(t, 1.5)`) or a tensor with a broadcast-compatible shape (e.g. `(m,n) + (n,)` for per-column add; `(m,1) + (1,n)` for outer-add).
+- **Constructors** — `_tensor_zeros(shape, dtype)` allocates a zero-filled tensor; `_tensor_full(shape, value, dtype)` fills with a constant; `_tensor_random(shape, dtype, seed)` fills with uniform values in [0,1) for floats (NumPy's `np.random.rand`-style; seed > 0 deterministic, seed == 0 time-seeded); `_tensor_from_array(data, dtype)` builds a 1-D tensor from a flat kLex array; `_tensor_linspace(start, stop, n, dtype)` produces n evenly spaced values; `_tensor_arange(start, stop, step, dtype)` is Python-style range; `_tensor_eye(n, dtype)` returns an n×n identity matrix. `dtype` is one of `"f32"` / `"f64"` / `"i64"`.
+- **Inspection** — `_tensor_dtype(t)`, `_tensor_shape(t)`, `_tensor_numel(t)`, `_tensor_get(t, i)` (linear flat index — works on strided views), `_tensor_to_array(t)` (extract all elements into a flat kLex array; row-major logical order).
+- **Materialisation / conversion** — `_tensor_clone(t)` returns a fully independent contiguous copy; `_tensor_cast(t, dtype)` converts every element to the target dtype (lossy for narrowing).
+- **Shape ops** (view-based — share backing data) — `_tensor_reshape(t, newShape)`, `_tensor_squeeze(t)` removes size-1 dims, `_tensor_expand_dims(t, axis)` inserts a size-1 dim (negative axis OK).
+- **Slicing** — `_tensor_slice(t, specs)` returns a strided **view** sharing backing data; `specs` is an array with one entry per axis (each is `null` for full axis or `[start, stop, step]` with negative-from-end indices and positive step). `_tensor_contiguous(t)` is a no-op for already-contiguous tensors, else materialises a strided view into a fresh contiguous tensor (NumPy `ascontiguousarray` semantics). Kernel ops require contiguous input — call `t.contiguous(view)` before passing a slice to `add`, `matmul`, reductions, etc.
+- **Pure element-wise ops** (`_tensor_add`, `_tensor_sub`, `_tensor_mul`, `_tensor_div`, `_tensor_pow`, `_tensor_neg`, `_tensor_abs`, `_tensor_exp`, `_tensor_log`, `_tensor_sqrt`, `_tensor_sin`, `_tensor_cos`) — allocate a fresh result tensor. Binary ops support **NumPy-style broadcasting**: either operand may be a scalar (`_tensor_add(t, 1.5)`) or a tensor with a broadcast-compatible shape (e.g. `(m,n) + (n,)` for per-column add; `(m,1) + (1,n)` for outer-add). `_tensor_clip(t, lo, hi)` clamps every element to [lo, hi].
 - **In-place ops** (`_tensor_add_inplace`, `_tensor_mul_inplace`, …) — mutate the LHS tensor, return it. Use when the caller owns the LHS and wants to avoid allocation. In-place variants are **strict shape** (no broadcasting) so the LHS isn't silently resized.
-- **Full reductions** (`_tensor_sum`, `_tensor_mean`, `_tensor_max`, `_tensor_min`, `_tensor_argmax`, `_tensor_argmin`) — produce a scalar from a tensor.
-- **Axis-aware reductions** (`_tensor_sum_axis`, `_tensor_mean_axis`, `_tensor_min_axis`, `_tensor_max_axis`, `_tensor_argmin_axis`, `_tensor_argmax_axis`) — reduce along one axis of a 2-D tensor, returning a 1-D tensor. axis ∈ {0, 1, -1, -2}; sum/min/max preserve dtype, mean returns f64, argmin/argmax return i64. v1 is 2-D only.
+- **Comparisons** — `_tensor_eq`, `_tensor_ne`, `_tensor_lt`, `_tensor_le`, `_tensor_gt`, `_tensor_ge`. Element-wise; output is always i64 (0 or 1 mask). Same broadcasting + scalar promotion as element-wise ops. NaN comparisons follow IEEE 754 (any comparison with NaN is 0, except `ne` which is 1).
+- **Selection** — `_tensor_where(mask, x, y)` returns out[i] = x[i] if mask[i] != 0 else y[i]. `mask` is an i64 tensor (typically from a comparison op); `x` and `y` may be tensors or scalars.
+- **Joining** — `_tensor_concatenate(tensors, axis)` joins along an existing axis (all inputs must agree on shape except that axis); `_tensor_stack(tensors, axis)` joins along a NEW axis (all inputs must have identical shapes; output rank = input rank + 1).
+- **Full reductions** (`_tensor_sum`, `_tensor_mean`, `_tensor_max`, `_tensor_min`, `_tensor_argmax`, `_tensor_argmin`) — collapse the entire tensor to a scalar.
+- **Axis-aware reductions** (`_tensor_sum_axis`, `_tensor_mean_axis`, `_tensor_min_axis`, `_tensor_max_axis`, `_tensor_argmin_axis`, `_tensor_argmax_axis`) — reduce along one axis of an N-D tensor, dropping that axis from the output (rank N → rank N-1). axis may be negative (-1 is the last axis). sum/min/max preserve dtype, mean returns f64, argmin/argmax return i64 (indices into the reduced axis).
+- **Keepdims reductions** — `_tensor_sum_axis_keepdims`, `_tensor_mean_axis_keepdims`, `_tensor_min_axis_keepdims`, `_tensor_max_axis_keepdims`, `_tensor_argmin_axis_keepdims`, `_tensor_argmax_axis_keepdims` — same as the axis reductions but keep the reduced axis at size 1 in the output instead of dropping it. Composes cleanly with broadcasting, e.g. `t.sub(x, t.mean_axis_keepdims(x, -1))` for layer-norm-style centring.
 - **Linear algebra** — `_tensor_matmul(a, b)` for 2-D matrix multiply (f32 routes through Apple MPSMatrixMultiplication on macOS, naive autovec CPU kernel on Linux; f64/i64 always CPU with goroutine row-strip parallelism above m ≥ 128); `_tensor_transpose(t)` for 2-D matrix transpose (materialising); `_tensor_dot(a, b)` for 1-D inner product (fused mul+sum C kernel — no intermediate tensor).
 
 
@@ -1995,6 +2001,12 @@ _mtlBufferAllocF32(count) allocate N zeroed float32 slots → (handle, err)
 _mtlBufferAllocU32(count) allocate N zeroed uint32 slots → (handle, err)
 _mtlReadBuffer(handle)   read float32 contents → (Array<Float>, err)
 _mtlReadBufferU32(handle) read uint32 contents → (Array<Int>, err)
+_mtlReadBufferIntoTensor(handle, t)
+                         zero-allocation readback of an f32 MTLBuffer
+                         directly into a pre-allocated f32 contiguous
+                         tensor's []float32 slice. Skips the per-element
+                         *Float construction that _mtlReadBuffer pays.
+                         → (null, err)
 _mtlBufferRelease(handle) free
 ```
 
@@ -3693,9 +3705,13 @@ agent.lex           _setErrorHook  _setAsyncSpawnHook  _setAsyncDoneHook
                     _setUiEventHook  _setBridgeCallHook
                     _uiEventActive  _uiEvent
 tensor.lex          _tensor_from_array  _tensor_zeros  _tensor_full
-                    _tensor_random  _tensor_reshape  _tensor_get
+                    _tensor_random  _tensor_linspace  _tensor_arange
+                    _tensor_eye
+                    _tensor_reshape  _tensor_get  _tensor_to_array
                     _tensor_dtype  _tensor_shape  _tensor_numel
                     _tensor_squeeze  _tensor_expand_dims
+                    _tensor_slice  _tensor_contiguous
+                    _tensor_clone  _tensor_cast  _tensor_clip
                     _tensor_abs  _tensor_neg  _tensor_exp  _tensor_log
                     _tensor_sqrt  _tensor_sin  _tensor_cos  _tensor_pow
                     _tensor_add  _tensor_sub  _tensor_mul  _tensor_div
@@ -3705,11 +3721,17 @@ tensor.lex          _tensor_from_array  _tensor_zeros  _tensor_full
                     _tensor_cos_inplace  _tensor_pow_inplace
                     _tensor_add_inplace  _tensor_sub_inplace
                     _tensor_mul_inplace  _tensor_div_inplace
+                    _tensor_eq  _tensor_ne  _tensor_lt  _tensor_le
+                    _tensor_gt  _tensor_ge  _tensor_where
+                    _tensor_concatenate  _tensor_stack
                     _tensor_sum  _tensor_mean  _tensor_max  _tensor_min
                     _tensor_argmax  _tensor_argmin
                     _tensor_sum_axis  _tensor_mean_axis
                     _tensor_min_axis  _tensor_max_axis
                     _tensor_argmin_axis  _tensor_argmax_axis
+                    _tensor_sum_axis_keepdims  _tensor_mean_axis_keepdims
+                    _tensor_min_axis_keepdims  _tensor_max_axis_keepdims
+                    _tensor_argmin_axis_keepdims  _tensor_argmax_axis_keepdims
                     _tensor_matmul  _tensor_transpose  _tensor_dot
 vm compiler helper  _iterPrep      (used by compileForIn; not a user API)
 ```

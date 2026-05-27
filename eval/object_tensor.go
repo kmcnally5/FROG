@@ -185,3 +185,154 @@ func dtypeFromName(name string) (DType, bool) {
 	}
 	return 0, false
 }
+
+// stridedOffsetFromFlat converts a row-major flat index into the
+// physical backing-slice offset for a strided tensor.
+//
+// Walks dimensions from the trailing axis backwards, peeling one
+// dim's logical index off via modulo + divide and accumulating
+// idx * strides[d] into the result.
+//
+// Caller must pass strides that match shape; for a contiguous tensor
+// (Strides == nil) callers should bypass this helper and use the
+// flat index directly.
+func stridedOffsetFromFlat(flat int, shape, strides []int) int {
+	if len(shape) == 0 {
+		return 0
+	}
+	off := 0
+	for d := len(shape) - 1; d >= 0; d-- {
+		dim := shape[d]
+		if dim == 0 {
+			return 0
+		}
+		idx := flat % dim
+		off += idx * strides[d]
+		flat /= dim
+	}
+	return off
+}
+
+// copyStridedToContiguousF32 materialises a strided f32 view into a
+// fresh contiguous backing slice. Walks logical indices row-major,
+// computing the source offset from strides at each step.
+//
+// Per-element copy in Go — ~10 ms per million elements on M4 — fast
+// enough for the v1 use case (one-shot materialise before kernel
+// dispatch). If this becomes a bottleneck, the inner loop could be
+// specialised for 2-D and 3-D cases or pushed to C.
+func copyStridedToContiguousF32(out, src []float32, shape, strides []int) {
+	rank := len(shape)
+	if rank == 0 {
+		if len(out) > 0 && len(src) > 0 {
+			out[0] = src[0]
+		}
+		return
+	}
+	numel := 1
+	for _, d := range shape {
+		numel *= d
+	}
+	if numel == 0 {
+		return
+	}
+	idx := make([]int, rank)
+	for k := 0; k < numel; k++ {
+		off := 0
+		for d := 0; d < rank; d++ {
+			off += idx[d] * strides[d]
+		}
+		out[k] = src[off]
+		for d := rank - 1; d >= 0; d-- {
+			idx[d]++
+			if idx[d] < shape[d] {
+				break
+			}
+			idx[d] = 0
+		}
+	}
+}
+
+func copyStridedToContiguousF64(out, src []float64, shape, strides []int) {
+	rank := len(shape)
+	if rank == 0 {
+		if len(out) > 0 && len(src) > 0 {
+			out[0] = src[0]
+		}
+		return
+	}
+	numel := 1
+	for _, d := range shape {
+		numel *= d
+	}
+	if numel == 0 {
+		return
+	}
+	idx := make([]int, rank)
+	for k := 0; k < numel; k++ {
+		off := 0
+		for d := 0; d < rank; d++ {
+			off += idx[d] * strides[d]
+		}
+		out[k] = src[off]
+		for d := rank - 1; d >= 0; d-- {
+			idx[d]++
+			if idx[d] < shape[d] {
+				break
+			}
+			idx[d] = 0
+		}
+	}
+}
+
+func copyStridedToContiguousI64(out, src []int64, shape, strides []int) {
+	rank := len(shape)
+	if rank == 0 {
+		if len(out) > 0 && len(src) > 0 {
+			out[0] = src[0]
+		}
+		return
+	}
+	numel := 1
+	for _, d := range shape {
+		numel *= d
+	}
+	if numel == 0 {
+		return
+	}
+	idx := make([]int, rank)
+	for k := 0; k < numel; k++ {
+		off := 0
+		for d := 0; d < rank; d++ {
+			off += idx[d] * strides[d]
+		}
+		out[k] = src[off]
+		for d := rank - 1; d >= 0; d-- {
+			idx[d]++
+			if idx[d] < shape[d] {
+				break
+			}
+			idx[d] = 0
+		}
+	}
+}
+
+// materialiseStrided returns a fresh contiguous tensor with the same
+// logical shape and values as src. If src is already contiguous,
+// returns src unchanged (no-copy fast path — matches NumPy
+// ascontiguousarray semantics).
+func materialiseStrided(src *Tensor) *Tensor {
+	if src.IsContiguous() {
+		return src
+	}
+	out := newTensorFromShape(src.DType, src.Shape)
+	switch src.DType {
+	case DTypeFloat32:
+		copyStridedToContiguousF32(out.F32, src.F32, src.Shape, src.Strides)
+	case DTypeFloat64:
+		copyStridedToContiguousF64(out.F64, src.F64, src.Shape, src.Strides)
+	case DTypeInt64:
+		copyStridedToContiguousI64(out.I64, src.I64, src.Shape, src.Strides)
+	}
+	return out
+}

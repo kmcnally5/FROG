@@ -2,37 +2,57 @@ package main
 
 import "klex/ast"
 
-// DefinitionAtPosition returns the location of the definition for the symbol at the given position
+// DefinitionAtPosition returns the location of the definition for the symbol at the given position.
+// Cross-file navigation (module.symbol) is handled first; same-file identifiers fall through.
 func DefinitionAtPosition(doc *DocumentState, pos Position) interface{} {
 	if doc.AST == nil || doc.Symbols == nil {
 		return nil
 	}
 
-	// Find the identifier at this position
+	// Check for DotExpr: module.symbol requires cross-file resolution.
+	node := FindNodeAtPosition(doc.AST, pos.Line, pos.Character)
+	if node != nil {
+		var dotExpr *ast.DotExpr
+		switch n := node.(type) {
+		case *ast.DotExpr:
+			dotExpr = n
+		case *ast.CallExpr:
+			if d, ok := n.Function.(*ast.DotExpr); ok {
+				dotExpr = d
+			}
+		}
+		if dotExpr != nil {
+			if ident, ok := dotExpr.Left.(*ast.Ident); ok {
+				libFile, _, sym, ok := resolveModuleSymbol(doc, ident.Value, dotExpr.Property)
+				if ok {
+					return Location{
+						URI: PathToURI(libFile),
+						Range: Range{
+							Start: Position{Line: sym.DefPos.Line - 1, Character: sym.DefPos.Col - 1},
+							End:   Position{Line: sym.DefPos.Line - 1, Character: sym.DefPos.Col - 1 + len(sym.Name)},
+						},
+					}
+				}
+			}
+			// DotExpr but couldn't resolve (struct field, unresolvable import) — don't fall through.
+			return nil
+		}
+	}
+
+	// Plain identifier — same-file symbol lookup.
 	ident := GetIdentAtPosition(doc.AST, pos.Line, pos.Character)
 	if ident == nil {
 		return nil
 	}
-
-	// Look up the symbol
 	sym, ok := doc.Symbols.Symbols[ident.Value]
 	if !ok {
-		// Builtin — no definition location
 		return nil
 	}
-
-	// Return the location of the definition
 	return Location{
 		URI: sym.DefURI,
 		Range: Range{
-			Start: Position{
-				Line:      sym.DefPos.Line - 1,
-				Character: sym.DefPos.Col - 1,
-			},
-			End: Position{
-				Line:      sym.DefPos.Line - 1,
-				Character: sym.DefPos.Col - 1 + len(sym.Name),
-			},
+			Start: Position{Line: sym.DefPos.Line - 1, Character: sym.DefPos.Col - 1},
+			End:   Position{Line: sym.DefPos.Line - 1, Character: sym.DefPos.Col - 1 + len(sym.Name)},
 		},
 	}
 }
