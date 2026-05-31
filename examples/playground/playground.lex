@@ -282,7 +282,7 @@ while i < len(londoners) {
     i = i + 1
 }
 
-let byAge = sortBy(people, fn(p) { return p.age })
+let byAge = sortBy(people, fn(a, b) { return a.age < b.age })
 println("\nAll by age:")
 i = 0
 while i < len(byAge) {
