@@ -774,7 +774,7 @@ window(1100, 800, "Secret Hunter", fn(frame) {
             drawSpinner(float(uiColX()) + 62.0, float(uiColY()) + 25.0, 10.0)
         }
         if scanTotal > 0 {
-            progressBar(uiColX(), uiColY() + 56, uiColW(), 8, float(scanDone), float(scanTotal))
+            progressBar(uiColX(), uiColY() + 56, uiColW(), 8, float(scanDone), 0.0, float(scanTotal))
             let pct = int(float(scanDone) / float(scanTotal) * 100.0)
             fillCA(theme["scanningText"], 0.80)
             noStroke()
@@ -890,7 +890,7 @@ window(1100, 800, "Secret Hunter", fn(frame) {
         drawThreatBar(10, r0 + 54, 270, frameCounts)
 
         let sevColors = [theme["crit"], theme["high"], theme["med"], theme["low"]]
-        pieChart(frameCounts, sevColors, 145.0, float(r0) + 114.0, 44.0, 18.0)
+        pieChart(frameCounts, sevColors, 145, r0 + 114, 44, 18.0)
 
         // Ease-out cubic count-up. While the tween runs we render scaled
         // integers; once finished we display the real frameCounts.
@@ -1125,7 +1125,7 @@ window(1100, 800, "Secret Hunter", fn(frame) {
             if scanTotal > 0 {
                 let barW = int(float(mainW) * 0.58)
                 let barX = int(midX) - barW / 2
-                progressBar(barX, int(midY) - 16, barW, 16, float(scanDone), float(scanTotal))
+                progressBar(barX, int(midY) - 16, barW, 16, float(scanDone), 0.0, float(scanTotal))
                 let pct = int(float(scanDone) / float(scanTotal) * 100.0)
                 fillC(theme["progressText"])
                 drawCentred(uiFont, str(scanDone) + " / " + str(scanTotal) + " files  —  " + str(pct) + "%", midX, midY + 14.0, 0.64)
@@ -1149,7 +1149,7 @@ window(1100, 800, "Secret Hunter", fn(frame) {
             if scanTotal > 0 {
                 let barW = int(float(mainW) * 0.58)
                 let barX = int(midX) - barW / 2
-                progressBar(barX, int(midY) - 16, barW, 16, float(scanDone), float(scanTotal))
+                progressBar(barX, int(midY) - 16, barW, 16, float(scanDone), 0.0, float(scanTotal))
                 let pct = int(float(scanDone) / float(scanTotal) * 100.0)
                 fillC(theme["progressText"])
                 if isGit {
@@ -1175,7 +1175,7 @@ window(1100, 800, "Secret Hunter", fn(frame) {
             if orgScanTotal > 0 {
                 let barW = int(float(mainW) * 0.58)
                 let barX = int(midX) - barW / 2
-                progressBar(barX, int(midY) - 16, barW, 16, float(orgScanDone), float(orgScanTotal))
+                progressBar(barX, int(midY) - 16, barW, 16, float(orgScanDone), 0.0, float(orgScanTotal))
                 fillC(theme["progressText"])
                 let pct = int(float(orgScanDone) / float(orgScanTotal) * 100.0)
                 drawCentred(uiFont, str(orgScanDone) + " / " + str(orgScanTotal) + " repos done  —  " + str(pct) + "%", midX, midY + 14.0, 0.64)

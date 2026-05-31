@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "kpkg": "0.1.0",
-  "klex": "kLex (FROG) v0.3.36",
+  "klex": "kLex (FROG) v0.3.37",
   "modules": [
     {
       "name": "actor",
@@ -63,8 +63,8 @@
       "name": "bridge",
       "path": "stdlib/bridge.lex",
       "version": "1.0.0",
-      "hash": "sha256:3a239400accc0fdfc289757df54611141b0372f78935db90e7982bf6f994960b",
-      "size": 8977
+      "hash": "sha256:a9d5e480103ef9a1761d81f910fc081ca5496a7b897351905d759b51b0fd9945",
+      "size": 10103
     },
     {
       "name": "bridgeMonitor",
@@ -336,6 +336,12 @@
       "version": "1.0.0",
       "hash": "sha256:b192cbef916b508731683f09deb244397d665d06b7b9f75e30a3b7bdc540f387",
       "size": 17208
+    },
+    {
+      "name": "serve_base",
+      "path": "stdlib/wasm/serve_base.lex",
+      "hash": "sha256:42faa33bd506932e17f9ed4333cbf8b157beb9ff8bc718904b8fc1e48ac7a2e3",
+      "size": 2065
     },
     {
       "name": "server",

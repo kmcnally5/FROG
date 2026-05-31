@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -177,6 +178,9 @@ func init() {
 // no shared mutable state across goroutine boundaries. Correct for tool servers.
 func init() {
 	Builtins["_httpServe"] = &Builtin{Fn: func(args []Object) Object {
+		if runtime.GOOS == "js" {
+			return runtimeError("_httpServe: browsers cannot host HTTP servers — call this from a Node.js / native kLex build, or use a Service Worker / Cloudflare Worker as the server", ast.Pos{})
+		}
 		if len(args) != 2 {
 			return runtimeError("_httpServe expects 2 arguments (port, handler)", ast.Pos{})
 		}

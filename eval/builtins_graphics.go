@@ -276,69 +276,11 @@ func applyScissor(r clipRect) {
 	gl.Scissor(int32(r.x), int32(float32(gfx.winH)-r.y-r.h), int32(r.w), int32(r.h))
 }
 
-// ── UI theme palette ─────────────────────────────────────────────────────────
+// uiPalette, toastEntry, pendingTooltip, pendingDropdown moved to
+// eval/builtins_ui_state.go so the WASM build (which has no `gfx`
+// struct) can still reference them via uiCore.
 
-type uiPalette struct {
-	widgetBg       [4]float32 // 0  button/widget normal background
-	widgetBgHover  [4]float32 // 1  hovered state
-	widgetBgActive [4]float32 // 2  pressed/checked state
-	widgetText     [4]float32 // 3  text on interactive widgets
-	labelText      [4]float32 // 4  label text above/beside widgets
-	dimText        [4]float32 // 5  secondary / unselected text
-	accent         [4]float32 // 6  accent line / stripe color
-	accentBg       [4]float32 // 7  selected item / active tab background
-	track          [4]float32 // 8  slider / progress track
-	trackFill      [4]float32 // 9  slider / progress fill
-	handle         [4]float32 // 10 slider handle, scrollbar thumb, checkmark
-	inputBg        [4]float32 // 11 text input / list container background
-	inputFocusBg   [4]float32 // 12 focused text input background
-	shadow         [4]float32 // 13 drop shadow for floating elements (contextMenu, tooltips)
-}
-
-// toastEntry is one active toast notification.
-type toastEntry struct {
-	message   string
-	style     string  // "info", "success", "warn", "error"
-	expiresAt float64 // seconds since gfx.startTime
-}
-
-// pendingTooltip holds tooltip text to be rendered by uiEnd() on top of everything.
-type pendingTooltip struct {
-	active bool
-	text   string
-	mx, my float32
-}
-
-// pendingDropdown holds the data for an open dropdown popup that must be
-// rendered last (on top of all other widgets) by uiEnd().
-type pendingDropdown struct {
-	active      bool
-	id          string
-	fx, fy, fw  float32
-	items       []string
-	selectedIdx int
-	charH       float32
-	textScale   float32
-}
-
-func defaultUIPalette() uiPalette {
-	return uiPalette{
-		widgetBg:       [4]float32{0.30, 0.30, 0.30, 1},
-		widgetBgHover:  [4]float32{0.50, 0.50, 0.50, 1},
-		widgetBgActive: [4]float32{0.20, 0.20, 0.20, 1},
-		widgetText:     [4]float32{0.92, 0.90, 1.00, 1},
-		labelText:      [4]float32{0.78, 0.76, 0.92, 1},
-		dimText:        [4]float32{0.62, 0.62, 0.62, 1},
-		accent:         [4]float32{0.68, 0.68, 0.68, 1},
-		accentBg:       [4]float32{0.40, 0.40, 0.40, 1},
-		track:          [4]float32{0.18, 0.18, 0.18, 1},
-		trackFill:      [4]float32{0.55, 0.55, 0.55, 1},
-		handle:         [4]float32{0.85, 0.85, 0.85, 1},
-		inputBg:        [4]float32{0.20, 0.20, 0.20, 1},
-		inputFocusBg:   [4]float32{0.10, 0.30, 0.50, 1},
-		shadow:         [4]float32{0.00, 0.00, 0.00, 0.50},
-	}
-}
+// defaultUIPalette also moved to eval/builtins_ui_state.go.
 
 // ── Graphics state ───────────────────────────────────────────────────────────
 
@@ -397,27 +339,22 @@ var gfx struct {
 	sdfVAO        uint32
 	sdfVBO        uint32
 	// UI system
-	uiTheme          uiPalette
-	uiActiveFont     *Font  // non-nil = use this font for all widget text
-	uiHoveredID      string
-	uiActiveID       string
-	uiNextID         int
-	uiElements       map[string][4]float32 // id -> [x, y, w, h]
+	// Theme, hover/active IDs, nextID counter, element registry, layout
+	// cursors and list maps moved to uiCore (eval/builtins_ui_state.go)
+	// so they're shared with the WASM Canvas2D backend.
 	uiBackspaceCount int                   // number of backspaces this frame
 	uiDeleteCount    int                   // forward-deletes this frame (Delete key)
 	uiLeftCount      int                   // ← arrow presses this frame
 	uiRightCount     int                   // → arrow presses this frame
 	uiUpCount        int                   // ↑ arrow presses this frame
 	uiDownCount      int                   // ↓ arrow presses this frame
-	uiListSelected   map[string]int        // listId -> selected item index
-	uiListScroll     map[string]int        // listId -> scroll position (top visible item)
 	uiScrollDelta    float64               // vertical mouse wheel delta this frame
 	uiScrollX        float64               // horizontal mouse wheel delta this frame
 	mouseRightClicked   bool                 // right-click fired this frame
 	mouseRightDown      bool                 // right button currently held
-	uiMenuOpenFrame     int                  // frameCount when a context menu first became visible
-	uiPendingDropdown   pendingDropdown      // open dropdown popup deferred to uiEnd()
-	uiToasts            []toastEntry         // active toast notifications
+	// uiMenuOpenFrame moved to uiCore.menuOpenFrame.
+	// uiPendingDropdown / uiToasts moved to uiCore for shared
+	// popup/toast rendering across desktop + WASM.
 	cursorArrow     *glfw.Cursor
 	cursorIBeam     *glfw.Cursor
 	cursorHand      *glfw.Cursor
@@ -431,27 +368,12 @@ var gfx struct {
 	gradDirLoc  int32
 	gradVAO     uint32
 	gradVBO     uint32
-	uiUndoStacks    map[string][]string  // per widget id — undo history (max 50)
-	uiRedoStacks    map[string][]string  // per widget id — redo history
-	uiTextCursor    map[string]int       // per widget id — cursor rune index
-	uiTextAnchor    map[string]int       // per widget id — selection anchor (== cursor → no selection)
-	uiTextScroll    map[string]float32   // per widget id — horizontal pixel scroll offset
-	uiTextBlink     map[string]float64   // per widget id — timestamp of last cursor movement
+	// uiUndoStacks / uiRedoStacks / uiTextCursor / uiTextAnchor /
+	// uiTextScroll / uiTextBlink moved to uiCore for shared text-edit
+	// state across desktop + WASM.
 	droppedFiles             []string      // paths from the last file-drop event
-	uiLastElementID          string        // ID of the most recently registered widget
-	uiTooltipHoveredID       string        // which element's hover timer is running
-	uiTooltipHoverStart      float64       // wall-clock second when that hover began
-	uiTooltipMatchedThisFrame bool         // true when tooltip() found a hover match this frame
-	uiPendingTooltip         pendingTooltip // tooltip queued for uiEnd() rendering
-	// Layout cursors
-	uiRowCurX float32
-	uiRowY     float32
-	uiRowH     float32
-	uiRowGap   float32
-	uiColX     float32
-	uiColCurY  float32
-	uiColW     float32
-	uiColGap   float32
+	// uiLastElementID + tooltip timer / pending state moved to uiCore.
+	// Layout cursors moved to uiCore (eval/builtins_ui_state.go).
 	// Drop shadow state
 	shadowActive  bool
 	shadowOffX    float32
@@ -1704,10 +1626,6 @@ func init() {
 
 	Builtins["frameCount"] = &Builtin{Fn: func(args []Object) Object {
 		return &Integer{Value: gfx.frameCount}
-	}}
-
-	Builtins["elapsedTime"] = &Builtin{Fn: func(args []Object) Object {
-		return &Float{Value: time.Since(gfx.startTime).Seconds()}
 	}}
 
 	Builtins["mouseX"] = &Builtin{Fn: func(args []Object) Object {

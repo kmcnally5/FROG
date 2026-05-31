@@ -1,0 +1,51 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: #0d0f14;
+    color: #cdd6f4;
+    font-family: -apple-system, system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 1rem;
+}
+
+.shell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 1280px;
+    max-width: 100%;
+}
+
+canvas {
+    display: block;
+    border: 1px solid #313244;
+    border-radius: 8px;
+    background: #141519;
+    width: 100%;
+    height: auto;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+button {
+    font-size: 0.9rem;
+    padding: 0.4rem 1rem;
+    border: 1px solid #45475a;
+    border-radius: 5px;
+    background: #1e1e2e;
+    color: #cdd6f4;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+button:hover:not(:disabled) { background: #313244; }
+button:disabled { opacity: 0.45; cursor: wait; }
+
+#status { color: #6c7086; font-size: 0.85rem; }

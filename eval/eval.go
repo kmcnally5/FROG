@@ -3132,6 +3132,21 @@ func Eval(node ast.Node, env *Environment) Object {
 	// itself is located or what the current working directory is.
 	case *ast.ImportStmt:
 		resolvedPath, tried, ok := resolveImportPath(n.Path, env)
+
+		// Embedded-stdlib fallback. When EmbeddedImportLookup is set
+		// (typically the WASM build, where there is no filesystem),
+		// consult it AFTER the disk search fails. The lookup key is
+		// the verbatim n.Path so embedded `stdlib/json.lex` resolves
+		// regardless of script-dir or CWD.
+		var embeddedSrc string
+		var fromEmbed bool
+		if !ok && EmbeddedImportLookup != nil {
+			if src, foundEmbedded := EmbeddedImportLookup(n.Path); foundEmbedded {
+				embeddedSrc = src
+				fromEmbed = true
+				ok = true
+			}
+		}
 		if !ok {
 			return runtimeError(
 				fmt.Sprintf("cannot import %q: not found. Searched:\n  %s",
@@ -3139,9 +3154,18 @@ func Eval(node ast.Node, env *Environment) Object {
 				n.Pos)
 		}
 
-		absPath, err := filepath.Abs(resolvedPath)
-		if err != nil {
-			absPath = resolvedPath
+		var absPath string
+		if fromEmbed {
+			// Synthetic absolute path so the module cache, in-flight
+			// map, and ScriptDir machinery all treat the embedded
+			// module distinctly from any disk file of the same name.
+			absPath = "embedded://" + n.Path
+		} else {
+			ap, err := filepath.Abs(resolvedPath)
+			if err != nil {
+				ap = resolvedPath
+			}
+			absPath = ap
 		}
 
 		// Read-locked fast path. The vast majority of imports after the
@@ -3155,9 +3179,15 @@ func Eval(node ast.Node, env *Environment) Object {
 			return mod
 		}
 
-		src, readErr := os.ReadFile(resolvedPath)
-		if readErr != nil {
-			return runtimeError(fmt.Sprintf("cannot import %q: %s", n.Path, readErr.Error()), n.Pos)
+		var src []byte
+		if fromEmbed {
+			src = []byte(embeddedSrc)
+		} else {
+			b, readErr := os.ReadFile(resolvedPath)
+			if readErr != nil {
+				return runtimeError(fmt.Sprintf("cannot import %q: %s", n.Path, readErr.Error()), n.Pos)
+			}
+			src = b
 		}
 
 		// Reserve the in-flight slot under the write lock. Re-check the

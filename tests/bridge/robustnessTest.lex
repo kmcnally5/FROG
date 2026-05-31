@@ -4,7 +4,7 @@
 // does not leak state into the next. This mirrors how real applications
 // should use bridges defensively.
 
-const BRIDGE_PATH = "tests/examples/bridge/robustness_bridge.py"
+const BRIDGE_PATH = "tests/bridge/robustness_bridge.py"
 
 let passCount = 0
 let failCount = 0
@@ -23,7 +23,7 @@ fn expect(label, ok) {
 println("")
 println("── 1. Backward compatibility ────────────────────────────────────────")
 
-let bridge, err = nativeBridge("python3", [BRIDGE_PATH])
+let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH]})
 expect("2-arg nativeBridge() succeeds", err == null)
 if err == null {
     let result, cerr = bridgeCall(bridge, "echo", ["hello"])
@@ -35,10 +35,7 @@ if err == null {
 println("")
 println("── 2. Options hash accepted ─────────────────────────────────────────")
 
-bridge, err = nativeBridge("python3", [BRIDGE_PATH], {
-    "timeout_seconds": 5,
-    "max_response_mb": 4,
-})
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH], "timeout_seconds": 5, "max_response_mb": 4})
 expect("3-arg nativeBridge() with options succeeds", err == null)
 if err == null {
     let result, cerr = bridgeCall(bridge, "echo", [42])
@@ -50,7 +47,7 @@ if err == null {
 println("")
 println("── 3. Timeout taints the bridge ─────────────────────────────────────")
 
-bridge, err = nativeBridge("python3", [BRIDGE_PATH], {"timeout_seconds": 1})
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH], "timeout_seconds": 1})
 if err != null {
     expect("bridge start", false)
 } else {
@@ -69,7 +66,7 @@ if err != null {
 println("")
 println("── 4. Per-call timeout override ─────────────────────────────────────")
 
-bridge, err = nativeBridge("python3", [BRIDGE_PATH], {"timeout_seconds": 30})
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH], "timeout_seconds": 30})
 if err != null {
     expect("bridge start", false)
 } else {
@@ -84,7 +81,7 @@ if err != null {
 println("")
 println("── 5. Stderr capture & bridgeStderr() ───────────────────────────────")
 
-bridge, err = nativeBridge("python3", [BRIDGE_PATH])
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH]})
 if err != null {
     expect("bridge start", false)
 } else {
@@ -109,7 +106,7 @@ if err != null {
 println("")
 println("── 6. BRIDGE_CLOSED on subprocess death ─────────────────────────────")
 
-bridge, err = nativeBridge("python3", [BRIDGE_PATH])
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH]})
 if err != null {
     expect("bridge start", false)
 } else {
@@ -123,10 +120,10 @@ if err != null {
 println("")
 println("── 7. Options validation ────────────────────────────────────────────")
 
-_, err = nativeBridge("python3", [BRIDGE_PATH], {"max_response_mb": 999})
+_, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH], "max_response_mb": 999})
 expect("max_response_mb > 256 is rejected", err != null)
 
-_, err = nativeBridge("python3", [BRIDGE_PATH], {"timeout_seconds": -5})
+_, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH], "timeout_seconds": -5})
 expect("negative timeout_seconds is rejected", err != null)
 
 // ── Summary ──────────────────────────────────────────────────────────────────

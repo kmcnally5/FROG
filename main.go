@@ -41,7 +41,7 @@ func init() {
 	runtime.LockOSThread()
 }
 
-const Version = "v0.3.36"
+const Version = "v0.3.37"
 
 // printUsage writes the kLex command-line help to stderr. Registered as
 // flag.Usage so it is also invoked when an unknown flag is encountered.

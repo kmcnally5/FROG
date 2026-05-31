@@ -19,7 +19,7 @@
 
 import "stdlib/datetime.lex" as dt
 
-let bridge, err = nativeBridge("python3", ["tests/examples/bridge/python_bridge.py"])
+let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": ["tests/bridge/python_bridge.py"]})
 if err != null {
     println("bridge failed to start: " + err.message)
     return

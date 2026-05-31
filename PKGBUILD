@@ -1,6 +1,6 @@
 # Maintainer: Karl McNally <kmcnally@gmail.com>
 pkgname=klex
-pkgver=0.3.36
+pkgver=0.3.37
 pkgrel=1
 pkgdesc="FROG: Parallel-first scripting language for batch data processing at scale"
 arch=('x86_64' 'aarch64')

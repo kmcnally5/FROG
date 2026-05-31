@@ -14,7 +14,7 @@ fn runSuite(name, cmd, scriptPath) {
     println("=== " + name)
     println("============================================")
 
-    let bridge, err = nativeBridge(cmd, [scriptPath])
+    let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": cmd, "args": [scriptPath]})
     if err != null {
         println("FAIL: " + name + " bridge failed to start: " + err.message)
         return
@@ -111,15 +111,15 @@ fn runSuite(name, cmd, scriptPath) {
     bridgeClose(bridge)
 }
 
-runSuite("PYTHON helper", "python3", "tests/examples/bridge/python_bridge.py")
+runSuite("PYTHON helper", "python3", "tests/bridge/python_bridge.py")
 println("")
-runSuite("NODE helper",   "node",    "tests/examples/bridge/node_bridge.js")
+runSuite("NODE helper",   "node",    "tests/bridge/node_bridge.js")
 
 println("")
 println("============================================")
 println("=== legacy bridge — capability gate")
 println("============================================")
-let bridge, err = nativeBridge("python3", ["tests/examples/bridge/old_bridge.py"])
+let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": ["tests/bridge/old_bridge.py"]})
 if err != null {
     println("FAIL: legacy bridge failed to start: " + err.message)
     return

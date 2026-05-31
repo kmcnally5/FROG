@@ -1,4 +1,168 @@
-# kLex v0.3.36 Release Notes
+# kLex Release Notes
+
+---
+
+## v0.3.37 — WASM Browser Port, Shared UI Toolkit, Playground CI/CD
+
+> Week of 2026-05-25 → 2026-05-30
+
+This release is the largest single-week drop in kLex history. The headline is a complete port of the kLex UI toolkit to the browser via WebAssembly and Canvas2D — every widget that runs on the desktop OpenGL backend now runs identically in a browser tab, with no JavaScript written by the user. On top of that: a rebuilt playground, GitHub Actions deployment, self-hosting infrastructure, and a comprehensive doc sweep.
+
+---
+
+### WASM — Browser UI Toolkit (Canvas2D)
+
+kLex now ships a **dual-target UI renderer**. The same FROG script that opens a native OpenGL window on the desktop runs pixel-for-pixel in the browser via Canvas2D. 35+ widgets are fully shared across both targets through a thin renderer interface (11 primitives). No widget code was duplicated.
+
+**Widgets ported to browser (all shared with desktop):**
+
+| Category | Widgets |
+|---|---|
+| Core | `button`, `label`, `checkbox`, `toggle`, `radio` |
+| Input | `textInput`, `textArea`, `slider`, `numericStepper`, `getTypedChars` |
+| Selection | `list`, `listMulti`, `dropdown`, `tabs` |
+| Layout | `scrollArea`, `splitter`, `accordion`, layout cursors (`uiBeginRow`/`uiBeginCol` family) |
+| Data | `table`, `treeView`, `sparkline`, `lineChart`, `barChart`, `pieChart` |
+| Overlay | `tooltip`, `toast`, `contextMenu`, `modal` |
+| Display | `progressBar`, `colorPicker` |
+| Clip/State | `pushClip`/`popClip`, `pushDisabled`/`popDisabled` |
+| Theme | `makeTheme`, `uiTheme`, `setTheme`, `lineHeight` |
+
+**Canvas2D renderer primitives:** `fillRoundedRect`, `strokeRoundedRect`, `drawText`, `textWidth`, `lineHeight`, `drawLine`, `fillPolygon`, `fillArc`, `drawImage`, `pushClip`, `popClip`.
+
+**Text editing** — both `textInput` and `textArea` support full cursor navigation, multi-line editing, click-to-place, shift+click selection, word-jump (Ctrl/Cmd+Arrow), Home/End, clipboard (Cmd/Ctrl+C/X/V), undo/redo (Cmd/Ctrl+Z/Y, 100-step per-widget stack), and auto-scroll to track the cursor.
+
+**Theming** — 14-slot RGBA palette with four preset themes: `"nebula"` (default), `"light"`, `"dark"`, `"highContrast"`. Call `setTheme(name)` for one-liner switching or `uiTheme(palette)` for fine-grained control.
+
+**DPR scaling** — all Canvas2D drawing respects the device pixel ratio; Retina/HiDPI displays render crisply.
+
+**Font rendering fix** — Safari returns a negative `alphabeticBaseline` (spec-correct); Chrome returns positive. `textTopInset` now calls `math.Abs()` so vertical text centering is accurate on both browsers.
+
+---
+
+### WASM — New Builtins
+
+Four new builtins available on both desktop and browser:
+
+| Builtin | Signature | Description |
+|---|---|---|
+| `pushDisabled` | `pushDisabled(disabled: bool)` | Push a disabled-state frame; all widgets between push/pop render at half opacity and ignore hover/click |
+| `popDisabled` | `popDisabled()` | Pop the top disabled frame |
+| `setTheme` | `setTheme(name: string)` | Install a preset theme by name |
+| `lineHeight` | `lineHeight([scale: float]) → int` | Pixel height of one line of widget text; use for vertical centering: `y + (h - lineHeight()) / 2` |
+
+**`progressBar` signature corrected** — now takes 7 arguments: `progressBar(x, y, w, h, value, min, max)`. The `min` parameter was missing from the LSP, language docs, and grammar docs — all four have been updated. Existing call sites were already passing `min` correctly.
+
+---
+
+### WASM — Worker Bridge
+
+JS Web Workers are now a first-class bridge transport in the browser. Any JS library can be called from kLex FROG code via the same `bridgeOpen` / `bridgeCall` / `bridgeClose` API used by subprocess bridges on the desktop:
+
+```frog
+let bridge, err = bridgeOpen({"kind": "worker", "script": "my_worker.js"})
+let result, err = bridgeCall(bridge, "compute", [data])
+bridgeClose(bridge)
+```
+
+The worker-side helper lives at `stdlib/worker/klex_bridge_worker.js`. It implements the full kLex bridge protocol (hello handshake, schema introspection, streaming, cancellation, backpressure) in pure JS with no Node dependency.
+
+---
+
+### WASM — OPFS (Origin Private File System)
+
+The `opfs://` URL scheme gives kLex scripts persistent, sandboxed storage in the browser. Standard `fs.*` calls route transparently to OPFS when the path starts with `opfs://`:
+
+```frog
+import "stdlib/fs.lex" as fs
+let data, err = fs.read("opfs://user-prefs.json")
+fs.write("opfs://cache.bin", bytes)
+```
+
+No server round-trips. No user-visible file picker. Storage survives page reloads and browser restarts.
+
+---
+
+### Playground — Rebuilt and Deployed via CI/CD
+
+`examples/playground/` is now the single canonical playground. `docs/playground/` has been retired.
+
+**GitHub Actions** — `.github/workflows/deploy-playground.yml` builds `klex.wasm` fresh and deploys to GitHub Pages on every push to `main`. No binary is ever committed to the repo.
+
+**Live URL:** `https://kmcnally5.github.io/FROG/`
+
+The playground is a full kLex IDE built entirely in FROG on Canvas2D: code editor, tab navigation, live execution via `runScript`, output panel, and documentation links.
+
+---
+
+### WASM Infrastructure — kLex Self-Hosts
+
+Python (`http.server`) has been eliminated from every WASM serve script. kLex now hosts all its own WASM applications.
+
+**Canonical asset locations** — nothing is copied at runtime:
+
+| Asset | Path |
+|---|---|
+| Go WASM runtime shim | `stdlib/wasm/wasm_exec.js` |
+| Compiled kLex binary | `bin/klex.wasm` |
+| Worker bridge helper | `stdlib/worker/klex_bridge_worker.js` |
+
+**`stdlib/wasm/serve_base.lex`** — new shared module providing MIME detection, `serveFile`, and `logged` helpers. All WASM hosts import it. Each `serve.lex` uses `_scriptDir()` to compute the repo root and routes shared assets from their canonical paths with no copies.
+
+**Test servers** — `tests/wasm_graphics/`, `tests/wasm_ui/`, and `tests/wasm_worker/` all now have proper `serve.lex` files and consistent `serve.sh` wrappers. Ports 8765 (worker), 8766 (graphics), 8767 (UI widgets), 8768 (playground).
+
+---
+
+### Build & Tooling
+
+- **`tools/stdlibgen/`** — walks `stdlib/` and embeds every `.lex` file into `cmd/wasm/embeddedstdlib_gen.go` so `import "stdlib/..."` works in the browser without a filesystem.
+- **`tools/fsdispatchgen/`** — generates the filesystem builtin dispatch table (`eval/builtins_fs_dispatch_gen.go`), handling `file://` and `opfs://` scheme routing.
+- **`tools/wasmsmoke`** — desktop ↔ WASM parity test runner (`go run ./tools/wasmsmoke`); diffs output byte-for-byte. Baseline: 59/90 pass; 31 known platform-limitation failures.
+- **`bin/wasmaudit`**, **`bin/buildtagaudit`** — new audit tools for catching WASM build tag drift before it reaches the binary.
+- Tool sources (`doclinks`, `hookaudit`, `syncdocs`) moved from public `tools/` to private `stuff/tools/`. `tools/` now contains only the five committed public tools: `fsdispatchgen`, `klexfmt`, `kpkg`, `stdlibgen`, `tapetool`.
+
+---
+
+### LSP & Editor
+
+- 6 builtins added to frogLSP: `lineHeight`, `pushDisabled`, `popDisabled`, `setTheme`, `openURL`, `runScript` — with full signatures and documentation extracted from Go source comments.
+- VSCode syntax regex updated from 516 → 522 builtins.
+- `progressBar` arity corrected in the LSP (6 → 7 args).
+- syncdocs audit: 0 stale LSP entries, 0 VSCode syntax gaps.
+
+---
+
+### Documentation
+
+- **`docs/WASM.MD`** — new complete WASM guide: architecture, JavaScript API, WASM-specific builtins, platform limitations, parity testing, self-hosting infrastructure.
+- **`docs/BUILTINS.MD`** — regenerated (606 builtins, 49 categories).
+- **`docs/KLEX_LANGUAGE.MD`** + **`docs/KLEX_GRAMMAR.MD`** — new entries for `pushDisabled`, `popDisabled`, `setTheme`, `lineHeight`; `progressBar` corrected in both.
+- **`docs/STDLIB.MD`** — confirmed current (60 modules, 645 functions).
+- **`docs/BRIDGE_API_DESIGN.MD`** — new bridge API design reference.
+- 12 broken cross-document links fixed.
+- **README.md** — playground URL updated to `https://kmcnally5.github.io/FROG/`.
+
+---
+
+### Bug Fixes
+
+| Area | Fix |
+|---|---|
+| `progressBar` | Missing `min` parameter — Go source accepted 7 args; LSP, language doc, and grammar doc all said 6 |
+| Canvas2D text | `textTopInset` now uses `math.Abs()` on `alphabeticBaseline` — fixes vertical centering on Safari |
+| `serve.sh` (all) | All four WASM serve scripts were copying `wasm_exec.js` from `docs/playground/` (retired) — now use `stdlib/wasm/wasm_exec.js` |
+| `tests/wasm_worker/` | Committed `klex.wasm` binary removed from the repo |
+| `tests/wasm_worker/` | Duplicate `klex_bridge_worker.js` removed — canonical: `stdlib/worker/klex_bridge_worker.js` |
+
+---
+
+### Breaking Changes
+
+None. All existing desktop kLex scripts run unchanged. WASM scripts written against the REPL (`klex_eval`) continue to work. The `progressBar` `min` parameter was always required by the Go implementation — callers already passed it.
+
+---
+
+## v0.3.36 Release Notes
 
 ## Overview
 

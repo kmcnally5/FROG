@@ -430,10 +430,10 @@ var builtinSignatures = map[string]BuiltinInfo{
 	},
 
 	// Native Bridge (cross-language FFI via subprocess JSON-RPC)
-	"nativeBridge": {
-		Signature:     "nativeBridge(cmd: string, args: array, opts?: hash) -> (bridge, error)",
-		Documentation: "Start a subprocess and return a bridge for calling into it. The subprocess must speak the kLex bridge protocol: read line-delimited JSON from stdin, write results to stdout.\n\nProtocol:\n  receive: {\"id\":N,\"fn\":\"name\",\"args\":[...]}\n  reply:   {\"id\":N,\"result\":value}\n           {\"id\":N,\"error\":\"message\"}\n\nOptional opts hash:\n  timeout_seconds  — default per-call timeout in seconds (0 = no timeout)\n  max_response_mb  — max response size in MB, range [1, 256], default 1\n  stderr_log       — path to file capturing subprocess stderr\n\nWhen no stderr_log is set, the bridge keeps the last 4KB of stderr in memory and exposes it through bridgeStderr() and in error message tails.\n\nThe bridge is registered globally and force-killed if kLex exits or is signalled, preventing orphaned subprocesses.\n\nError codes returned in the second tuple element:\n  BRIDGE_OPTS_INVALID — bad value in the opts hash\n  BRIDGE_ERROR        — failed to start subprocess\n\nExample:\n  bridge, err = nativeBridge(\"python3\", [\"bridge.py\"], {\n      \"timeout_seconds\": 30,\n      \"max_response_mb\": 16,\n  })\n  if err != null { println(err.message)  return }",
-		Params:        []string{"cmd", "args", "opts"},
+	"bridgeOpen": {
+		Signature:     "bridgeOpen(transport: hash) -> (bridge, error)",
+		Documentation: "Transport-polymorphic bridge constructor. Dispatches on transport[\"kind\"]:\n  \"subprocess\" — spawn a subprocess and speak the kLex bridge protocol over stdin/stdout (only kind implemented today)\n  \"worker\"     — Web Worker (browser/WASM target; not yet implemented — returns BRIDGE_TRANSPORT_UNAVAILABLE)\n  \"remote\"     — TCP/QUIC remote bridge (future — returns BRIDGE_TRANSPORT_UNAVAILABLE)\n\nNamed `bridgeOpen` (not `bridge`) to match the bridgeXxx family (bridgeClose / bridgeCall / …) and to avoid shadowing the natural variable name. `let bridge, err = bridgeOpen({...})` is the idiomatic call shape.\n\nSubprocess transport hash schema:\n  kind:             \"subprocess\"   (required)\n  cmd:              string          (required — executable name or path)\n  args:             [string, ...]   (optional — argv tail)\n  timeout_seconds:  number          (optional — default per-call timeout)\n  max_response_mb:  int             (optional — wire-frame cap, 1..256)\n  stderr_log:       string          (optional — mirror bridge stderr here)\n\nKey validation is STRICT — any key not in the schema yields BRIDGE_TRANSPORT_MISCONFIGURED naming the bad key, so typos like \"tiemout_seconds\" fail loud instead of silently disabling the option.\n\nError codes returned in the second tuple element:\n  BRIDGE_TRANSPORT_MISCONFIGURED — missing required key, wrong type, or unknown key\n  BRIDGE_TRANSPORT_UNKNOWN       — `kind` value not recognised\n  BRIDGE_TRANSPORT_UNAVAILABLE   — `kind` recognised but not implemented in this build\n  BRIDGE_ERROR                   — failed to start subprocess\n\nExample:\n  let bridge, err = bridgeOpen({\n      \"kind\": \"subprocess\",\n      \"cmd\":  \"python3\",\n      \"args\": [\"bridge.py\"],\n      \"timeout_seconds\": 30,\n      \"max_response_mb\": 16\n  })\n  if err != null { println(err.message)  return }\n\nSee docs/BRIDGE_API_DESIGN.MD for the full design rationale.",
+		Params:        []string{"transport"},
 	},
 	"bridgeCall": {
 		Signature:     "bridgeCall(bridge, fn: string, args: array, timeoutSec?: number) -> (result, error)",
@@ -476,9 +476,9 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Params:        []string{"bridge", "fn", "args", "timeout"},
 	},
 	"bridgePool": {
-		Signature:     "bridgePool(n: int, cmd: string, args: array, opts?: hash) -> (pool, error)",
-		Documentation: "Start `n` identical bridge subprocesses and return them as a round-robin pool. Use this when you want to fan out the same workload across multiple workers without manually spawning and tracking each one.\n\nopts hash accepts every bridgeOpt key (timeout, stderr_log, maxBytes) plus a pool-only key:\n  init   — callable run once on each newly-started bridge. Use for per-bridge setup such as loading rules, opening a connection, or warming a cache. Receives the bridge as its single argument. Returning an Error (or a (result, err) tuple whose err is non-null, the bridgeCall shape) marks that bridge dead in the pool; callers can inspect bridgePoolHealth() to find out.\n\nOn partial spawn failure (e.g. cmd not found halfway through) every bridge already started is closed before the error is returned — no orphaned subprocesses.\n\nExample:\n  pool, err = bridgePool(16, \"python3\", [\"yara_bridge.py\"], {\n      \"timeout\": 30,\n      \"init\":    fn(b) {\n          _, e = bridgeCall(b, \"load\", [\"secrets.yar\"])\n          return e\n      }\n  })\n  if err != null { println(err.message)  return }",
-		Params:        []string{"n", "cmd", "args", "opts"},
+		Signature:     "bridgePool(n: int, transport: hash, opts?: hash) -> (pool, error)",
+		Documentation: "Start `n` identical bridges from a transport hash and return them as a round-robin pool. Use this when you want to fan out the same workload across multiple workers without manually spawning and tracking each one.\n\nThe transport hash takes the same shape as bridgeOpen() — kind, cmd, args, plus optional timeout_seconds / max_response_mb / stderr_log. Strict key validation; only kind=\"subprocess\" is implemented today.\n\nOptional opts hash holds pool-only configuration:\n  init  — callable run once on each newly-started bridge. Use for per-bridge setup such as loading rules, opening a connection, or warming a cache. Receives the bridge as its single argument. Returning an Error (or a (result, err) tuple whose err is non-null, the bridgeCall shape) marks that bridge dead in the pool; callers can inspect bridgePoolHealth() to find out.\n\nOn partial spawn failure (e.g. cmd not found halfway through) every bridge already started is closed before the error is returned — no orphaned subprocesses.\n\nExample:\n  pool, err = bridgePool(16, {\n      \"kind\": \"subprocess\",\n      \"cmd\":  \"python3\",\n      \"args\": [\"yara_bridge.py\"],\n      \"timeout_seconds\": 30\n  }, {\n      \"init\": fn(b) {\n          _, e = bridgeCall(b, \"load\", [\"secrets.yar\"])\n          return e\n      }\n  })\n  if err != null { println(err.message)  return }",
+		Params:        []string{"n", "transport", "opts"},
 	},
 	"bridgePoolCall": {
 		Signature:     "bridgePoolCall(pool, fn: string, args: array, timeoutSec?: number) -> (result, error)",
@@ -1285,12 +1285,12 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Params:        []string{"points"},
 	},
 	"lineChart": {
-		Signature:     "lineChart(data: array, x, y, w, h: float, min?: float, max?: float) -> null",
+		Signature:     "lineChart(data: array, x, y, w, h: float) | lineChart(data: array, x, y, w, h, min, max: float) -> null",
 		Documentation: "Draw a line chart of numeric data in the rect (x, y, w×h).\n\nUses the current fill() colour for the line and area fill (25% alpha). If min/max are omitted they are derived from the data.\n\nDraws: dark background, subtle axis lines, filled area, line, dot per point, accent border.\n\nExample:\n  fill(0.3, 0.7, 1.0, 1.0)\n  lineChart(durations, 10, 10, 400, 150)\n  lineChart(durations, 10, 10, 400, 150, 0.0, 10.0)",
 		Params:        []string{"data", "x", "y", "w", "h", "min", "max"},
 	},
 	"barChart": {
-		Signature:     "barChart(data: array, x, y, w, h: float, min?: float, max?: float) -> null",
+		Signature:     "barChart(data: array, x, y, w, h: float) | barChart(data: array, x, y, w, h, min, max: float) -> null",
 		Documentation: "Draw a vertical bar chart of numeric data in the rect (x, y, w×h).\n\nUses the current fill() colour for bars. Baseline is 0 unless min is provided. If max is omitted it is derived from the data.\n\nEach bar has a 15% gap. A dim track bar shows the full column height for context.\n\nExample:\n  fill(0.9, 0.4, 0.2, 1.0)\n  barChart(findingCounts, 10, 170, 400, 120)\n  barChart(findingCounts, 10, 170, 400, 120, 0.0, 50.0)",
 		Params:        []string{"data", "x", "y", "w", "h", "min", "max"},
 	},
@@ -1520,9 +1520,9 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Params:        []string{"label", "x", "y", "w", "value", "min", "max", "size"},
 	},
 	"progressBar": {
-		Signature:     "progressBar(x, y, w, h: int, value, max: float) -> null",
-		Documentation: "Display-only filled progress bar at (x, y) with size w×h. Fill fraction = value / max, clamped to [0, 1]. No interaction.\n\nMust be called between uiBegin() and uiEnd().",
-		Params:        []string{"x", "y", "w", "h", "value", "max"},
+		Signature:     "progressBar(x, y, w, h: int, value, min, max: float) -> null",
+		Documentation: "Display-only filled progress bar at (x, y) with size w×h. Fill fraction = (value - min) / (max - min), clamped to [0, 1]. No interaction.\n\nMust be called between uiBegin() and uiEnd().",
+		Params:        []string{"x", "y", "w", "h", "value", "min", "max"},
 	},
 	"dropdown": {
 		Signature:     "dropdown(label: string, items: array, x, y, w: int, size?: float) -> string",
@@ -1578,6 +1578,29 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Signature:     "popClip() -> null",
 		Documentation: "Pop the top clip rect from the stack and restore the one below it. If the stack is now empty, clipping is disabled entirely. Every pushClip must have exactly one matching popClip.",
 		Params:        []string{},
+	},
+
+	"pushDisabled": {
+		Signature:     "pushDisabled(disabled: bool) -> null",
+		Documentation: "Push a disabled-state frame. All interactive widgets drawn between pushDisabled(true) and popDisabled() render at half opacity and ignore hover/click. Stack-based so nested forms can selectively re-enable sections.\n\nMust be called between uiBegin() and uiEnd().",
+		Params:        []string{"disabled"},
+	},
+	"popDisabled": {
+		Signature:     "popDisabled() -> null",
+		Documentation: "Pop the top disabled-state frame pushed by pushDisabled(). Every pushDisabled must have exactly one matching popDisabled.\n\nMust be called between uiBegin() and uiEnd().",
+		Params:        []string{},
+	},
+
+	"setTheme": {
+		Signature:     "setTheme(name: string) -> null",
+		Documentation: "Install a preset theme by name. Valid names:\n  \"nebula\"       — deep violet + ice cyan (the default)\n  \"light\"        — clean light theme, blue accent\n  \"dark\"         — modern dark theme, blue accent\n  \"highContrast\" — accessibility: pure black/white + yellow accent\nSets both colour palette AND style tokens (radii, spacing, font base). Use uiTheme(palette) for fine-grained colour overrides.\n\nCall once at startup or on theme-switch. Must be called after window() opens.",
+		Params:        []string{"name"},
+	},
+
+	"lineHeight": {
+		Signature:     "lineHeight(scale?: float) -> int",
+		Documentation: "Pixel height of one line of widget text at scale (default 0.5). Useful for vertically centring text manually:\n  label(s, x, y + (h - lineHeight()) / 2)\n\nMust be called between uiBegin() and uiEnd().",
+		Params:        []string{"scale"},
 	},
 
 	"tabs": {
@@ -2484,5 +2507,21 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Signature:     "_tensor_where(mask: tensor, x: tensor|number, y: tensor|number) -> tensor",
 		Documentation: "Element-wise conditional selection: out[i] = x[i] if mask[i] != 0 else y[i]. mask must be an i64 tensor (typically the output of a comparison op). x and y must have the same dtype; either may be a scalar number (broadcast to mask's shape). All shapes must match mask's shape after scalar promotion. NumPy equivalent: np.where(condition, x, y).",
 		Params:        []string{"mask", "x", "y"},
+	},
+
+	// ── WASM / Browser-Only (//go:build js && wasm) ─────────────────────
+	// Registered only in the WebAssembly build that powers the kLex
+	// Playground IDE. They have no desktop equivalent — calling them in a
+	// desktop script is an undefined-builtin error. See docs/WASM.MD.
+
+	"runScript": {
+		Signature:     "runScript(src: string) -> hash",
+		Documentation: "WASM-only (browser playground). Evaluate src as a complete, isolated kLex program in a fresh environment and return a hash with keys \"output\" (printed text), \"error\" (message, empty on success) and \"isError\" (bool). Definitions do not persist between calls. Scripts that call window() are rejected — the canvas belongs to the playground IDE. Not available on desktop.",
+		Params:        []string{"src"},
+	},
+	"openURL": {
+		Signature:     "openURL(url: string) -> null",
+		Documentation: "WASM-only (browser playground). Open url in a new browser tab via window.open(url, \"_blank\"). Used by the playground's documentation links. Not available on desktop.",
+		Params:        []string{"url"},
 	},
 }

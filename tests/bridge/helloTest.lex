@@ -12,7 +12,7 @@
 //   { protocol, capabilities, helper, language, language_version }
 
 println("=== python helper bridge ===")
-let bridge, err = nativeBridge("python3", ["tests/examples/bridge/python_bridge.py"])
+let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": ["tests/bridge/python_bridge.py"]})
 if err != null {
     println("FAIL: python bridge failed to start: " + err.message)
     return
@@ -53,7 +53,7 @@ bridgeClose(bridge)
 
 println("")
 println("=== node helper bridge ===")
-bridge, err = nativeBridge("node", ["tests/examples/bridge/node_bridge.js"])
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "node", "args": ["tests/bridge/node_bridge.js"]})
 if err != null {
     println("FAIL: node bridge failed to start: " + err.message)
     return
@@ -84,7 +84,7 @@ bridgeClose(bridge)
 
 println("")
 println("=== legacy bridge (no __hello__) ===")
-bridge, err = nativeBridge("python3", ["tests/examples/bridge/old_bridge.py"])
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": ["tests/bridge/old_bridge.py"]})
 if err != null {
     println("FAIL: legacy bridge failed to start: " + err.message)
     return

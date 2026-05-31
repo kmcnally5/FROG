@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>kLex Worker Bridge Test</title>
+<style>
+body { font-family: -apple-system, system-ui, sans-serif; max-width: 800px; margin: 2em auto; padding: 0 1em; }
+pre { background: #111; color: #cfc; padding: 1em; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+button { font-size: 1em; padding: 0.5em 1em; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: wait; }
+h1 { font-size: 1.4em; }
+</style>
+</head>
+<body>
+
+<h1>kLex Worker Bridge Test</h1>
+<p>End-to-end test of <code>bridgeOpen({"kind": "worker", ...})</code>.
+The button below runs a kLex script (shown) that spawns
+<code>test_worker.js</code> as a Web Worker, calls a few handlers via
+<code>bridgeCall</code>, and prints the results.</p>
+
+<button id="run" disabled>Loading WASM…</button>
+
+<h3>kLex script</h3>
+<pre id="script"></pre>
+
+<h3>Output</h3>
+<pre id="output">(click Run)</pre>
+
+<script src="wasm_exec.js"></script>
+<script>
+const KLEX_SCRIPT = `
+// Spawn a Web Worker bridge — same API as subprocess bridges.
+let bridge, err = bridgeOpen({
+    "kind":   "worker",
+    "script": "test_worker.js"
+})
+if err != null {
+    println("FAIL: bridge open: " + err.message)
+    return
+}
+println("✓ worker bridge opened")
+
+// Introspect what the worker told us during the __hello__ handshake.
+let info = bridgeInfo(bridge)
+println("  protocol:     " + str(info["protocol"]))
+println("  language:     " + info["language"])
+println("  helper:       " + info["helper"])
+println("  capabilities: " + str(info["capabilities"]))
+
+// Call a few handlers.
+let sum, e = bridgeCall(bridge, "add", [2, 3])
+if e != null { println("FAIL add: " + e.message) } else { println("✓ add(2,3) = " + str(sum)) }
+
+let greet, e2 = bridgeCall(bridge, "greet", ["kLex"])
+if e2 != null { println("FAIL greet: " + e2.message) } else { println("✓ greet = " + greet) }
+
+let len, e3 = bridgeCall(bridge, "strlen", ["the quick brown fox"])
+if e3 != null { println("FAIL strlen: " + e3.message) } else { println("✓ strlen = " + str(len)) }
+
+let stats, e4 = bridgeCall(bridge, "stats", [[10, 20, 30, 40]])
+if e4 != null { println("FAIL stats: " + e4.message) } else {
+    println("✓ stats.count = " + str(stats["count"]))
+    println("✓ stats.sum   = " + str(stats["sum"]))
+    println("✓ stats.mean  = " + str(stats["mean"]))
+}
+
+bridgeClose(bridge)
+println("")
+println("✓ bridge closed cleanly — worker terminated")
+`;
+
+document.getElementById('script').textContent = KLEX_SCRIPT.trim();
+
+(async () => {
+    const go = new Go();
+    const buf = await fetch('klex.wasm').then(r => r.arrayBuffer());
+    const { instance } = await WebAssembly.instantiate(buf, go.importObject);
+    go.run(instance);
+
+    // klex_eval is registered by the WASM's init().
+    document.getElementById('run').disabled = false;
+    document.getElementById('run').textContent = 'Run';
+
+    document.getElementById('run').addEventListener('click', async () => {
+        document.getElementById('output').textContent = 'running…';
+        // klex_eval returns a Promise — runs in a Go goroutine so the
+        // JS event loop is free to deliver worker postMessage events
+        // back into Go while the script runs.
+        const result = await globalThis.klex_eval(KLEX_SCRIPT);
+        const out = (result.output || '') + (result.error ? '\n[error] ' + result.error : '');
+        document.getElementById('output').textContent = out || '(no output)';
+    });
+})().catch(e => {
+    document.getElementById('output').textContent = 'WASM load failed: ' + e;
+});
+</script>
+
+</body>
+</html>

@@ -40,7 +40,16 @@
 // All three are wired via `go:generate` directives. Running
 // `go generate ./vm/...` regenerates every derived file from
 // scratch — no manual sync, no drift.
+//
+// vmbuiltins is also available as a pre-built binary at bin/vmbuiltins
+// for direct invocation (e.g. from serve.sh). Build it once with:
+//
+//	go build -o bin/vmbuiltins ./vm/cmd/vmbuiltins
+//
+// The go:generate directive below calls the pre-built binary so that
+// repeated regeneration (e.g. during serve.sh) does not pay a compile
+// cost. If bin/vmbuiltins is absent, rebuild it with the command above.
 
-//go:generate go run ./cmd/vmbuiltins
+//go:generate ../bin/vmbuiltins
 
 package vm

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kLex Playground — FROG in the browser</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="shell">
+  <canvas id="klex-canvas" width="1280" height="820"></canvas>
+  <div class="toolbar">
+    <button id="run-btn" disabled>Loading…</button>
+    <span id="status"></span>
+  </div>
+</div>
+
+<script src="wasm_exec.js"></script>
+<script>
+// Cmd+Enter (or Ctrl+Enter) triggers Run from anywhere on the page.
+document.addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        window.__klex_run_requested = true;
+    }
+});
+
+</script>
+<script>
+(async () => {
+    const status  = document.getElementById('status');
+    const runBtn  = document.getElementById('run-btn');
+    const bust    = '?v=' + Date.now();
+
+    const [scriptResp, wasmResp] = await Promise.all([
+        fetch('playground.lex' + bust),
+        fetch('klex.wasm'      + bust),
+    ]);
+
+    if (!scriptResp.ok) { status.textContent = 'Failed to load playground.lex'; return; }
+    if (!wasmResp.ok)   { status.textContent = 'Failed to load klex.wasm';      return; }
+
+    const scriptText = await scriptResp.text();
+    const wasmBuffer = await wasmResp.arrayBuffer();
+
+    const go = new Go();
+    const { instance } = await WebAssembly.instantiate(wasmBuffer, go.importObject);
+    go.run(instance);
+
+    runBtn.disabled  = false;
+    runBtn.textContent = 'Run playground';
+
+    runBtn.addEventListener('click', async () => {
+        runBtn.disabled = true;
+        status.textContent = 'starting…';
+        try {
+            const result = await globalThis.klex_eval(scriptText);
+            if (result.isError || result.error) {
+                status.textContent = 'error — see console';
+                console.error('klex_eval:', result);
+            } else {
+                status.textContent = 'running';
+                runBtn.textContent  = 'Restart';
+                runBtn.disabled = false;
+            }
+        } catch (e) {
+            status.textContent = 'js error: ' + (e && e.message || e);
+            runBtn.disabled = false;
+            console.error(e);
+        }
+    });
+
+    // Auto-start after a short tick so the Go runtime is fully settled.
+    setTimeout(() => runBtn.click(), 80);
+})().catch(e => {
+    document.getElementById('status').textContent = 'init failed: ' + (e && e.message || e);
+    console.error(e);
+});
+</script>
+
+</body>
+</html>

@@ -630,6 +630,19 @@ var MarkExternalUpvaluesShared = func(fn Object) {
 // invocations leave it unset and never pay the VM compile cost.
 var VMCompileAndRunModule func(prog *ast.Program, scriptDir string) (env *Environment, errObj Object)
 
+// VMRunScript is the WASM hook for delegating isolated full-program
+// execution to the bytecode VM. cmd/wasm/main.go wires this at init()
+// time. When set, the runScript builtin (builtins_eval_wasm.go) tries
+// the VM first and falls back to tree-walker Eval on compile error.
+//
+// Returns (result, true) when the VM compiled and ran the program —
+// result may itself be an *Error if the program failed at runtime.
+// Returns (nil, false) when the compiler rejected the program (e.g.
+// unimplemented AST arm) — the caller falls through to Eval.
+//
+// nil by default — non-WASM and pure-tree-walker builds leave it unset.
+var VMRunScript func(prog *ast.Program) (Object, bool)
+
 // IsExternalCallable is a companion predicate to ExternalCallable. It
 // lets eval-side type checks recognise types that ExternalCallable
 // would dispatch (notably *CompiledFunction from the VM) WITHOUT

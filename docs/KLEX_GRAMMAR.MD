@@ -756,10 +756,10 @@ These are not grammar rules but are listed here because they shape what programs
 
 *(always in scope — no import required)*
 
-**Extracted from source:** run `go run ./tools/syncdocs` to audit builtins
-against LSP, VS Code syntax, LANGUAGE.TXT, and this file. (The legacy
-`tools/docwalk/extract_builtins.go` still works for a quick name dump but is
-superseded by syncdocs.)
+**Extracted from source.** The builtin list below is generated from the Go
+source and kept in sync with the language server (LSP) and the VS Code syntax
+definition, so it always reflects the builtins the interpreter actually
+registers.
 
 ### Output & Input
 
@@ -1057,7 +1057,7 @@ kLex communicates with subprocesses via line-delimited JSON over stdin/stdout. A
 - Receive on stdin: `{"id": N, "fn": "name", "args": [...]}`
 - Send on stdout:   `{"id": N, "result": value}` or `{"id": N, "error": "message"}`
 
-* `nativeBridge(cmd: STRING, args: ARRAY)` → `(BRIDGE, error)` — start subprocess; `args` is an array of string arguments
+* `bridgeOpen(transport: HASH)` → `(BRIDGE, error)` — start a bridge from a transport hash. Subprocess transport requires `"kind": "subprocess"` plus `"cmd"` (and optional `"args"`); see KLEX_LANGUAGE.MD for the full schema
 * `bridgeCall(bridge: BRIDGE, fn: STRING, args: ARRAY)` → `(result, error)` — call a function; all kLex types marshal to JSON automatically; calls are serialised (safe from async tasks)
 * `bridgeClose(bridge: BRIDGE)` → `null` — send EOF to subprocess and wait for it to exit
 
@@ -1344,7 +1344,7 @@ Always pass values as an `ARRAY` argument — never interpolate into the SQL str
 * `bridgeStream(bridge, fn, args [, timeout])` → `(CHANNEL, error)` — streaming call; one channel item per yielded message
 * `bridgeNotifications(bridge)` → `CHANNEL` — unsolicited notifications from the subprocess
 * `bridgeMetrics(bridge)` → `HASH` — counters + per-function p50/p95/p99 latency
-* `bridgePool(n: INTEGER, cmd: STRING, args: ARRAY [, opts: HASH])` → `(POOL, error)` — spawn N identical workers
+* `bridgePool(n: INTEGER, transport: HASH [, opts: HASH])` → `(POOL, error)` — spawn N identical workers from a transport hash; `opts` holds pool-only keys (e.g. `init`)
 * `bridgePoolCall(pool, fn, args [, timeout])` → `(any, error)` — call via idle worker
 * `bridgePoolStream(pool, fn, args [, timeout])` → `(CHANNEL, error)` — streaming variant
 * `bridgePoolHealth(pool)` → `HASH` — per-worker health + restart history
@@ -1589,7 +1589,8 @@ if keyPressed("TAB") {
 ### Display Widgets
 
 * `label(text: STRING, x, y: INTEGER [, size: FLOAT])` — static text label; size = text scale (default 0.5)
-* `progressBar(x, y, w, h: INTEGER, value, max: FLOAT)` — display-only filled bar; fill fraction = value / max; no interaction
+* `progressBar(x, y, w, h: INTEGER, value, min, max: FLOAT)` — display-only filled bar; fill fraction = (value − min) / (max − min), clamped [0, 1]; no interaction
+* `lineHeight([scale: FLOAT])` → `INTEGER` — pixel height of one line of widget text at scale (default 0.5); useful for vertical centering: `y + (h - lineHeight()) / 2`
 
 ### Interactive Widgets
 
@@ -1624,6 +1625,11 @@ if keyPressed("TAB") {
 ### Context Menu
 
 * `contextMenu(x, y: INTEGER, items: ARRAY, visible: BOOL [, size: FLOAT])` → `INTEGER` — floating popup menu; call after all other widgets; returns index of clicked item, -1 if none, -2 if clicked outside (dismiss)
+
+### Disabled State
+
+* `pushDisabled(disabled: BOOL)` → `null` — push disabled state; all interactive widgets between `pushDisabled(true)` and `popDisabled()` render at half opacity and ignore hover/click; stack-based so nested regions can selectively re-enable
+* `popDisabled()` → `null` — pop the top disabled frame; every `pushDisabled` must have a matching `popDisabled`
 
 ### Notifications
 
@@ -1666,6 +1672,7 @@ All layout cursor builtins must be called between `uiBegin()` and `uiEnd()`.
 
 * `makeTheme()` → `ARRAY` — return the 13-slot default palette; each slot is a `[r, g, b, a]` float array; modify slots then call `uiTheme()`
 * `uiTheme(palette: ARRAY)` → `null` — install a 13-slot palette as the global widget color theme; all widgets read from this palette each frame
+* `setTheme(name: STRING)` → `null` — install a preset theme by name; valid: `"nebula"` (default), `"light"`, `"dark"`, `"highContrast"`; sets colour palette and style tokens (radii, spacing, font); call after `window()` opens
 
 Slot index reference:
 
@@ -1684,6 +1691,13 @@ Slot index reference:
 | 10 | handle | slider handle, scrollbar thumb, checkmark |
 | 11 | inputBg | text input / list container background |
 | 12 | inputFocusBg | focused text input background |
+
+### WASM / Browser-Only Builtins
+
+These two builtins are registered **only** in the WebAssembly build (`//go:build js && wasm`) and have no desktop equivalent. They support the browser-hosted kLex Playground IDE. See [WASM.MD](WASM.MD) for the full WASM reference.
+
+* `runScript(src: STRING)` → `HASH` — evaluate `src` as a complete, isolated kLex program in a fresh environment; returns a hash with keys `output` (printed text), `error` (message, empty on success) and `isError` (bool); definitions do not persist between calls; scripts calling `window()` are rejected
+* `openURL(url: STRING)` → `null` — open `url` in a new browser tab via `window.open(url, "_blank")`
 
 ---
 

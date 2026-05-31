@@ -24,6 +24,7 @@ import "stdlib/ai/ai_common.lex"  as ai
 import "stdlib/mcp.lex"           as mcp
 import "stdlib/retry.lex"         as retry
 import "stdlib/mtl_fx.lex"        as fx
+import "stdlib/bridge.lex"        as br
 import "stdlib/bridgeMonitor.lex" as monitor
 
 
@@ -179,7 +180,7 @@ fn tryBridge(commands, scriptArgs, opts) {
     let i = 0
     let n = len(commands)
     while i < n {
-        let b, err = nativeBridge(commands[i], scriptArgs, opts)
+        let b, err = bridgeOpen(br.subprocessTransport(commands[i], scriptArgs, opts))
         if err == null { return b, null }
         lastErr = err
         i = i + 1
@@ -2508,7 +2509,7 @@ fn drawMainUI(W, H) {
     fillC(theme["mainLabel"])
     prompt = textArea("Prompt · (Cmd+V to paste)",
                       prompt, panelX + 20, cy + 22, panelW - 40, 130, 0.5)
-    cy = cy + 162
+    cy = cy + 174
 
     // ── Negative prompt (avoid:) ──────────────────────────────────────────
     // Smaller text area; default is the canonical SD 1.5 baseline. User can
@@ -2517,7 +2518,7 @@ fn drawMainUI(W, H) {
     fillC(theme["mainLabel"])
     negPrompt = textArea("Negative prompt · (avoid:)",
                          negPrompt, panelX + 20, cy + 22, panelW - 40, 56, 0.45)
-    cy = cy + 92
+    cy = cy + 104
 
     // ── Style preset (suffix appended at gen time, prompt stays clean) ────
     fillC(theme["mainLabel"])
@@ -2526,7 +2527,7 @@ fn drawMainUI(W, H) {
                     "oil painting", "cyberpunk", "studio ghibli style", "flat vector art"]
     stylePreset = dropdown("", styleOptions,
                            panelX + 80, cy + 4, panelW - 100, 0.45)
-    cy = cy + 38
+    cy = cy + 46
 
     // ── Enhance with Claude ───────────────────────────────────────────────
     let enhanceLabel = "✨  Enhance with Claude"
@@ -2542,7 +2543,7 @@ fn drawMainUI(W, H) {
         let tw = textWidth(uiFont, enhanceLabel, 0.42)
         say(enhanceLabel, panelX + 20 + (panelW - 40 - tw) / 2, cy + 8, 0.42)
     }
-    cy = cy + 38
+    cy = cy + 46
     if len(enhanceErr) > 0 {
         fillC(theme["crit"])
         cy = drawWrapped("✨ " + enhanceErr, panelX + 20, cy, 56, 0.4)
@@ -2557,16 +2558,16 @@ fn drawMainUI(W, H) {
         lockRatio = float(imgW) / float(imgH)
     }
     lockAspect = newLock
-    cy = cy + 38
+    cy = cy + 46
 
     let prevW = imgW
     let prevH = imgH
     imgW = int(slider("Width: " + str(imgW) + " px",
                       panelX + 20, cy + 16, panelW - 40, imgW, 256, 1280, 0.45))
-    cy = cy + 42
+    cy = cy + 50
     imgH = int(slider("Height: " + str(imgH) + " px",
                       panelX + 20, cy + 16, panelW - 40, imgH, 256, 1280, 0.45))
-    cy = cy + 52
+    cy = cy + 60
 
     // Propagate aspect lock: whichever slider moved this frame drives the
     // other. Both clamps mirror the sliders' own 256-1280 bounds so we never
@@ -2596,7 +2597,7 @@ fn drawMainUI(W, H) {
         useImg2Img = newImg2Img
         if !useImg2Img { clearInitImage() }   // turning off clears state
     }
-    cy = cy + 28
+    cy = cy + 38
 
     if useImg2Img {
         // Drop zone: dashed-style rectangle, 120px tall. Two visual states:
@@ -2667,7 +2668,7 @@ fn drawMainUI(W, H) {
         let tw = textWidth(uiFont, lbl, 0.5)
         say(lbl, panelX + 20 + (panelW - 40 - tw) / 2, cy + 12, 0.5)
     }
-    cy = cy + 54
+    cy = cy + 62
 
     // ── Load image (post-generation alternative) ─────────────────────────
     // Bring in any existing RGBA image from disk for adjusting. Drag-drop
@@ -4872,7 +4873,7 @@ if tadpoleMcpErr != null {
 }
 
 uiSetFont(uiFont)
-window(1280, 820, "Tadpole — AI Image Generator", drawFrame)
+window(1280, 943, "Tadpole — AI Image Generator", drawFrame)
 
 if tadpoleMcpSrv != null {
     _mcpStopServer(tadpoleMcpSrv)

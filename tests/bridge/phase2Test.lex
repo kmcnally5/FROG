@@ -5,7 +5,7 @@
 
 import "stdlib/bridge.lex" as br
 
-const BRIDGE_PATH = "tests/examples/bridge/robustness_bridge.py"
+const BRIDGE_PATH = "tests/bridge/robustness_bridge.py"
 
 let passCount = 0
 let failCount = 0
@@ -24,7 +24,7 @@ fn expect(label, ok) {
 println("")
 println("── 1. Notifications stream during slow call ─────────────────────────")
 
-let bridge, err = nativeBridge("python3", [BRIDGE_PATH])
+let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH]})
 expect("bridge starts", err == null)
 if err == null {
     let notifCh = bridgeNotifications(bridge)
@@ -65,7 +65,7 @@ if err == null {
 println("")
 println("── 2. Concurrent calls on one bridge ────────────────────────────────")
 
-bridge, err = nativeBridge("python3", [BRIDGE_PATH])
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH]})
 expect("bridge starts", err == null)
 if err == null {
     // Launch 4 concurrent calls with different delays — shorter delays should
@@ -158,7 +158,7 @@ expect("withBridge returns result", err == null && result == "one-shot")
 println("")
 println("── 7. Error classification helpers ──────────────────────────────────")
 
-bridge, err = nativeBridge("python3", [BRIDGE_PATH])
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [BRIDGE_PATH]})
 if err == null {
     let _, kerr = bridgeCall(bridge, "kill_self", [])
     expect("isRetriable(BRIDGE_CLOSED) = true", br.isRetriable(kerr))

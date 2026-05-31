@@ -1,8 +1,8 @@
 # kLex — FROG Language Runtime
 
-> **A high-performance interpreted language for native tooling, scanners, terminals, IDEs, and concurrent desktop utilities.**
+> **A high-performance interpreted language for native tooling, browser applications, cross-language pipelines, and AI-ready concurrent utilities.**
 
-kLex is the reference implementation of FROG — a runtime built for a specific class of program: parallel file scanners, native GUI applications, high-throughput pipelines, and concurrent desktop utilities.
+kLex is the reference implementation of FROG — a runtime built for a specific class of program: parallel file scanners, native GUI applications, browser tools, cross-language pipelines, and AI-accelerated concurrent utilities.
 
 It is not a general-purpose language. It is a runtime for people who want to build real tools fast.
 
@@ -20,9 +20,11 @@ It is not a general-purpose language. It is a runtime for people who want to bui
 |---|---|
 | **Native tooling** | File scanners, credential hunters, pipeline processors |
 | **Concurrent desktop utilities** | GUI apps that stay responsive under load |
+| **Browser / WASM** | Same scripts, same UI toolkit, running in-browser with no rewrite |
+| **Cross-language bridges** | Call Python, Node.js, or any subprocess from FROG with a typed schema and streaming |
+| **AI / ML primitives** | Tensor ops, embeddings, and model inference baked into the runtime |
 | **High-throughput scripting** | Parallel workloads without a compiled toolchain |
-| **Systems-style interpreted execution** | Explicit state, explicit channels, no hidden behaviour |
-| **Immediate-mode GUI** | OpenGL window + SDF rendering baked into the runtime |
+| **Immediate-mode GUI** | OpenGL on desktop, Canvas2D in the browser — same widget code |
 | **Channel-oriented concurrency** | Channels are a language primitive, not a library add-on |
 
 ---
@@ -43,9 +45,27 @@ A full parallel security scanner built entirely in FROG. Scans codebases and git
 
 ## Try it Online
 
-**[Launch the kLex REPL](https://kmcnally5.github.io/FROG/playground/)** — run kLex code directly in your browser, no installation required.
+**[Launch the kLex REPL](https://kmcnally5.github.io/FROG/)** — run FROG code directly in your browser, no installation required. Multi-line input, persistent session state, full stdlib. Powered by the WASM build — [see below](#wasm--frog-in-the-browser).
 
-The REPL supports multi-line input (automatically detects when blocks are complete) and maintains session state — define variables and functions, then use them in subsequent lines.
+---
+
+## Screenshots
+
+<p align="center">
+  <a href="docs/images/screenshot2.png"><img src="docs/images/screenshot2.png" width="32%" alt="Secret Hunter — credential scanner with native OpenGL GUI"></a>
+  &nbsp;
+  <a href="docs/images/screenshot1.png"><img src="docs/images/screenshot1.png" width="32%" alt="kLex Playground — WASM browser IDE"></a>
+  &nbsp;
+  <a href="docs/images/screenshot3.png"><img src="docs/images/screenshot3.png" width="32%" alt="tadPole — AI image generator built in FROG"></a>
+</p>
+
+<p align="center">
+  <em>Secret Hunter (native OpenGL GUI)</em>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <em>kLex Playground (browser · WASM)</em>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <em>tadPole AI image generator</em>
+</p>
 
 ---
 
@@ -103,7 +123,7 @@ No hidden type coercion. No implicit threading. No magic. Every behaviour in a F
 
 ## Install
 
-Requires Go 1.22+.
+Requires Go 1.26+.
 
 ```bash
 git clone https://github.com/kmcnally5/FROG
@@ -113,6 +133,18 @@ go build -o klex .
 ```
 
 The built `klex` binary auto-discovers `stdlib/` next to itself, so scripts that `import "stdlib/..."` work from any directory — no `KLEX_PATH` configuration needed when the binary and stdlib stay together.
+
+### Build the full toolchain
+
+`go build -o klex .` is all you need to run programs. To build the interpreter **and** every bundled tool (`klexfmt`, `tapetool`, `kpkg`, `froglsp`, the WASM generators, …) in one shot, use the cross-platform builder:
+
+```bash
+go run ./tools/build          # klex + all tools → ./bin/
+go run ./tools/build --wasm   # also build the WASM playground bundle → ./bin/klex.wasm
+go run ./tools/build --list   # show what would be built, without compiling
+```
+
+It's a small Go program (no make, no shell scripts — works identically on Windows, Linux, and macOS) that discovers the tools by scanning the source tree, so it never goes out of date. The output `bin/` directory is generated build output and is gitignored — nothing in it ships; you rebuild it from source whenever you like.
 
 ---
 
@@ -197,6 +229,80 @@ The VM is under active development. The vast majority of the language is support
 
 ---
 
+## WASM — FROG in the Browser
+
+kLex compiles to WebAssembly (`GOOS=js GOARCH=wasm`). The same language that drives a native GPU-accelerated scanner runs directly in a browser tab, no installation required.
+
+```bash
+cd examples/playground && ./serve.sh   # build + serve in one step
+```
+
+| Capability | How it works |
+|---|---|
+| **Zero-install distribution** | Paste a URL, run FROG — no package manager, no friction |
+| **Full UI toolkit** | 35+ widgets (buttons, tables, charts, text input) via Canvas2D — identical code to the desktop |
+| **Embedded stdlib** | Every stdlib module is baked into the binary; `import "stdlib/json.lex"` resolves from memory |
+| **OPFS persistence** | `opfs://` URL scheme gives scripts persistent sandboxed storage; survives page reloads |
+| **Persistent REPL + isolated VM** | `klex_eval` keeps session state; `runScript` runs a fresh VM environment per call |
+| **Worker bridge** | Call any JS library from FROG via Web Workers — same bridge API as desktop subprocesses |
+| **JS interop** | Three exports: `klex_eval`, `klex_reset`, `klex_depth` |
+
+Filesystem I/O, subprocesses, Metal/tensor, and database drivers are unavailable in the browser sandbox. Everything else runs as-is.
+
+Full details: [docs/WASM.MD](docs/WASM.MD).
+
+---
+
+## Cross-language Bridges
+
+FROG scripts call Python, Node.js, or any subprocess directly via the bridge protocol — typed JSON-over-stdio with schema introspection, streaming, and backpressure. The calling side is three lines:
+
+```frog
+let bridge, err = bridgeOpen("./my_bridge.py")
+let result, err = bridgeCall(bridge, "analyse", [data])
+bridgeClose(bridge)
+```
+
+The bridge worker handles type validation, streaming responses, and cancellation automatically. In the browser, the same API maps to Web Workers — call any JS library from kLex without leaving FROG.
+
+---
+
+## Agentic Hooks — the Runtime Talks Back
+
+FROG programs are observable. Every significant runtime event fires through a structured hook layer that external tools — including LLMs — can watch in real time.
+
+| Hook | Fires when |
+|---|---|
+| `error` | A TypeError or RuntimeError is raised |
+| `async_spawn` | An `async()` call creates a new task |
+| `async_done` | A task completes |
+| `ui_event` | A widget fires a user interaction |
+| `bridge` | A native bridge call is made or returns |
+
+Every event carries a `caused_by` ID — the full causal graph of a concurrent program is reconstructable without touching the source.
+
+### `--record-tape`
+
+```bash
+go run ./tools/tapetool record my_app.lex
+go run ./tools/tapetool show my_app-20260529.lextape --filter error   # usually all you need
+```
+
+### LLM-assisted remote debugging
+
+The tape streams as the program runs. An LLM can observe a live FROG app while a human drives the UI — no source changes, no rebuild:
+
+```bash
+KLEX_PATH=. go run ./tools/tapetool record --output /tmp/debug.lextape my_app.lex
+tail -f /tmp/debug.lextape | grep --line-buffered '"kind":"error"'
+```
+
+**Real example:** SecretHunter's UI was flickering on every frame. A one-minute tape session caught `progressBar expects 7 arguments` firing at 60fps — silently aborting the render loop mid-draw, every frame. The same mechanism caught a 2310-errors-per-second storm in another app that looked like an unresponsive UI from the outside.
+
+It turns out "give an AI a live window into your program's runtime" is an unreasonably effective debugging strategy.
+
+---
+
 ## Why kLex exists
 
 Most interpreted languages treat concurrency as an afterthought — async/await sugar over an event loop, or a GIL that makes threading a lie. FROG treats concurrency as the execution model.
@@ -233,9 +339,11 @@ The restraint is intentional. No decorators, no metaclasses, no reactive state s
 
 **macOS** is the primary development platform. Every release passes the full master test suite before tagging.
 
-**Windows** — v0.3.35 passes 45 of 47 stdlib tests on a fresh install (the two failures are test-content portability issues, not interpreter bugs). v0.3.36 and the bytecode VM are untested on Windows.
+**WASM** — 59/90 unit tests pass under `go run ./tools/wasmsmoke`. The 31 failures are pre-existing platform limitations (filesystem, subprocess, database, Metal/tensor) — not interpreter bugs.
 
-**Linux** — v0.3.35 has been verified and is working. v0.3.36 and the bytecode VM are untested on Linux.
+**Windows** — v0.3.35 passes 45 of 47 stdlib tests on a fresh install (the two failures are test-content portability issues, not interpreter bugs). v0.3.37 is untested on Windows.
+
+**Linux** — v0.3.35 has been verified and is working. v0.3.37 is untested on Linux.
 
 If you hit anything platform-specific, a GitHub issue with reproduction steps is the fastest way to get it looked at.
 

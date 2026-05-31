@@ -1332,7 +1332,7 @@ let YARA_WORKERS = 16
 
 // startYaraBridge — kept for standalone / CLI use (yaraTest.lex etc.)
 fn startYaraBridge(rulesFile) {
-    let bridge, err = nativeBridge("python3", [_scriptDir() + "/yara_bridge.py"])
+    let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [_scriptDir() + "/yara_bridge.py"]})
     if err != null { return null, err }
     _, err = bridgeCall(bridge, "load", [rulesFile])
     if err != null {
@@ -1377,7 +1377,7 @@ fn _yaraFlushBatch(bridge, batch, batchCount, accum, accumCount) {
 // "severity":...}) feed the sidebar tiles and per-file events
 // ({"phase":"yara_progress", "done":1}) tick the progress bar.
 fn scanYaraChunkBatch(rulesFile, files, startIdx, endIdx, progressCh) {
-    let bridge, err = nativeBridge("python3", [_scriptDir() + "/yara_bridge.py"])
+    let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [_scriptDir() + "/yara_bridge.py"]})
     if err != null { return makeArray(0) }
 
     _, err = bridgeCall(bridge, "load", [rulesFile])
@@ -1528,7 +1528,7 @@ let ENTROPY_WORKERS = 16
 // "entropy_progress", "done": 1} for the progress bar. The CLI path passes
 // progressCh = null and just collects results.
 fn scanEntropyChunk(files, startIdx, endIdx, progressCh) {
-    let bridge, err = nativeBridge("python3", [_scriptDir() + "/yara_bridge.py"])
+    let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": [_scriptDir() + "/yara_bridge.py"]})
     if err != null { return makeArray(0) }
 
     let chunkSize = endIdx - startIdx
@@ -1707,7 +1707,7 @@ fn enrichWithJWT(findings, doJWT) {
         i = i + 1
     }
 
-    let bridge, err = nativeBridge("node", [_scriptDir() + "/jwt_bridge.js"])
+    let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "node", "args": [_scriptDir() + "/jwt_bridge.js"]})
     if err != null {
         // Decode is optional — if Node isn't installed or the bridge fails to
         // start, leave findings untouched rather than failing the whole scan.
@@ -1969,7 +1969,7 @@ fn runOrgScan(orgUrl, cfg, maxSizeMB, progressCh) {
     let totalStart = _timeNanos()
 
     // Start the bridge process
-    let bridge, berr = nativeBridge(python, [bridgePath])
+    let bridge, berr = bridgeOpen({"kind": "subprocess", "cmd": python, "args": [bridgePath]})
     if berr != null {
         return {
             "error": "Could not start github_bridge.py: " + berr.message,

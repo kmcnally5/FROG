@@ -33,7 +33,7 @@
 // ── ResilientBridge struct ────────────────────────────────────────────────────
 
 struct ResilientBridge {
-    _cmd, _args, _opts, _maxRetries, _failures, _circuitOpen, _bridge
+    _transport, _maxRetries, _failures, _circuitOpen, _bridge
 
     // call(fn, callArgs) → (result, err)
     // Calls fn with callArgs. On BRIDGE_CLOSED or BRIDGE_TAINTED, attempts up
@@ -126,7 +126,7 @@ struct ResilientBridge {
 
     fn _restart() {
         bridgeClose(self._bridge)
-        let newBridge, err = nativeBridge(self._cmd, self._args, self._opts)
+        let newBridge, err = bridgeOpen(self._transport)
         if err != null { return err }
 
         // Health check — bridges that implement health_check() confirm they
@@ -143,12 +143,34 @@ struct ResilientBridge {
     }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// subprocessTransport(cmd, args, opts?) → hash
+//
+// Build a subprocess transport hash for bridgeOpen() / bridgePool(). Copies
+// the bridge-transport keys (timeout_seconds, max_response_mb, stderr_log)
+// out of opts and ignores anything else, so it's safe to pass a hash that
+// also contains non-transport keys (max_retries, require_deps, etc.).
+//
+// Example:
+//   t = br.subprocessTransport("python3", ["worker.py"], {"timeout_seconds": 30})
+//   b, err = bridgeOpen(t)
+fn subprocessTransport(cmd, args, opts) {
+    let t = {"kind": "subprocess", "cmd": cmd, "args": args}
+    if opts != null {
+        if opts["timeout_seconds"] != null { t["timeout_seconds"] = opts["timeout_seconds"] }
+        if opts["max_response_mb"] != null { t["max_response_mb"] = opts["max_response_mb"] }
+        if opts["stderr_log"]      != null { t["stderr_log"]      = opts["stderr_log"]      }
+    }
+    return t
+}
+
 // ── Constructor ───────────────────────────────────────────────────────────────
 
 // newResilient(cmd, args, opts?) → (ResilientBridge, err)
 //
 // Creates a bridge and wraps it in a ResilientBridge. Options:
-//   All nativeBridge opts are forwarded (timeout_seconds, max_response_mb, stderr_log).
+//   All bridgeOpen transport keys are forwarded (timeout_seconds, max_response_mb, stderr_log).
 //   max_retries     — how many consecutive BRIDGE_CLOSED/BRIDGE_TAINTED failures
 //                     before the circuit opens (default: 3)
 //   require_deps    — if true, calls check_deps() on startup and returns an error
@@ -161,7 +183,8 @@ fn newResilient(cmd, args, opts) {
         if opts["require_deps"] != null { requireDeps = opts["require_deps"] }
     }
 
-    let b, err = nativeBridge(cmd, args, opts)
+    let transport = subprocessTransport(cmd, args, opts)
+    let b, err = bridgeOpen(transport)
     if err != null { return null, err }
 
     if requireDeps == true {
@@ -185,9 +208,7 @@ fn newResilient(cmd, args, opts) {
     }
 
     let rb = ResilientBridge {
-        _cmd:         cmd,
-        _args:        args,
-        _opts:        opts,
+        _transport:   transport,
         _maxRetries:  maxRetries,
         _failures:    0,
         _circuitOpen: false,
@@ -208,7 +229,7 @@ fn newResilient(cmd, args, opts) {
 //       return bridgeCall(b, "do_work", [input])
 //   })
 fn withBridge(cmd, args, opts, callback) {
-    let b, err = nativeBridge(cmd, args, opts)
+    let b, err = bridgeOpen(subprocessTransport(cmd, args, opts))
     if err != null { return null, err }
     let result, cerr = safe(fn() { return callback(b) })
     bridgeClose(b)

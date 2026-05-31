@@ -13,7 +13,7 @@
 // streamTest + cancelTest cover for Python. One file because each section
 // is short.
 
-let bridge, err = nativeBridge("node", ["tests/examples/bridge/node_bridge.js"])
+let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "node", "args": ["tests/bridge/node_bridge.js"]})
 if err != null {
     println("bridge failed to start: " + err.message)
     return

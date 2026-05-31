@@ -231,7 +231,7 @@ The causal `caused_by` chain means an agent does not need to correlate events by
 
 ## `tapetool`
 
-`bin/tapetool` is the companion command-line tool for working with `.lextape` files. It can filter, pretty-print, summarise, and query tape recordings.
+`go run ./tools/tapetool` is the companion command-line tool for working with `.lextape` files. It can filter, pretty-print, summarise, and query tape recordings.
 
 ---
 

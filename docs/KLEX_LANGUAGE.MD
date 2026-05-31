@@ -33,6 +33,7 @@ The kLex language is nicknamed FROG: **Functional, Reactive, Opinionated, Govern
 - [Database Access](#database-access)
 - [Error Propagation — the ? Operator](#error-propagation-the-operator)
 - [Bitwise Operations](#bitwise-operations)
+- [WASM / Browser-Only Builtins](#wasm-browser-only-builtins)
 
 kLex is a small, dynamically typed, tree-walking interpreter written in Go. It is strict about types, has no implicit coercion, and handles errors the Go way — by returning them as values rather than throwing exceptions.
 
@@ -2142,9 +2143,9 @@ bridgeNotifications(bridge)
                          subprocess emits (one-way, no response)
 bridgeMetrics(bridge)    counters + per-function p50/p95/p99 latency
                          snapshot → hash
-bridgePool(n, cmd, args [, opts])
-                         spawn a pool of N identical bridge subprocesses
-                         for parallel calls → (pool, err)
+bridgePool(n, transport [, opts])
+                         spawn a pool of N identical bridges from a
+                         transport hash for parallel calls → (pool, err)
 bridgePoolCall(pool, fn, args [, timeout])
                          like bridgeCall but routes to the next idle
                          worker in the pool
@@ -2636,19 +2637,47 @@ See stdlib/bridge.lex for the higher-level ResilientBridge wrapper with automati
 ### Lifecycle
 
 ```lex
-bridge, err = nativeBridge(cmd, args, opts?)
-                             — start subprocess and return a bridge handle.
-                               cmd: executable name or path; args: array of
-                               string arguments.
-                               opts (hash, optional):
-                                 timeout_seconds — default per-call timeout
-                                 max_response_mb — cap reply size in MB [1..256]
-                                 stderr_log      — path to capture subprocess stderr
+bridge, err = bridgeOpen(transport)
+                             — start a bridge from a transport hash and
+                               return a bridge handle. Transport-polymorphic
+                               (subprocess today; worker/remote planned).
+
+                               Subprocess transport hash:
+                                 "kind":            "subprocess" (required)
+                                 "cmd":             executable name or path (required)
+                                 "args":            array of strings (optional)
+                                 "timeout_seconds": default per-call timeout (optional)
+                                 "max_response_mb": cap reply size in MB [1..256]
+                                 "stderr_log":      path to capture subprocess stderr
+
+                               Strict key validation — typos like
+                               "tiemout_seconds" fail loud with
+                               BRIDGE_TRANSPORT_MISCONFIGURED naming the
+                               bad key.
+
                                Bridges are auto-registered and force-killed
                                on kLex exit — no orphaned subprocesses.
+
+                               Error codes (err.code):
+                                 BRIDGE_TRANSPORT_MISCONFIGURED — bad transport hash
+                                 BRIDGE_TRANSPORT_UNKNOWN       — unknown "kind"
+                                 BRIDGE_TRANSPORT_UNAVAILABLE   — kind not built in
+                                 BRIDGE_ERROR                   — failed to start subprocess
 bridgeClose(bridge)          — clean shutdown; sends EOF on stdin, then
                                force-kills after 2s if the subprocess
                                hasn't exited. Idempotent.
+```
+
+Example:
+
+```lex
+let bridge, err = bridgeOpen({
+    "kind":            "subprocess",
+    "cmd":             "python3",
+    "args":            ["my_bridge.py"],
+    "timeout_seconds": 30
+})
+if err != null { println(err.message)  return }
 ```
 
 
@@ -2725,11 +2754,13 @@ notifCh = bridgeNotifications(bridge)
 ### Pools (Parallel Fan-Out)
 
 ```lex
-pool, err = bridgePool(n, cmd, args, opts?)
-                             — start n identical bridges. opts accepts
-                               all bridgeOpt keys plus init: a callable run
-                               once per bridge for setup. Returns
-                               BRIDGE_POOL_EMPTY if every member is dead.
+pool, err = bridgePool(n, transport, opts?)
+                             — start n identical bridges from a transport
+                               hash. Transport takes the same shape as
+                               bridgeOpen(). opts (separate hash) holds
+                               pool-only keys: init (callable run once per
+                               bridge for setup). Returns BRIDGE_POOL_EMPTY
+                               if every member is dead.
 bridgePoolCall(pool, fn, args, timeoutSec?)
                              → forward to next alive bridge (round-robin).
 bridgePoolStream(pool, fn, args, timeout?)
@@ -2745,8 +2776,12 @@ bridgePoolClose(pool)        — close every member. Idempotent.
 Example — call a Python YARA scanner pool:
 
 ```lex
-pool, err = bridgePool(8, "python3", ["yara_bridge.py"], {
+pool, err = bridgePool(8, {
+    "kind":            "subprocess",
+    "cmd":             "python3",
+    "args":            ["yara_bridge.py"],
     "timeout_seconds": 30,
+}, {
     "init": fn(b) {
         _, e = bridgeCall(b, "load", ["secrets.yar"])
         return e
@@ -3399,8 +3434,9 @@ _scriptDir()             directory of the .lex file whose code is currently
                          module's directory, not the entry script's. Empty
                          string in REPL context. Use to locate sibling
                          resources independent of CWD:
-                           bridge = nativeBridge("python3",
-                                      [_scriptDir() + "/helper.py"], opts)
+                           bridge = bridgeOpen({"kind": "subprocess",
+                                      "cmd":  "python3",
+                                      "args": [_scriptDir() + "/helper.py"]})
                            font = loadFont(_scriptDir() + "/fonts/x.ttf", 32)
 
 _osArgs() returns full os.Args: index 0 = binary, 1 = script, 2+ = user args.
@@ -4434,8 +4470,12 @@ if keyPressed("TAB") {
 label(text, x, y)             — text label at (x, y)
 label(text, x, y, size)       — with explicit text scale (default 0.5)
 
-progressBar(x, y, w, h, value, max)
-                              — display-only filled bar; fill = value/max
+progressBar(x, y, w, h, value, min, max)
+                              — display-only filled bar; fill = (value-min)/(max-min)
+
+lineHeight()                  → int — pixel height of one line at default scale (0.5)
+lineHeight(scale)             → int — at explicit scale; use to centre text vertically:
+                                  label(s, x, y + (h - lineHeight()) / 2)
 ```
 
 
@@ -4600,6 +4640,12 @@ scrollArea(x, y, w, h, contentH)      → float — draws panel+scrollbar; retur
                                   popClip()
 pushClip(x, y, w, h)         — enable scissor rect; clips all drawing to this region
 popClip()                     — disable scissor rect (restore full drawing area)
+
+pushDisabled(disabled)        — push disabled state; widgets between push/pop render at
+                                half opacity and ignore hover/click; stack-based so nested
+                                forms can selectively re-enable sections
+popDisabled()                 — pop the top disabled frame; every pushDisabled must have
+                                a matching popDisabled
 ```
 
 
@@ -4760,6 +4806,10 @@ uiTheme(palette)              — install palette as the global widget color the
                               — all widgets read from this theme each frame
                               — call once at startup or when switching themes
                               — must be called after window() opens
+
+setTheme(name)                — install a preset theme by name; call after window() opens
+                              — valid names: "nebula" (default), "light", "dark", "highContrast"
+                              — sets colour palette AND style tokens (radii, spacing, font)
 ```
 
 Slot index reference:
@@ -4804,11 +4854,15 @@ kLex can call into any language — Python, Rust, C, Node, anything — via a pe
 ### Starting a Bridge
 
 ```lex
-bridge, err = nativeBridge(cmd, args)
-bridge, err = nativeBridge(cmd, args, opts)
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": cmd, "args": args})
+bridge, err = bridgeOpen({"kind": "subprocess", "cmd": cmd, "args": args, "timeout_seconds": 30})
 ```
 
-— Starts the subprocess and returns a bridge handle. — cmd is the executable ("python3", "./my_bridge", etc.) — args is an array of string arguments (["bridge.py"]) — opts (optional hash) configures the bridge:
+— Starts the subprocess and returns a bridge handle. Pass a single transport hash where:
+— `"kind"` is `"subprocess"` (only kind implemented today; `"worker"` and `"remote"` are planned)
+— `"cmd"` is the executable (`"python3"`, `"./my_bridge"`, etc.)
+— `"args"` is an array of string arguments (`["bridge.py"]`)
+— Additional optional keys configure the bridge:
 
 ```lex
 timeout_seconds  default per-call timeout (0 = no timeout)
@@ -5025,7 +5079,7 @@ bridge.py:
       print(json.dumps(resp), flush=True)
 
 kLex caller:
-  bridge, err = nativeBridge("python3", ["bridge.py"])
+  bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": ["bridge.py"]})
   if err != null { println(err.message)  return }
 
   result, err = bridgeCall(bridge, "add", [10, 20])
@@ -5105,7 +5159,7 @@ MCP_TOOL_ERROR   — callToolText surfaced an isError:true result MCP_NO_TEXT   
 import "stdlib/mcp.lex" as mcp
 
 client, err = mcp.newClient("python3",
-                            ["snowball/frogMcp/server/server.py"],
+                            ["path/to/mcp_server.py"],
                             {"timeout_sec": 30})
 if err != null { println(err.message)  return }
 
@@ -5131,7 +5185,7 @@ info        = _mcpInfo(client)             // hash
 chan        = _mcpNotifications(client)    // Channel of notifications
 ```
 
-See snowball/frogMcp/ for kLex's own MCP server (code intelligence — klex_search, klex_describe_symbol, klex_run, klex_test, go_doc, ...).
+Point `mcp.newClient` at any MCP server that speaks stdio JSON-RPC — a filesystem server, a GitHub server, or one you write yourself. The first argument is the command to launch; the second is its argument list.
 
 
 ## MCP Server (Expose a kLex Program to External Agents)
@@ -5661,6 +5715,36 @@ let packed = bitOr(bitShiftLeft(hi, 4), lo)
 // Ones' complement
 let inv = bitNot(0)   // -1 (all bits set in two's complement)
 ```
+
+---
+
+## WASM / Browser-Only Builtins
+
+Two builtins exist **only** in the WebAssembly build (`GOOS=js GOARCH=wasm`, gated `//go:build js && wasm`). They have no meaning on desktop and are not registered there. They exist to support the kLex Playground IDE running in the browser. For the full WASM story — architecture, JavaScript API, and platform limitations — see [WASM.MD](WASM.MD).
+
+```lex
+runScript(src)   → hash — evaluate src as a complete, isolated kLex program
+                          in a fresh environment and return a hash with keys
+                          "output" (printed text), "error" (message, empty on
+                          success), and "isError" (bool). Definitions do not
+                          persist between calls. Scripts that call window() are
+                          rejected — the canvas belongs to the playground IDE.
+
+openURL(url)     → null — open url in a new browser tab via
+                          window.open(url, "_blank"). Used by the playground's
+                          documentation links.
+```
+
+```lex
+let result = runScript("println(1 + 2)")
+println(result["output"])   // 3
+println(result["isError"])  // false
+
+openURL("https://github.com/kmcnally5/FROG")
+```
+
+These are intentionally absent from the desktop interpreter. Calling them in a
+desktop script is an undefined-builtin error.
 
 ---
 

@@ -1,7 +1,9 @@
 package vm
 
-// module.go — M6 (audit follow-up, 2026-05-22): VM-side entry point
-// for compiling and running an imported .lex module.
+// module.go — VM-side entry points for eval hooks.
+//
+// CompileAndRunModule: M6 (audit follow-up, 2026-05-22): imported module
+// execution via the eval.VMCompileAndRunModule hook.
 //
 // Wired into eval's *ast.ImportStmt arm via the
 // eval.VMCompileAndRunModule hook. When the hook is set (main.go /
@@ -41,6 +43,33 @@ import (
 // back to the tree-walker path. Returns (nil, *eval.Error) on
 // runtime error — the module's top-level threw, and the user
 // should see it just as they would with the tree-walker.
+// CompileAndRunScript is the eval.VMRunScript hook implementation.
+// It compiles and runs a complete isolated program — the WASM runScript
+// builtin path where each call gets a fresh execution context (no
+// persistent environment). No ScriptDir or __args__ propagation is
+// needed: in-browser scripts have no filesystem path, and runScript
+// programs don't receive command-line arguments.
+//
+// Returns (result, true) on success or runtime error — result may be
+// an *eval.Error if the program itself failed. Output is captured by
+// the caller via eval.Output before this is called.
+// Returns (nil, false) on compile error so the caller falls through to
+// tree-walker Eval, keeping the same incremental fallback as modules.
+func CompileAndRunScript(prog *ast.Program) (eval.Object, bool) {
+	chunk, err := Compile(prog)
+	if err != nil {
+		return nil, false
+	}
+	result, runErr := Run(chunk)
+	if runErr != nil {
+		return &eval.Error{
+			Kind:    eval.RuntimeErr,
+			Message: "vm script error: " + runErr.Error(),
+		}, true
+	}
+	return result, true
+}
+
 func CompileAndRunModule(prog *ast.Program, scriptDir string) (*eval.Environment, eval.Object) {
 	chunk, err := Compile(prog)
 	if err != nil {

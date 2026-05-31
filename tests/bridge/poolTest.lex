@@ -17,9 +17,7 @@ let INIT_FN = fn(b) {
 }
 
 println("=== bridgePool start ===")
-let pool, err = bridgePool(POOL_SIZE, "python3", ["tests/examples/bridge/python_bridge.py"], {
-    "init": INIT_FN,
-})
+let pool, err = bridgePool(POOL_SIZE, {"kind": "subprocess", "cmd": "python3", "args": ["tests/bridge/python_bridge.py"]}, {"init": INIT_FN})
 if err != null {
     println("bridgePool failed: " + err.message)
     return

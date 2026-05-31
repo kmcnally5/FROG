@@ -1,5 +1,3 @@
-//go:build !js
-
 package eval
 
 import (
@@ -235,7 +233,7 @@ func parseBridgeOpts(opts Object) (bridgeOpts, Object) {
 	h, ok := opts.(*Hash)
 	if !ok {
 		return out, bridgeError("BRIDGE_OPTS_INVALID",
-			fmt.Sprintf("nativeBridge: opts must be hash, got %s", opts.Type()))
+			fmt.Sprintf("bridgeOpts: opts must be hash, got %s", opts.Type()))
 	}
 
 	for _, pair := range h.Pairs {
@@ -248,41 +246,191 @@ func parseBridgeOpts(opts Object) (bridgeOpts, Object) {
 			switch v := pair.Value.(type) {
 			case *Integer:
 				if v.Value < 0 {
-					return out, bridgeError("BRIDGE_OPTS_INVALID", "nativeBridge: timeout_seconds must be >= 0")
+					return out, bridgeError("BRIDGE_OPTS_INVALID", "bridgeOpts: timeout_seconds must be >= 0")
 				}
 				out.timeout = time.Duration(v.Value) * time.Second
 			case *Float:
 				if v.Value < 0 {
-					return out, bridgeError("BRIDGE_OPTS_INVALID", "nativeBridge: timeout_seconds must be >= 0")
+					return out, bridgeError("BRIDGE_OPTS_INVALID", "bridgeOpts: timeout_seconds must be >= 0")
 				}
 				out.timeout = time.Duration(v.Value * float64(time.Second))
 			case *Null:
 				out.timeout = 0
 			default:
 				return out, bridgeError("BRIDGE_OPTS_INVALID",
-					fmt.Sprintf("nativeBridge: timeout_seconds must be number, got %s", v.Type()))
+					fmt.Sprintf("bridgeOpts: timeout_seconds must be number, got %s", v.Type()))
 			}
 		case "max_response_mb":
 			v, ok := pair.Value.(*Integer)
 			if !ok {
 				return out, bridgeError("BRIDGE_OPTS_INVALID",
-					fmt.Sprintf("nativeBridge: max_response_mb must be integer, got %s", pair.Value.Type()))
+					fmt.Sprintf("bridgeOpts: max_response_mb must be integer, got %s", pair.Value.Type()))
 			}
 			if v.Value < 1 || v.Value > 256 {
 				return out, bridgeError("BRIDGE_OPTS_INVALID",
-					fmt.Sprintf("nativeBridge: max_response_mb must be in [1, 256], got %d", v.Value))
+					fmt.Sprintf("bridgeOpts: max_response_mb must be in [1, 256], got %d", v.Value))
 			}
 			out.maxBytes = v.Value * 1024 * 1024
 		case "stderr_log":
 			v, ok := pair.Value.(*String)
 			if !ok {
 				return out, bridgeError("BRIDGE_OPTS_INVALID",
-					fmt.Sprintf("nativeBridge: stderr_log must be string, got %s", pair.Value.Type()))
+					fmt.Sprintf("bridgeOpts: stderr_log must be string, got %s", pair.Value.Type()))
 			}
 			out.stderrLog = v.Value
 		}
 	}
 	return out, nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Transport dispatcher — bridge() entry point
+// ─────────────────────────────────────────────────────────────────────────────
+
+// validSubprocessKeys lists every key permitted in a subprocess transport
+// hash. Strict validation rejects unknown keys with
+// BRIDGE_TRANSPORT_MISCONFIGURED so typos like "tiemout_seconds" fail loud
+// instead of silently disabling the option. (FROG decision #5.)
+var validSubprocessKeys = map[string]bool{
+	"kind":            true,
+	"cmd":             true,
+	"args":            true,
+	"timeout_seconds": true,
+	"max_response_mb": true,
+	"stderr_log":      true,
+}
+
+// hashLookup returns the value for the given string key in h, or nil if
+// the key is absent (or stored under a non-string key, which shouldn't
+// happen for transport hashes built from kLex literals).
+func hashLookup(h *Hash, key string) Object {
+	for _, pair := range h.Pairs {
+		keyStr, ok := pair.Key.(*String)
+		if !ok {
+			continue
+		}
+		if keyStr.Value == key {
+			return pair.Value
+		}
+	}
+	return nil
+}
+
+// spawnBridgeFromTransport reads the `kind` field and dispatches to the
+// per-transport spawn helper. Returns the (bridge, NULL) tuple on success
+// or a (NULL, Error) tuple on failure.
+func spawnBridgeFromTransport(transport *Hash) Object {
+	kindObj := hashLookup(transport, "kind")
+	if kindObj == nil {
+		return bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+			"bridgeOpen: transport hash missing required key 'kind'")
+	}
+	kindStr, ok := kindObj.(*String)
+	if !ok {
+		return bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+			fmt.Sprintf("bridgeOpen: 'kind' must be a string, got %s", kindObj.Type()))
+	}
+
+	switch kindStr.Value {
+	case "subprocess":
+		return spawnSubprocessFromTransport(transport)
+	case "worker":
+		// Dispatched via WorkerTransportSpawn — set by the WASM build
+		// in eval/bridge_worker_wasm.go's init(). Nil on desktop, so
+		// `bridgeOpen({"kind": "worker"})` on desktop is the expected
+		// BRIDGE_TRANSPORT_UNAVAILABLE.
+		if WorkerTransportSpawn != nil {
+			return WorkerTransportSpawn(transport)
+		}
+		return bridgeError("BRIDGE_TRANSPORT_UNAVAILABLE",
+			"bridgeOpen: worker transport not available in this build (browser/WASM only)")
+	case "remote":
+		return bridgeError("BRIDGE_TRANSPORT_UNAVAILABLE",
+			"bridgeOpen: remote transport not yet implemented")
+	default:
+		return bridgeError("BRIDGE_TRANSPORT_UNKNOWN",
+			fmt.Sprintf("bridgeOpen: unknown transport kind %q (known: 'subprocess', 'worker')", kindStr.Value))
+	}
+}
+
+// parseSubprocessTransport extracts cmd, cmdArgs, and bridgeOpts from a
+// subprocess transport hash. Shared between bridgeOpen() and bridgePool() so
+// both paths produce identical validation errors and accept the same hash
+// shape. Returns a non-nil Error tuple as the last value on validation
+// failure; callers should return it directly.
+//
+// Caller must have already verified transport["kind"] == "subprocess".
+func parseSubprocessTransport(transport *Hash) (string, []string, bridgeOpts, Object) {
+	var zeroOpts bridgeOpts
+
+	// Strict key validation — every key must be in validSubprocessKeys.
+	for _, pair := range transport.Pairs {
+		keyStr, ok := pair.Key.(*String)
+		if !ok {
+			return "", nil, zeroOpts, bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+				fmt.Sprintf("subprocess transport: keys must be strings, got %s", pair.Key.Type()))
+		}
+		if !validSubprocessKeys[keyStr.Value] {
+			return "", nil, zeroOpts, bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+				fmt.Sprintf("subprocess transport: unknown key %q (valid: kind, cmd, args, timeout_seconds, max_response_mb, stderr_log)", keyStr.Value))
+		}
+	}
+
+	// Required: cmd.
+	cmdObj := hashLookup(transport, "cmd")
+	if cmdObj == nil {
+		return "", nil, zeroOpts, bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+			"subprocess transport: missing required key 'cmd'")
+	}
+	cmdStr, ok := cmdObj.(*String)
+	if !ok {
+		return "", nil, zeroOpts, bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+			fmt.Sprintf("subprocess transport: 'cmd' must be a string, got %s", cmdObj.Type()))
+	}
+
+	// Optional: args (array of strings).
+	var cmdArgs []string
+	if argsObj := hashLookup(transport, "args"); argsObj != nil {
+		if _, isNull := argsObj.(*Null); !isNull {
+			argsArr, ok := argsObj.(*Array)
+			if !ok {
+				return "", nil, zeroOpts, bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+					fmt.Sprintf("subprocess transport: 'args' must be an array, got %s", argsObj.Type()))
+			}
+			cmdArgs = make([]string, len(argsArr.Elements))
+			for i, el := range argsArr.Elements {
+				s, ok := el.(*String)
+				if !ok {
+					return "", nil, zeroOpts, bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+						fmt.Sprintf("subprocess transport: 'args[%d]' must be a string, got %s", i, el.Type()))
+				}
+				cmdArgs[i] = s.Value
+			}
+		}
+	}
+
+	// Shared opts parsing — handles timeout_seconds, max_response_mb,
+	// stderr_log. Strict key validation above has already rejected unknown
+	// keys, so anything parseBridgeOpts ignores is a known non-opts key.
+	opts, perr := parseBridgeOpts(transport)
+	if perr != nil {
+		return "", nil, zeroOpts, perr
+	}
+	return cmdStr.Value, cmdArgs, opts, nil
+}
+
+// spawnSubprocessFromTransport validates the transport hash for the
+// subprocess kind and delegates to the shared spawnBridge() helper.
+func spawnSubprocessFromTransport(transport *Hash) Object {
+	cmd, cmdArgs, opts, perr := parseSubprocessTransport(transport)
+	if perr != nil {
+		return perr
+	}
+	b, errObj := spawnBridge(cmd, cmdArgs, opts)
+	if errObj != nil {
+		return errObj
+	}
+	return &Tuple{Elements: []Object{b, NULL}}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -405,15 +553,6 @@ func startBridgeReader(b *Bridge) {
 		}
 		taintAllBridge(b, "BRIDGE_CLOSED", msg)
 	}()
-}
-
-// closeChannelDone idempotently closes a Channel's done signal. Both the
-// consumer (eval.go's for-in break handler) and the bridge reader (on natural
-// stream end) may want to close it; whoever loses the race recovers from the
-// "close of closed channel" panic.
-func closeChannelDone(ch *Channel) {
-	defer func() { recover() }()
-	close(ch.done)
 }
 
 // defaultStreamWindow is the per-stream in-flight cap when the caller doesn't
@@ -1164,45 +1303,50 @@ func spawnBridge(cmdName string, cmdArgs []string, opts bridgeOpts) (*Bridge, Ob
 
 func init() {
 
-	// ── nativeBridge(cmd, args, opts?) → (bridge, err) ───────────────────────
-	Builtins["nativeBridge"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) != 2 && len(args) != 3 {
-			return runtimeError("nativeBridge expects 2 or 3 arguments (cmd, args, opts?)", ast.Pos{})
+	// ── bridgeOpen(transport: hash) → (bridge, err) ──────────────────────────
+	//
+	// Transport-polymorphic bridge constructor. Dispatches on transport.kind:
+	//   "subprocess" — spawn a subprocess and speak the kLex bridge protocol
+	//                  over stdin/stdout (the only kind implemented today)
+	//   "worker"     — Web Worker (browser only; Phase 3 — not yet implemented)
+	//   "remote"     — TCP/QUIC remote bridge (future)
+	//
+	// Named `bridgeOpen` (not `bridge`) to match the bridgeXxx family
+	// (bridgeClose / bridgeCall / bridgeStream / …) and to avoid shadowing
+	// the natural variable name. `let bridge, err = bridgeOpen(...)` is the
+	// idiomatic call shape.
+	//
+	// Subprocess transport hash schema:
+	//   kind:             "subprocess"  (required)
+	//   cmd:              string         (required — executable name or path)
+	//   args:             [string, ...]  (optional — argv tail)
+	//   timeout_seconds:  number         (optional — default per-call timeout)
+	//   max_response_mb:  int            (optional — wire-frame cap, 1..256)
+	//   stderr_log:       string         (optional — mirror bridge stderr here)
+	//
+	// Per FROG decision #5, key validation is STRICT — any key not listed
+	// above yields BRIDGE_TRANSPORT_MISCONFIGURED naming the bad key, so
+	// typos like "tiemout_seconds" fail loud instead of silently disabling
+	// the option.
+	//
+	// Example (kLex hash literals require quoted string keys):
+	//   let bridge, err = bridgeOpen({
+	//       "kind": "subprocess",
+	//       "cmd": "python3",
+	//       "args": ["yara_bridge.py"],
+	//       "timeout_seconds": 30
+	//   })
+	//
+	// See docs/BRIDGE_API_DESIGN.MD for the full design rationale.
+	Builtins["bridgeOpen"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 1 {
+			return runtimeError("bridgeOpen expects 1 argument (transport hash)", ast.Pos{})
 		}
-		cmdArg, ok := args[0].(*String)
+		transport, ok := args[0].(*Hash)
 		if !ok {
-			return typeError(fmt.Sprintf("nativeBridge: cmd must be string, got %s", args[0].Type()), ast.Pos{})
+			return typeError(fmt.Sprintf("bridgeOpen: transport must be a hash, got %s", args[0].Type()), ast.Pos{})
 		}
-		argsArr, ok := args[1].(*Array)
-		if !ok {
-			return typeError(fmt.Sprintf("nativeBridge: args must be array, got %s", args[1].Type()), ast.Pos{})
-		}
-		cmdArgs := make([]string, len(argsArr.Elements))
-		for i, el := range argsArr.Elements {
-			s, ok := el.(*String)
-			if !ok {
-				return typeError(fmt.Sprintf("nativeBridge: args[%d] must be string, got %s", i, el.Type()), ast.Pos{})
-			}
-			cmdArgs[i] = s.Value
-		}
-
-		var opts bridgeOpts
-		if len(args) == 3 {
-			parsed, perr := parseBridgeOpts(args[2])
-			if perr != nil {
-				return perr
-			}
-			opts = parsed
-		} else {
-			parsed, _ := parseBridgeOpts(nil)
-			opts = parsed
-		}
-
-		b, errObj := spawnBridge(cmdArg.Value, cmdArgs, opts)
-		if errObj != nil {
-			return errObj
-		}
-		return &Tuple{Elements: []Object{b, NULL}}
+		return spawnBridgeFromTransport(transport)
 	}}
 
 	// ── bridgeCall(bridge, fn, args, timeoutSec?) → (result, err) ────────────
@@ -1452,19 +1596,26 @@ func init() {
 		b.closed = true
 		b.mu.Unlock()
 
-		// Close stdin — a well-written bridge loop sees EOF and exits.
+		// Close stdin — a well-written bridge loop sees EOF and exits. For
+		// worker bridges, workerWriteCloser.Close() also terminates the
+		// underlying Web Worker, so there's nothing left to Wait on below.
 		if b.stdin != nil {
 			_ = b.stdin.Close()
 		}
 
-		// Wait up to 2s for clean exit; force-kill the process group otherwise.
-		done := make(chan error, 1)
-		go func() { done <- b.Cmd.Wait() }()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			killBridgeProcess(b.Cmd)
-			<-done
+		// Subprocess bridges have a Cmd to wait on (give it 2s for clean
+		// exit, force-kill the process group otherwise). Worker bridges
+		// have b.Cmd == nil because they're not subprocess-backed —
+		// terminate() above already finished them, so skip this dance.
+		if b.Cmd != nil {
+			done := make(chan error, 1)
+			go func() { done <- b.Cmd.Wait() }()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				killBridgeProcess(b.Cmd)
+				<-done
+			}
 		}
 
 		// Taint to unblock any bridgeCalls that are still in flight (race with

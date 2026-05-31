@@ -6,7 +6,7 @@
 // fixtures below are real JWT-shaped strings with whatever header/payload we
 // want; the signature segments are intentionally bogus.
 
-let bridge, err = nativeBridge("node", ["examples/SecretHunter/jwt_bridge.js"])
+let bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "node", "args": ["examples/SecretHunter/jwt_bridge.js"]})
 if err != null {
     println("bridge failed to start: " + err.message)
     return

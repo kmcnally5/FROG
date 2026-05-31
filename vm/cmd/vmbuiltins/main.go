@@ -54,6 +54,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/build/constraint"
 	"go/format"
 	"go/parser"
 	"go/token"
@@ -68,28 +69,46 @@ func main() {
 	root := findRoot()
 	evalDir := filepath.Join(root, "eval")
 	outPath := filepath.Join(root, "vm", "builtins_gen.go")
+	outWasmPath := filepath.Join(root, "vm", "builtins_gen_wasm.go")
 
-	names, err := scanBuiltinNames(evalDir)
+	// Base scan: exclude _wasm.go files — builtins that only exist in
+	// the browser build must not appear in the desktop table.
+	baseNames, err := scanBuiltinNames(evalDir, false)
 	if err != nil {
-		fatalf("scan %s: %v", evalDir, err)
+		fatalf("scan %s (base): %v", evalDir, err)
 	}
-	if len(names) == 0 {
+	if len(baseNames) == 0 {
 		fatalf("no Builtins[\"…\"] = … registrations found in %s — broken scanner?", evalDir)
 	}
+	sort.Strings(baseNames)
 
-	// Stable alphabetical ordering. Critical: every regen against the
-	// same source set must produce the same indices, so a compiled
-	// bytecode artifact stays valid across compiler runs.
-	sort.Strings(names)
-
-	src, err := renderBuiltinsGen(names)
+	// WASM scan: include _wasm.go files to pick up WASM-only builtins
+	// (currently runScript and openURL from builtins_eval_wasm.go).
+	wasmNames, err := scanBuiltinNames(evalDir, true)
 	if err != nil {
-		fatalf("render: %v", err)
+		fatalf("scan %s (wasm): %v", evalDir, err)
 	}
-	if err := writeAtomic(outPath, src); err != nil {
+	sort.Strings(wasmNames)
+
+	// Emit the non-WASM table, gated //go:build !js.
+	baseSrc, err := renderBuiltinsGen(baseNames, "!js")
+	if err != nil {
+		fatalf("render base: %v", err)
+	}
+	if err := writeAtomic(outPath, baseSrc); err != nil {
 		fatalf("write %s: %v", outPath, err)
 	}
-	fmt.Printf("✓ vmbuiltins — wrote %d builtins to %s\n", len(names), outPath)
+	fmt.Printf("✓ vmbuiltins — wrote %d builtins to %s\n", len(baseNames), outPath)
+
+	// Emit the WASM table, gated //go:build js && wasm.
+	wasmSrc, err := renderBuiltinsGen(wasmNames, "js && wasm")
+	if err != nil {
+		fatalf("render wasm: %v", err)
+	}
+	if err := writeAtomic(outWasmPath, wasmSrc); err != nil {
+		fatalf("write %s: %v", outWasmPath, err)
+	}
+	fmt.Printf("✓ vmbuiltins — wrote %d builtins to %s\n", len(wasmNames), outWasmPath)
 }
 
 // ── Scanning ──────────────────────────────────────────────────────────────────
@@ -104,7 +123,13 @@ func main() {
 // Duplicates are silently deduped — the same name might be re-declared
 // across build tags (e.g. Windows vs POSIX fs builtins) and we want
 // one entry, not three.
-func scanBuiltinNames(dir string) ([]string, error) {
+//
+// When includeWasm is false, files ending in _wasm.go are skipped so
+// the base (non-WASM) table excludes browser-only builtins. When true,
+// only files that would be compiled under GOOS=js GOARCH=wasm are
+// scanned — //go:build constraints are evaluated against the WASM tag
+// set and filename-based GOOS conventions are honoured.
+func scanBuiltinNames(dir string, includeWasm bool) ([]string, error) {
 	seen := make(map[string]bool)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -119,6 +144,19 @@ func scanBuiltinNames(dir string) ([]string, error) {
 			continue
 		}
 		path := filepath.Join(dir, name)
+		if includeWasm {
+			ok, err := fileMatchesWasm(path)
+			if err != nil {
+				return nil, fmt.Errorf("%s: check wasm tags: %w", name, err)
+			}
+			if !ok {
+				continue
+			}
+		} else {
+			if strings.HasSuffix(name, "_wasm.go") {
+				continue
+			}
+		}
 		if err := scanOneFile(path, seen); err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
@@ -128,6 +166,72 @@ func scanBuiltinNames(dir string) ([]string, error) {
 		names = append(names, n)
 	}
 	return names, nil
+}
+
+// fileMatchesWasm reports whether the file at path would be compiled
+// under GOOS=js GOARCH=wasm. It evaluates the //go:build constraint if
+// present; for files with no constraint it falls back to the filename-
+// based GOOS convention (foo_darwin.go → darwin only, etc.).
+func fileMatchesWasm(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	for _, raw := range strings.SplitN(string(data), "\n", 30) {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "//") {
+			break // reached non-comment source — no build constraint
+		}
+		if strings.HasPrefix(line, "//go:build ") {
+			expr, err := constraint.Parse(line)
+			if err != nil {
+				return false, err
+			}
+			return expr.Eval(wasmTagMatch), nil
+		}
+	}
+	// No //go:build line. Apply filename-based GOOS/GOARCH convention:
+	// foo_GOOS.go or foo_GOARCH.go is included only for that target.
+	stem := strings.TrimSuffix(filepath.Base(path), ".go")
+	for _, seg := range strings.Split(stem, "_")[1:] {
+		switch seg {
+		case "unix", "darwin", "windows", "linux", "freebsd",
+			"netbsd", "openbsd", "plan9", "solaris", "aix",
+			"dragonfly", "android", "ios":
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// wasmTagMatch reports whether tag is set under GOOS=js GOARCH=wasm.
+// Used to evaluate //go:build constraints for the WASM builtin table.
+func wasmTagMatch(tag string) bool {
+	switch tag {
+	case "js", "wasm":
+		return true
+	case "ignore":
+		return false
+	// OS tags that are not "js"
+	case "unix", "aix", "android", "darwin", "dragonfly", "freebsd",
+		"hurd", "illumos", "ios", "linux", "nacl", "netbsd", "openbsd",
+		"plan9", "solaris", "wasip1", "windows", "zos":
+		return false
+	// Arch tags that are not "wasm"
+	case "386", "amd64", "arm", "arm64", "loong64", "mips", "mips64",
+		"mips64le", "mipsle", "ppc64", "ppc64le", "riscv64", "s390x", "sparc64":
+		return false
+	default:
+		// Unknown tags (e.g. go version constraints like "go1.21"): treat as
+		// satisfied so version-gated files are not silently excluded. This means
+		// any novel build tag not listed above is assumed WASM-compatible. If a
+		// new eval builtin file is ever gated with a non-WASM-specific tag that
+		// is not in the lists above, re-run the generator and verify the count.
+		return true
+	}
 }
 
 // scanOneFile parses path and records every builtin name it finds
@@ -219,9 +323,15 @@ func stringKey(expr ast.Expr) (string, bool) {
 //     order.
 //   - Drift is impossible at runtime: init() panics if any name is
 //     missing OR if a new builtin was added without regenerating.
-func renderBuiltinsGen(names []string) ([]byte, error) {
+//
+// buildTag is written as a //go:build constraint at the top of the
+// file (e.g. "!js" or "js && wasm"). Empty string = no constraint.
+func renderBuiltinsGen(names []string, buildTag string) ([]byte, error) {
 	var b bytes.Buffer
 
+	if buildTag != "" {
+		fmt.Fprintf(&b, "//go:build %s\n\n", buildTag)
+	}
 	b.WriteString("// Code generated by vm/cmd/vmbuiltins. DO NOT EDIT.\n")
 	b.WriteString("//\n")
 	b.WriteString("// Source of truth: every Builtins[\"…\"] = … registration across\n")

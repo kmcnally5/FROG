@@ -10,8 +10,6 @@ during a run. The runtime writes one when invoked with
 `--record-tape=PATH`; tapetool wraps that flow and gives you ways to
 inspect, replay, diff, and mutate tapes after the fact.
 
-Format spec: [docs/AGENTIC_HOOKS_ROADMAP.md](projects/AGENTIC_HOOKS_ROADMAP.md)
-
 ## Build & run
 
 ```bash
@@ -93,4 +91,4 @@ the answer in one read.
 
 Tapes are produced by the runtime's agentic-hook surfaces (5 of them:
 error, async-spawn, async-done, UI, bridge). Coverage of those is audited
-by [hookaudit](../hookaudit/).
+by [hookaudit](stuff/tools/hookaudit/).

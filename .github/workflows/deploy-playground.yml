@@ -1,0 +1,63 @@
+name: Deploy Playground
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate embedded stdlib
+        run: go run ./tools/stdlibgen
+
+      - name: Generate filesystem dispatch table
+        run: go run ./tools/fsdispatchgen
+
+      - name: Build vmbuiltins and regenerate builtin table
+        run: |
+          go build -o bin/vmbuiltins ./vm/cmd/vmbuiltins
+          bin/vmbuiltins
+
+      - name: Build klex.wasm
+        env:
+          GOOS: js
+          GOARCH: wasm
+          CGO_ENABLED: "0"
+        run: go build -o examples/playground/klex.wasm ./cmd/wasm
+
+      - name: Copy shared WASM assets into playground
+        run: cp stdlib/wasm/wasm_exec.js examples/playground/wasm_exec.js
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: examples/playground/
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

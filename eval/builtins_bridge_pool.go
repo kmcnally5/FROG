@@ -1,3 +1,5 @@
+//go:build !js
+
 package eval
 
 import (
@@ -100,59 +102,81 @@ func (p *BridgePool) pick() *Bridge {
 }
 
 func init() {
-	// ── bridgePool(n, cmd, args, opts?) → (pool, err) ────────────────────────
+	// ── bridgePool(n, transport, opts?) → (pool, err) ────────────────────────
 	//
-	// Starts `n` identical bridges and returns them as a pool. Optional opts
-	// hash supports every bridge-level option (timeout, stderr_log, maxBytes)
-	// plus an "init" callable that runs once on each bridge — handy for
-	// per-bridge setup like loading YARA rules. If init returns an Error, that
-	// bridge is marked dead in the pool; callers can inspect bridgePoolHealth().
+	// Starts `n` identical bridges from a transport hash and returns them as a
+	// pool. Transport hash takes the same shape as bridgeOpen() — kind, cmd,
+	// args, plus optional timeout_seconds / max_response_mb / stderr_log.
+	//
+	// Optional opts hash holds pool-only configuration:
+	//   init  — callable run once on each bridge after spawn. Receives the
+	//           bridge as its single argument. If it returns an Error (or a
+	//           Tuple whose second element is an Error — the bridgeCall shape),
+	//           that bridge is marked dead in the pool. Use for loading YARA
+	//           rules, opening connections, etc.
+	//
+	// Example:
+	//   bridgePool(16, {
+	//       "kind": "subprocess",
+	//       "cmd":  "python3",
+	//       "args": ["yara_bridge.py"],
+	//       "timeout_seconds": 30
+	//   }, {
+	//       "init": fn(b) { return bridgeCall(b, "load", ["rules.yar"]) }
+	//   })
 	Builtins["bridgePool"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) < 3 || len(args) > 4 {
-			return runtimeError("bridgePool expects 3 or 4 arguments (n, cmd, args, opts?)", ast.Pos{})
+		if len(args) < 2 || len(args) > 3 {
+			return runtimeError("bridgePool expects 2 or 3 arguments (n, transport, opts?)", ast.Pos{})
 		}
 		nArg, ok := args[0].(*Integer)
 		if !ok || nArg.Value < 1 {
 			return typeError(fmt.Sprintf("bridgePool: n must be a positive integer, got %s", args[0].Type()), ast.Pos{})
 		}
-		cmdArg, ok := args[1].(*String)
+		transport, ok := args[1].(*Hash)
 		if !ok {
-			return typeError(fmt.Sprintf("bridgePool: cmd must be string, got %s", args[1].Type()), ast.Pos{})
-		}
-		argsArr, ok := args[2].(*Array)
-		if !ok {
-			return typeError(fmt.Sprintf("bridgePool: args must be array, got %s", args[2].Type()), ast.Pos{})
-		}
-		cmdArgs := make([]string, len(argsArr.Elements))
-		for i, el := range argsArr.Elements {
-			s, ok := el.(*String)
-			if !ok {
-				return typeError(fmt.Sprintf("bridgePool: args[%d] must be string, got %s", i, el.Type()), ast.Pos{})
-			}
-			cmdArgs[i] = s.Value
+			return typeError(fmt.Sprintf("bridgePool: transport must be a hash, got %s", args[1].Type()), ast.Pos{})
 		}
 
-		var opts bridgeOpts
+		// Dispatch on kind. Only subprocess is implemented today.
+		kindObj := hashLookup(transport, "kind")
+		if kindObj == nil {
+			return bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+				"bridgePool: transport hash missing required key 'kind'")
+		}
+		kindStr, ok := kindObj.(*String)
+		if !ok {
+			return bridgeError("BRIDGE_TRANSPORT_MISCONFIGURED",
+				fmt.Sprintf("bridgePool: 'kind' must be a string, got %s", kindObj.Type()))
+		}
+		switch kindStr.Value {
+		case "subprocess":
+			// fall through
+		case "worker", "remote":
+			return bridgeError("BRIDGE_TRANSPORT_UNAVAILABLE",
+				fmt.Sprintf("bridgePool: transport kind %q is not yet implemented", kindStr.Value))
+		default:
+			return bridgeError("BRIDGE_TRANSPORT_UNKNOWN",
+				fmt.Sprintf("bridgePool: unknown transport kind %q (known: 'subprocess')", kindStr.Value))
+		}
+
+		cmd, cmdArgs, opts, perr := parseSubprocessTransport(transport)
+		if perr != nil {
+			return perr
+		}
+
+		// Pool-only opts (init).
 		var initFn Object
-		if len(args) == 4 {
-			// Pull the init callable out before handing the rest to the shared
-			// option parser — parseBridgeOpts doesn't know about pool-only keys.
-			if h, ok := args[3].(*Hash); ok {
+		if len(args) == 3 {
+			if h, ok := args[2].(*Hash); ok {
 				initKey := HashKey{Type: STRING_OBJ, Value: "init"}
 				if pair, found := h.Pairs[initKey]; found {
 					if _, isNull := pair.Value.(*Null); !isNull {
 						initFn = pair.Value
 					}
 				}
+			} else if _, isNull := args[2].(*Null); !isNull {
+				return typeError(fmt.Sprintf("bridgePool: opts must be a hash or null, got %s", args[2].Type()), ast.Pos{})
 			}
-			parsed, perr := parseBridgeOpts(args[3])
-			if perr != nil {
-				return perr
-			}
-			opts = parsed
-		} else {
-			parsed, _ := parseBridgeOpts(nil)
-			opts = parsed
 		}
 
 		n := int(nArg.Value)
@@ -165,7 +189,7 @@ func init() {
 		// which the OS already parallelises; sequential keeps error reporting
 		// predictable (first failure aborts the rest).
 		for i := 0; i < n; i++ {
-			b, errObj := spawnBridge(cmdArg.Value, cmdArgs, opts)
+			b, errObj := spawnBridge(cmd, cmdArgs, opts)
 			if errObj != nil {
 				// Roll back any bridges we already started so we don't leak
 				// subprocesses on a partial failure.
