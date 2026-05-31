@@ -300,6 +300,23 @@ tail -f /tmp/debug.lextape | grep --line-buffered '"kind":"error"'
 
 **Real example:** SecretHunter's UI was flickering on every frame. A one-minute tape session caught `progressBar expects 7 arguments` firing at 60fps — silently aborting the render loop mid-draw, every frame. The same mechanism caught a 2310-errors-per-second storm in another app that looked like an unresponsive UI from the outside.
 
+**Real example — the bug static reading could not find:** After a scan finished, SecretHunter's sidebar went dead — the SCAN button, checkboxes, and dropdowns all stopped responding — yet the results tree was still fully browsable, and the "Scan complete" toast never appeared. Nothing in the source looked wrong: it parsed cleanly, the suspect code paths were all correctly guarded, and reading the 1700-line draw loop by eye turned up nothing. The breakthrough came only from a tape:
+
+```bash
+# Record a tape while the app runs (the built klex binary writes it directly):
+KLEX_PATH=. klex --record-tape=/tmp/sh.lextape examples/SecretHunter/secretHunterUI.lex
+# Run a scan in the app, close it, then inspect the tape for errors:
+go run ./tools/tapetool show /tmp/sh.lextape --filter error
+```
+
+The tape was unambiguous — from the moment the scan completed, **every single frame** threw the same line:
+
+```
+#5152  error  [TypeError] uiBeginRow: all arguments must be integers
+```
+
+One call in the post-scan performance footer passed `float(...)` coordinates to `uiBeginRow`, which requires integers. Because that error aborted each frame *before* `uiEnd()` ran, hover state never updated (so every hover-driven widget went dead) and queued toasts never rendered — while the findings tree survived on a raw `mouseClicked()` check earlier in the frame. Three separate symptoms, one root cause, invisible to the eye but obvious the instant the tape named the line. A per-frame error that aborts a render loop produces no crash and no log — the tape is the only thing that sees it.
+
 It turns out "give an AI a live window into your program's runtime" is an unreasonably effective debugging strategy.
 
 ---
@@ -344,7 +361,7 @@ The restraint is intentional. No decorators, no metaclasses, no reactive state s
 
 **Windows** — v0.3.35 passes 45 of 47 stdlib tests on a fresh install (the two failures are test-content portability issues, not interpreter bugs). v0.3.37 is untested on Windows.
 
-**Linux** — v0.3.35 has been verified and is working. v0.3.37 is untested on Linux.
+**Linux** — v0.3.37 confirmed working, including the desktop graphics/UI stack and the WASM build. The only test currently failing on Linux is `hashConcurrentTest.lex`.
 
 If you hit anything platform-specific, a GitHub issue with reproduction steps is the fastest way to get it looked at.
 

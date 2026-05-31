@@ -167,6 +167,26 @@ func requireIntArgs(name, msg string, args []Object) ([]int, Object) {
 	return out, nil
 }
 
+// requireFloatArgs decodes a known-arity slice of numeric args, accepting
+// either *Integer or *Float (a literal 10 and a computed 10.5 are both fine).
+// Used by the layout-cursor builtins, whose documented signatures are `: float`
+// and whose sibling advance functions (uiRowAdvance/uiColAdvance) already accept
+// both. Returns the values as float32 ready for the float-native graphics layer.
+func requireFloatArgs(name, msg string, args []Object) ([]float32, Object) {
+	out := make([]float32, len(args))
+	for i, a := range args {
+		switch v := a.(type) {
+		case *Integer:
+			out[i] = float32(v.Value)
+		case *Float:
+			out[i] = float32(v.Value)
+		default:
+			return nil, typeError(name+": "+msg, ast.Pos{})
+		}
+	}
+	return out, nil
+}
+
 // rgbaFromArray converts a kLex [r,g,b,a] *Array into [4]float32.
 // Accepts Integer or Float per slot.
 func rgbaFromArray(a *Array) ([4]float32, bool) {
@@ -362,14 +382,18 @@ func init() {
 		if len(args) != 4 {
 			return typeError("uiBeginRow expects 4 arguments: x, y, h, gap", ast.Pos{})
 		}
-		vals, err := requireIntArgs("uiBeginRow", "all arguments must be integers", args)
+		// Accept int OR float — matches the documented `: float` signature and
+		// the sibling uiRowAdvance. Previously this required ints, which silently
+		// aborted render loops when a caller passed computed float coords (the
+		// SecretHunter post-scan freeze, found via --record-tape 2026-05-31).
+		vals, err := requireFloatArgs("uiBeginRow", "x, y, h, gap must be numbers", args)
 		if err != nil {
 			return err
 		}
-		uiCore.rowCurX = float32(vals[0])
-		uiCore.rowY = float32(vals[1])
-		uiCore.rowH = float32(vals[2])
-		uiCore.rowGap = float32(vals[3])
+		uiCore.rowCurX = vals[0]
+		uiCore.rowY = vals[1]
+		uiCore.rowH = vals[2]
+		uiCore.rowGap = vals[3]
 		return NULL
 	}}
 	Builtins["uiRowX"] = &Builtin{Fn: func(args []Object) Object { return &Integer{Value: int(uiCore.rowCurX)} }}
@@ -397,14 +421,16 @@ func init() {
 		if len(args) != 4 {
 			return typeError("uiBeginCol expects 4 arguments: x, y, w, gap", ast.Pos{})
 		}
-		vals, err := requireIntArgs("uiBeginCol", "all arguments must be integers", args)
+		// Accept int OR float — matches the documented `: float` signature and
+		// the sibling uiColAdvance (see uiBeginRow note above).
+		vals, err := requireFloatArgs("uiBeginCol", "x, y, w, gap must be numbers", args)
 		if err != nil {
 			return err
 		}
-		uiCore.colX = float32(vals[0])
-		uiCore.colCurY = float32(vals[1])
-		uiCore.colW = float32(vals[2])
-		uiCore.colGap = float32(vals[3])
+		uiCore.colX = vals[0]
+		uiCore.colCurY = vals[1]
+		uiCore.colW = vals[2]
+		uiCore.colGap = vals[3]
 		return NULL
 	}}
 	Builtins["uiColX"] = &Builtin{Fn: func(args []Object) Object { return &Integer{Value: int(uiCore.colX)} }}

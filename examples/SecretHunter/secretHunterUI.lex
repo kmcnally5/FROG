@@ -1513,7 +1513,7 @@ window(1100, 800, "Secret Hunter", fn(frame) {
             rect(float(x), float(fy) + 8.0, 1.0, 24.0)
         }
 
-        uiBeginRow(float(mainX) + 18.0, float(fy + 11), 18.0, 0)
+        uiBeginRow(mainX + 18, fy + 11, 18, 0)
 
         if frameCounts[0] > 0 { fillC(theme["crit"]) }
         else { fillC(theme["low"]) }
