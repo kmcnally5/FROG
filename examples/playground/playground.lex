@@ -317,8 +317,8 @@ let shareMsgFrames  = 0
 
 
 // Config state
-let currentTheme = "nebula"
-let prevTheme    = "nebula"
+let currentTheme = "dark"
+let prevTheme    = "dark"
 
 // ── Load documentation index ──────────────────────────────────────────────────
 
@@ -388,22 +388,46 @@ fn searchDocs(q) {
     let total = len(docs)
     if total == 0 { return [] }
     let lq = lower(q)
-    let results = makeArray(30, null)
-    let count = 0
+
+    // Three relevance tiers so the most on-point matches lead, instead of
+    // being buried under commands that merely mention the query in their
+    // description (searching "print" otherwise surfaces anything whose
+    // summary says "println" / "printf" / "Prints").
+    let prefixHits  = makeArray(30, null)   // name starts with the query
+    let nameHits    = makeArray(30, null)   // name contains the query (not prefix)
+    let summaryHits = makeArray(30, null)   // only the summary contains it
+    let pc = 0
+    let nc = 0
+    let sc = 0
+
     let i = 0
-    while i < total && count < 30 {
+    while i < total {
         let e = docs[i]
         let name = e["name"]
-        let summary = e["summary"]
         if type(name) != "STRING" { i = i + 1  continue }
+        let summary = e["summary"]
         if type(summary) != "STRING" { summary = "" }
-        if indexOf(lower(name), lq) >= 0 || indexOf(lower(summary), lq) >= 0 {
-            results[count] = e
-            count = count + 1
+        let pos = indexOf(lower(name), lq)
+        if pos == 0 {
+            if pc < 30 { prefixHits[pc] = e  pc = pc + 1 }
+        } else if pos > 0 {
+            if nc < 30 { nameHits[nc] = e  nc = nc + 1 }
+        } else if indexOf(lower(summary), lq) >= 0 {
+            if sc < 30 { summaryHits[sc] = e  sc = sc + 1 }
         }
         i = i + 1
     }
-    return slice(results, 0, count)
+
+    // Concatenate the tiers in priority order, capped at 30 results.
+    let out = makeArray(30, null)
+    let oc = 0
+    let k = 0
+    while k < pc && oc < 30 { out[oc] = prefixHits[k]   oc = oc + 1  k = k + 1 }
+    k = 0
+    while k < nc && oc < 30 { out[oc] = nameHits[k]     oc = oc + 1  k = k + 1 }
+    k = 0
+    while k < sc && oc < 30 { out[oc] = summaryHits[k]  oc = oc + 1  k = k + 1 }
+    return slice(out, 0, oc)
 }
 
 // ── Config helpers ────────────────────────────────────────────────────────────
@@ -446,6 +470,47 @@ let CFG_LBL_Y   = CONT_Y
 let CFG_THEME_Y = CFG_LBL_Y + 28
 
 let TAB_LABELS = ["Output", "Docs", "Config"]
+
+// drawWrappedLine draws `text` word-wrapped to maxChars per visual row, from
+// (x, y), advancing by lh per row. Output is monospace so char count == pixel
+// width. A single token longer than the line is hard-broken so nothing
+// overflows. Returns the y after the last row so the caller continues below.
+fn drawWrappedLine(text, x, y, lh, maxChars) {
+    if text == "" { return y + lh }
+    let words = split(text, " ")
+    let cur = ""
+    let ty  = y
+    let wi  = 0
+    while wi < len(words) {
+        let w = words[wi]
+        // Hard-break a single word that is wider than the whole line.
+        while len(w) > maxChars {
+            if cur != "" {
+                label(cur, x, ty, 0.42)
+                ty  = ty + lh
+                cur = ""
+            }
+            label(substr(w, 0, maxChars), x, ty, 0.42)
+            ty = ty + lh
+            w  = substr(w, maxChars, len(w))
+        }
+        let candidate = w
+        if cur != "" { candidate = cur + " " + w }
+        if len(candidate) > maxChars && cur != "" {
+            label(cur, x, ty, 0.42)
+            ty  = ty + lh
+            cur = w
+        } else {
+            cur = candidate
+        }
+        wi = wi + 1
+    }
+    if cur != "" {
+        label(cur, x, ty, 0.42)
+        ty = ty + lh
+    }
+    return ty
+}
 
 window(1280, 820, "kLex Playground", fn(frame) {
     setTheme(currentTheme)
@@ -491,19 +556,19 @@ window(1280, 820, "kLex Playground", fn(frame) {
         shareMsgFrames = 0
     }
 
-    // Share feedback disappears after ~180 frames (~3s at 60fps)
+    // Copy/share feedback lifecycle — disappears after ~180 frames (~3s at
+    // 60fps). The message itself is drawn in the footer status bar (below),
+    // clear of the toolbar and the example dropdown.
     if len(shareMsg) > 0 {
         shareMsgFrames = shareMsgFrames + 1
         if shareMsgFrames > 180 {
             shareMsg       = ""
             shareMsgFrames = 0
-        } else {
-            label(shareMsg, 1018, 19, 0.42)
         }
     }
 
     // ── Left pane: code editor ────────────────────────────────────────────────
-    code = textArea("", code, EDGE, CY, LEFT_W, CH)
+    code = textArea("", code, EDGE, CY, LEFT_W, CH, "klex")
 
     // ── Right pane: tabs ──────────────────────────────────────────────────────
     rightTab = tabs(RX, CY, RW, TAB_LABELS, rightTab)
@@ -541,9 +606,33 @@ window(1280, 820, "kLex Playground", fn(frame) {
             label("Press Run or Cmd+Enter to execute your code",
                   RX + 60, CONT_Y + CONT_H / 2, 0.42)
         } else {
-            // Read-only display — do not capture return value so output
-            // cannot be accidentally cleared by keyboard events.
-            textArea("", output, RX, CONT_Y, RW, CONT_H)
+            // Plain text drawn straight onto the background — no textbox
+            // container. Long lines are word-wrapped to the pane width so
+            // output never runs off the right edge. The output font is
+            // monospace, so character count equals pixel width — we wrap by
+            // char count (no per-character measuring).
+            let lh = lineHeight(0.42)
+            // Measure the char width with the ACTUAL font label() renders in.
+            // The string-only textWidth() uses a fixed 8px base font and badly
+            // overestimates how many chars fit (→ effectively no wrapping); the
+            // font-bound form measures monoFont at its real size, matching the
+            // text we draw.
+            let charW = textWidth("0", 0.42)
+            if monoFont != null { charW = textWidth(monoFont, "0", 0.42) }
+            let maxChars = int(float(RW - 14) / charW)
+            if maxChars < 1 { maxChars = 1 }
+            let yMax = CONT_Y + CONT_H
+            // Start below the Copy button (top-right) so the first lines of
+            // output don't run underneath it.
+            let ty   = CONT_Y + 36
+            pushClip(RX, CONT_Y, RW, CONT_H)
+            let lines = split(output, "\n")
+            let li = 0
+            while li < len(lines) && ty < yMax {
+                ty = drawWrappedLine(lines[li], RX, ty, lh, maxChars)
+                li = li + 1
+            }
+            popClip()
         }
         if monoFont != null { uiResetFont() }
     }
@@ -606,6 +695,9 @@ window(1280, 820, "kLex Playground", fn(frame) {
     let lineCount  = len(lines)
     let charCount  = len(code)
     let statusL    = "Lines: " + str(lineCount) + "   Chars: " + str(charCount)
+    if len(shareMsg) > 0 {
+        statusL = shareMsg + "      " + statusL
+    }
     let statusR    = ""
     if execTimeMs > 0 {
         statusR = "Last run: " + str(execTimeMs) + "ms"
@@ -623,6 +715,12 @@ window(1280, 820, "kLex Playground", fn(frame) {
     if len(statusR) > 0 {
         label(statusR, 1130, STATUS_Y + 7, 0.38)
     }
+
+    // Centred tagline — the gold nugget: this whole IDE is FROG itself,
+    // compiled to WebAssembly and running in the browser.
+    let tagline = "This entire IDE is a FROG program — compiled to WebAssembly, running in your browser"
+    let tagW    = textWidth(tagline, 0.38)
+    label(tagline, int((1280.0 - tagW) / 2.0), STATUS_Y + 7, 0.38)
 
     uiEnd()
 })

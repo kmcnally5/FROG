@@ -104,7 +104,7 @@ func themePreset(name string) (uiPalette, uiStyle, bool) {
 			trackFill:      [4]float32{0.30, 0.65, 1.00, 1},
 			handle:         [4]float32{0.96, 0.97, 0.99, 1},
 			inputBg:        [4]float32{0.12, 0.14, 0.18, 1},
-			inputFocusBg:   [4]float32{0.16, 0.20, 0.28, 1},
+			inputFocusBg:   [4]float32{0.09, 0.15, 0.30, 1}, // deep blue — high contrast with near-white text
 			shadow:         [4]float32{0.00, 0.00, 0.00, 0.85},
 		}, s, true
 
@@ -128,7 +128,7 @@ func themePreset(name string) (uiPalette, uiStyle, bool) {
 			trackFill:      [4]float32{1.00, 0.95, 0.00, 1},
 			handle:         [4]float32{1.00, 1.00, 1.00, 1},
 			inputBg:        [4]float32{0.00, 0.00, 0.00, 1},
-			inputFocusBg:   [4]float32{0.20, 0.18, 0.00, 1},
+			inputFocusBg:   [4]float32{0.13, 0.12, 0.02, 1}, // dark, low-yellow so white text stays crisp
 			shadow:         [4]float32{1.00, 1.00, 1.00, 0.50}, // light glow
 		}, s, true
 	}

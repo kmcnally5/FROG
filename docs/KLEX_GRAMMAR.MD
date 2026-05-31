@@ -1612,7 +1612,7 @@ if keyPressed("TAB") {
 
 ### Multi-line Input
 
-* `textArea(label: STRING, text: STRING, x, y, w, h: INTEGER [, size: FLOAT])` → `STRING` — multiline editable text box; click to focus; Enter for newline; mouse wheel scrolls; label drawn above box
+* `textArea(label: STRING, text: STRING, x, y, w, h: INTEGER [, size: FLOAT] [, syntax: STRING])` → `STRING` — multiline editable text box; click to focus; Enter for newline; mouse wheel scrolls; label drawn above box. The optional trailing args are order-independent: a number sets the font scale, the string `"klex"` enables kLex syntax highlighting (colours adapt to the theme background)
 
 ### Data Grid
 

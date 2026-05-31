@@ -36,25 +36,37 @@ type wrappedLine struct {
 func (l wrappedLine) endRune() int { return l.startRune + l.runeCount }
 
 // softWrapTextWithOffsets is the offset-aware companion to softWrapText.
-// It runs the same wrap algorithm then re-derives rune offsets by walking
-// the original text — correct for all three cases the wrap produces (hard
-// newline consumed, space-eaten soft wrap, per-rune fallback split).
+// It derives each visual line's rune offset DURING construction by counting
+// the separators the wrap consumes, rather than guessing afterwards:
+//
+//   - between two hard lines (split on '\n') exactly one '\n' is consumed;
+//   - between two soft-wrapped pieces of the same hard line, at most one
+//     space is consumed (per-rune fallback breaks consume nothing).
+//
+// The earlier implementation re-derived offsets with a `runesMatchAt`
+// heuristic that skipped a separator only when the next line did NOT match
+// at the cursor. That check is vacuously true for an EMPTY line (the needle
+// is empty), so the '\n' before a blank line was never skipped — and every
+// line after a blank line drifted one rune too early, accumulating per blank
+// line. That misplaced the caret (drawn one+ chars too far right) even though
+// the edit position itself was correct. Counting separators explicitly fixes
+// it for blank lines, soft wraps, and per-rune fallbacks alike.
 func softWrapTextWithOffsets(text string, maxW, scale float32) []wrappedLine {
-	lines := softWrapText(text, maxW, scale)
 	runes := []rune(text)
-	out := make([]wrappedLine, len(lines))
+	var out []wrappedLine
 	cursor := 0
-	for i, line := range lines {
-		lineRunes := []rune(line)
-		if !runesMatchAt(runes, cursor, lineRunes) && cursor < len(runes) {
-			cursor++
+	for hi, hard := range strings.Split(text, "\n") {
+		if hi > 0 {
+			cursor++ // the '\n' that separated this hard line from the previous one
 		}
-		out[i] = wrappedLine{
-			text:      line,
-			startRune: cursor,
-			runeCount: len(lineRunes),
+		for vi, vline := range wrapOneLine(hard, maxW, scale) {
+			vRunes := []rune(vline)
+			if vi > 0 && cursor < len(runes) && runes[cursor] == ' ' && !runesMatchAt(runes, cursor, vRunes) {
+				cursor++ // a single space consumed by this soft-wrap break
+			}
+			out = append(out, wrappedLine{text: vline, startRune: cursor, runeCount: len(vRunes)})
+			cursor += len(vRunes)
 		}
-		cursor += len(lineRunes)
 	}
 	if len(out) == 0 {
 		out = append(out, wrappedLine{startRune: 0, runeCount: 0})

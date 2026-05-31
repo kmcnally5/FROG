@@ -1609,9 +1609,9 @@ var builtinSignatures = map[string]BuiltinInfo{
 		Params:        []string{"x", "y", "w", "items", "activeIdx", "size"},
 	},
 	"textArea": {
-		Signature:     "textArea(label: string, text: string, x, y, w, h: int, size?: float) -> string",
-		Documentation: "Multi-line text editing widget. Draws a labelled box at (x, y) with size w×h. Returns the updated string after applying typed characters and backspaces from the current frame. Click to focus; click elsewhere to unfocus. Supports newlines.\n\nMust be called between uiBegin() and uiEnd().",
-		Params:        []string{"label", "text", "x", "y", "w", "h", "size"},
+		Signature:     "textArea(label: string, text: string, x, y, w, h: int, size?: float, syntax?: string) -> string",
+		Documentation: "Multi-line text editing widget. Draws a labelled box at (x, y) with size w×h. Returns the updated string after applying typed characters and backspaces from the current frame. Click to focus; click elsewhere to unfocus. Supports newlines.\n\nThe two optional trailing arguments are order-independent: a number sets the font scale; the string \"klex\" turns on kLex syntax highlighting (keywords, strings, comments, numbers, operators, builtins — colours adapt to the theme background).\n\nMust be called between uiBegin() and uiEnd().",
+		Params:        []string{"label", "text", "x", "y", "w", "h", "size", "syntax"},
 	},
 	"toggle": {
 		Signature:     "toggle(label: string, x, y: int, on: bool, size?: float) -> bool",

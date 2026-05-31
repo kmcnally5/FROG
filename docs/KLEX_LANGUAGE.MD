@@ -4560,12 +4560,18 @@ tabs(x, y, w, items, activeIdx, size)
 ### Multi-Line Input
 
 ```lex
-textArea(label, text, x, y, w, h)      → string — multiline editable text box
-textArea(label, text, x, y, w, h, size)
+textArea(label, text, x, y, w, h)              → string — multiline editable text box
+textArea(label, text, x, y, w, h, size)        — with explicit font scale
+textArea(label, text, x, y, w, h, "klex")      — with kLex syntax highlighting
+textArea(label, text, x, y, w, h, size, "klex")
                               — click to focus; backspace to delete; Enter for newline
                                 Cmd/Ctrl+V paste (preserves newlines); Cmd/Ctrl+C copy;
                                 Cmd/Ctrl+X cut; mouse wheel scrolls;
                                 cursor auto-follows typing; scrollbar shown when needed
+                                The two optional trailing args are order-independent:
+                                a number sets the font scale, the string "klex" turns on
+                                syntax highlighting (keywords, strings, comments, numbers,
+                                operators, builtins). Colours adapt to the theme background.
 ```
 
 

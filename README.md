@@ -51,21 +51,22 @@ A full parallel security scanner built entirely in FROG. Scans codebases and git
 
 ## Screenshots
 
-<p align="center">
-  <a href="docs/images/screenshot2.png"><img src="docs/images/screenshot2.png" width="32%" alt="Secret Hunter — credential scanner with native OpenGL GUI"></a>
-  &nbsp;
-  <a href="docs/images/screenshot1.png"><img src="docs/images/screenshot1.png" width="32%" alt="kLex Playground — WASM browser IDE"></a>
-  &nbsp;
-  <a href="docs/images/screenshot3.png"><img src="docs/images/screenshot3.png" width="32%" alt="tadPole — AI image generator built in FROG"></a>
-</p>
-
-<p align="center">
-  <em>Secret Hunter (native OpenGL GUI)</em>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <em>kLex Playground (browser · WASM)</em>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <em>tadPole AI image generator</em>
-</p>
+<table>
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <a href="docs/images/screenshot2.png"><img src="docs/images/screenshot2.png" width="100%" alt="Secret Hunter — credential scanner with native OpenGL GUI"></a><br>
+      <em>Secret Hunter (native OpenGL GUI)</em>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="docs/images/screenshot1.png"><img src="docs/images/screenshot1.png" width="100%" alt="kLex Playground — WASM browser IDE"></a><br>
+      <em>kLex Playground (browser · WASM)</em>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="docs/images/screenshot3.png"><img src="docs/images/screenshot3.png" width="100%" alt="tadPole — AI image generator built in FROG"></a><br>
+      <em>tadPole AI image generator</em>
+    </td>
+  </tr>
+</table>
 
 ---
 

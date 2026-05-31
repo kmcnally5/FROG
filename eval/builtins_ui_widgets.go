@@ -3306,14 +3306,18 @@ func init() {
 		return &String{Value: newText}
 	}}
 
-	// ── textArea(label, text, x, y, w, h, [size]) → string ──────────
+	// ── textArea(label, text, x, y, w, h, [size], [syntax]) → string ──────────
 	// Multi-line text editor. Lines split on '\n'; Enter inserts a
 	// newline. Vertical scroll via wheel; cursor follows on edit.
 	// Horizontal scroll is intentionally NOT supported — wide lines
 	// are clipped on the right. Selection works across line boundaries.
+	// The two optional trailing args are order-independent: a number sets
+	// the font scale; the string "klex" enables kLex syntax highlighting
+	// (keyword/string/comment/number/operator/builtin colours derived from
+	// the theme background luminance).
 	Builtins["textArea"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) < 6 || len(args) > 7 {
-			return typeError("textArea expects 6-7 arguments: label, text, x, y, w, h, [size]", ast.Pos{})
+		if len(args) < 6 || len(args) > 8 {
+			return typeError("textArea expects 6-8 arguments: label, text, x, y, w, h, [size], [syntax]", ast.Pos{})
 		}
 		label, ok1 := args[0].(*String)
 		currentText, ok2 := args[1].(*String)
@@ -3324,10 +3328,24 @@ func init() {
 		if err != nil {
 			return err
 		}
-		scale, err := extractScale("textArea", args, 6, 0.5)
-		if err != nil {
-			return err
+		// Optional trailing args, order-independent: a number sets the font
+		// scale; a string selects a syntax-highlight mode ("klex"). Either,
+		// both, or neither may be supplied.
+		scale := float32(0.5)
+		syntax := ""
+		for k := 6; k < len(args); k++ {
+			switch a := args[k].(type) {
+			case *Float:
+				scale = float32(a.Value)
+			case *Integer:
+				scale = float32(a.Value)
+			case *String:
+				syntax = a.Value
+			default:
+				return typeError("textArea: optional args must be a size (number) and/or a syntax mode (string)", ast.Pos{})
+			}
 		}
+		highlight := syntax == "klex"
 
 		id := fmt.Sprintf("ta_%d", uiCore.nextID)
 		uiCore.nextID++
@@ -3778,10 +3796,38 @@ func init() {
 			}
 		}
 
-		// Lines of text.
+		// Lines of text — single colour, or per-token colours when syntax
+		// highlighting is enabled. The full text is tokenised once into a
+		// per-rune category slice; each visual line then draws consecutive
+		// same-category runs in their token colour.
+		var hlCats []synCat
+		if highlight {
+			hlCats = highlightKLex([]rune(newText))
+		}
 		for i := 0; i < visibleLines && scrollLine+i < len(wlines); i++ {
 			ly := fieldT + float32(i)*lh
-			activeRenderer.drawText(wlines[scrollLine+i].text, int(fieldL), int(ly), false, scale, uiCore.theme.widgetText)
+			wl := wlines[scrollLine+i]
+			if !highlight {
+				activeRenderer.drawText(wl.text, int(fieldL), int(ly), false, scale, uiCore.theme.widgetText)
+				continue
+			}
+			lineRunes := []rune(wl.text)
+			base := wl.startRune
+			normal := uiCore.theme.widgetText
+			bg := uiCore.theme.inputBg
+			x := fieldL
+			r := 0
+			for r < len(lineRunes) {
+				cat := catAt(hlCats, base+r)
+				s := r + 1
+				for s < len(lineRunes) && catAt(hlCats, base+s) == cat {
+					s++
+				}
+				runText := string(lineRunes[r:s])
+				activeRenderer.drawText(runText, int(x), int(ly), false, scale, syntaxColor(cat, bg, normal))
+				x += activeRenderer.textWidth(runText, scale)
+				r = s
+			}
 		}
 
 		// Blinking caret — shifted down by textTopInset so it sits
