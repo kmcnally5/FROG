@@ -180,8 +180,9 @@ const AsyncYieldInterval = 1000
 // Exposed as the __version__ builtin so FROG programs can read it.
 var KLexVersion = "unknown"
 
-// Output is the writer used by println. Defaults to os.Stdout.
-// Override this to redirect output (e.g. in WASM builds).
+// Output is the writer used by print, println and input's prompt.
+// Defaults to os.Stdout. Override this to redirect output (e.g. the
+// WASM playground redirects it to a strings.Builder to capture stdout).
 var Output io.Writer = os.Stdout
 
 // DeepFreeze is the exported entry point for other packages (the
@@ -385,7 +386,7 @@ var Builtins = map[string]*Builtin{
 	// Useful for building output on a single line across multiple calls.
 	"print": {Fn: func(args []Object) Object {
 		for _, arg := range args {
-			fmt.Print(arg.Inspect())
+			fmt.Fprint(Output, arg.Inspect())
 		}
 		return NULL
 	}},
@@ -944,7 +945,7 @@ var Builtins = map[string]*Builtin{
 			if !ok {
 				return typeError(fmt.Sprintf("input: argument must be string, got %s", args[0].Type()), ast.Pos{})
 			}
-			fmt.Print(prompt.Value)
+			fmt.Fprint(Output, prompt.Value)
 		}
 		line, err := stdinReader.ReadString('\n')
 		if err != nil {
