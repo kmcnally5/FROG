@@ -87,6 +87,23 @@ type CompiledFunction struct {
 	// validateArity + bindCallArgs to handle both shapes uniformly.
 	Variadic bool
 
+	// Params and ParamTypes carry the source-level parameter names and
+	// their optional type annotations (parallel slices; "" = unannotated),
+	// copied from the FunctionLiteral at compile time. ReturnType is the
+	// optional return-type annotation. TypeChecked is true when any
+	// annotation is present — it gates the call-time type check so
+	// unannotated functions pay nothing.
+	//
+	// These mirror eval.Function's fields so the VM enforces the SAME
+	// optional type annotations as the tree-walker, via the shared
+	// eval.CheckArgAnnotations / eval.AnnotationAccepts vocabulary.
+	// Argument checking runs in bindStackArgs/bindArgs (regular call
+	// paths); return checking runs at OpReturn via chunk.ReturnType.
+	Params      []string
+	ParamTypes  []string
+	ReturnType  string
+	TypeChecked bool
+
 	// SelfSlot is the local slot the VM should populate with the
 	// CompiledFunction itself at call time, supporting recursive
 	// references inside the function body without a full closure
@@ -113,6 +130,16 @@ type CompiledFunction struct {
 }
 
 func (cf *CompiledFunction) Type() eval.ObjectType { return CompiledFunctionType }
+
+// displayName is the name used in type-annotation error messages. Matches the
+// tree-walker's eval.fnDisplayName ("anonymous" for lambdas) so the SAME
+// source produces identical diagnostics under both interpreters.
+func (cf *CompiledFunction) displayName() string {
+	if cf.Name == "" {
+		return "anonymous"
+	}
+	return cf.Name
+}
 
 // Inspect produces a kLex-side debug string. Mirrors the
 // tree-walker's *eval.Function output so println(fn) is consistent

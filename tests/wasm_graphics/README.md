@@ -8,7 +8,8 @@ The render loop is driven by `requestAnimationFrame`; input events
 
 ```
 ./serve.sh
-# open http://localhost:8766/  → click "Run"
+# kitchen-sink demo : http://localhost:8766/         → click "Run"
+# new-builtins proof: http://localhost:8766/proof.html → click "Run"
 ```
 
 ## What's covered
@@ -17,11 +18,31 @@ The render loop is driven by `requestAnimationFrame`; input events
 - State: `background`, `fill`, `stroke`, `strokeWeight`, `noFill`, `noStroke`
 - Transform stack: `pushMatrix`, `popMatrix`, `translate`, `rotate`, `scale`
 - Shapes: `rect`, `roundedRect`, `circle`, `ellipse`, `line`, `triangle`, `arc`, `polygon`, `point`
-- Effects: `shadow`, `noShadow`, `blendMode`
+- Effects: `shadow`, `noShadow`, `blendMode`, `gradient`
 - Clipping: `pushClip`, `popClip`
-- Text: `text(str, x, y, scale?)`, `textWidth(str, scale?)`
-- Images: `loadImage(path)`, `drawImage(img, x, y [, w, h])`, `imageSize(img)`
+- Text: `text(str, x, y, scale?)`, `textWidth(str, scale?)`, `loadFont`, `textFont`
+- Images: `loadImage(path)`, `drawImage(img, x, y [, w, h])`, `imageSize(img)`,
+  `imageFromRgba(bytes, w, h)`, `imageToRgba(img)`
+- Particles: `drawParticles(xs, ys, rs, gs, bs, alphas, count, pointSize)`
 - Input: `mouseX`, `mouseY`, `mouseDown`, `mouseClicked`, `keyDown`, `keyPressed`
+- Drag-and-drop: `droppedFiles()`
+
+### New-builtins proof (`proof.html` / `proof.lex`)
+
+A focused page that proves the four builtins most recently ported from
+the desktop (GL) backend to Canvas2D:
+
+- **`gradient`** — horizontal + vertical two-colour linear fills
+- **`imageToRgba` / `imageFromRgba`** — the image-fx round-trip:
+  `imageToRgba(img)` → `_imgInvert` / `_imgSepia` → `imageFromRgba(...)` →
+  `drawImage`. This is what makes the pure-Go filters in
+  `eval/builtins_image_fx.go` usable in the browser.
+- **`drawParticles`** — an animated SoA particle field (every 10th
+  particle has alpha 0, proving the `alpha < 0.01` skip). Canvas2D draws
+  one fill per particle — fine for hundreds/low-thousands, slower than
+  the desktop GPU batch at very high counts.
+- **`saveImage`** — renders the clean "no filesystem in the browser"
+  `RuntimeError` on-canvas (export is desktop-only by design).
 
 ## Testing image loading
 
@@ -37,18 +58,14 @@ blocks the eval goroutine on a Go channel while the browser fetches
 and decodes the image asynchronously. Same cooperative-async pattern
 as worker bridges and the render loop.
 
-## What's deferred (follow-up sessions)
+## Coverage status
 
-- `loadFont`, `textFont`, `textWidth` (SDF font path — needs Canvas2D
-  metric calls or a separate text-rendering strategy)
-- `loadImage`, `drawImage`, `saveImage`, `imageFromRgba`, `imageToRgba`
-  (no FS in browser; needs OPFS or fetch shim)
-- `drawParticles`, `gradient` (GPU-specific; would need WebGL backend)
-- `shadow`, `noShadow` (Canvas2D has shadow* properties — doable, just not in MVP)
-- `pushClip`, `popClip` (`ctx.save/clip/restore` — doable, not in MVP)
-- `arc`, `polygon`, `point` (mechanical; not in MVP)
-- `droppedFiles` (drag-and-drop events on canvas)
-- `blendMode` (subset of Canvas2D's `globalCompositeOperation`)
+The Canvas2D backend now implements **every** desktop graphics builtin.
+The only intentional difference is `saveImage`, which raises a clear
+"no filesystem in the browser" error rather than writing a file —
+in-browser image export is out of scope by design (run on desktop to
+save files). See the `gradient` / `drawParticles` /
+`imageFromRgba`+`imageToRgba` notes under the proof page above.
 
 ## How the render loop works
 

@@ -118,6 +118,12 @@ void main() {
 // edges on near-axis-aligned strokes. Tweak here if visual results disagree.
 var sdfAAScale = float32(1.0)
 
+// sdfTextGamma applies a gamma curve to the SDF text coverage so antialiased
+// edges read crisp rather than washed-out under sRGB alpha blending. <1.0
+// fills thin edges (slightly heavier, sharper-looking); 1.0 = off; >1.0 thins.
+// Affects text alpha only — never layout. Tune to taste and rebuild.
+var sdfTextGamma = float32(0.85)
+
 var sdfFragmentShaderSrc string
 var texFragmentShaderSrc string
 
@@ -173,12 +179,15 @@ void main() {
         float sdf   = s.r;
         float w     = length(vec2(dFdx(sdf), dFdy(sdf))) * %f;
         float alpha = smoothstep(0.5 - w, 0.5 + w, sdf);
+        // Gamma-correct the coverage (see sdfTextGamma) so AA fringes read
+        // crisp instead of washed-out under sRGB blending.
+        alpha = pow(alpha, %f);
         fragColor   = vec4(tint.rgb, alpha * tint.a);
     } else {
         fragColor = s * tint;
     }
 }
-`+"\x00", sdfAAScale)
+`+"\x00", sdfAAScale, sdfTextGamma)
 }
 
 // Gradient shaders — two-color linear fill interpolated in the fragment shader.
@@ -2147,7 +2156,14 @@ func computeGlyphSDF(src *image.RGBA, displayW, displayH, scale int) []byte {
 func buildFontAtlas() uint32 {
 	const chars       = 96
 	const ptSize      = 16
-	const renderScale = 4   // render at 4× then compute SDF at 1×
+	// renderScale = SDF supersample; oversample stores the atlas at 3× the
+	// logical cell resolution for crisper text (storeScale=2). Logical cell
+	// size (gfx.fontCellW/H) stays in renderScale units, so on-screen size is
+	// unchanged; the per-cell UVs in text() are index fractions (idx/chars)
+	// and need no change.
+	const renderScale = 6
+	const oversample  = 3
+	const storeScale  = renderScale / oversample
 	const dpi         = 96 * renderScale
 
 	f, err := opentype.Parse(gomono.TTF)
@@ -2188,11 +2204,12 @@ func buildFontAtlas() uint32 {
 	}
 
 	// Compute display-resolution SDF from the high-res rasterisation.
-	displayW := atlasW / renderScale
-	displayH := cellH  / renderScale
-	sdfData  := computeGlyphSDF(dst, displayW, displayH, renderScale)
+	displayW := atlasW / storeScale
+	displayH := cellH  / storeScale
+	sdfData  := computeGlyphSDF(dst, displayW, displayH, storeScale)
 
-	// Store display-pixel dimensions; renderScale is now 1 (already divided).
+	// Store logical cell dimensions (renderScale units); the atlas itself is
+	// denser (storeScale) but text() sizes glyphs from these logical values.
 	gfx.fontCellW       = cellW / renderScale
 	gfx.fontCellH       = cellH / renderScale
 	gfx.fontRenderScale = 1
@@ -2273,7 +2290,12 @@ func unicodeAtlasSet() []rune {
 // Codepoints the face doesn't contain are silently skipped.
 // Returns a Font with deferred GPU upload and per-glyph UV/advance data.
 func buildProportionalFontAtlas(ttfData []byte, ptSize float64) (*Font, error) {
-	const renderScale = 4
+	// renderScale = SDF supersample (raster at this multiple, then distance-
+	// field it down). 6 (with oversample 3 → storeScale 2) stores the atlas at
+	// 3× the logical glyph resolution for crisp small text, while keeping the
+	// same storeScale=2 the SDF code is tuned for. Logical metrics use
+	// renderScale, so on-screen size/layout is unchanged.
+	const renderScale = 6
 	const dpi        = 96 * renderScale
 	const pad        = 2 // high-res px gap between glyphs to prevent SDF bleeding
 
@@ -2325,13 +2347,24 @@ func buildProportionalFontAtlas(ttfData []byte, ptSize float64) (*Font, error) {
 		d.DrawString(string(s.r))
 	}
 
-	// Downsample to display resolution and compute SDF.
-	displayW := totalHrW / renderScale
-	displayH := hrLineH  / renderScale
-	sdfData  := computeGlyphSDF(dst, displayW, displayH, renderScale)
+	// Store the SDF atlas at oversample× the logical glyph resolution so
+	// small text carries far more distance-field detail (crisper edges)
+	// WITHOUT changing on-screen size: the logical metrics below stay in
+	// renderScale units; only the stored atlas + UVs use storeScale.
+	// Degrade gracefully toward 1× for very large fonts so the single-row
+	// atlas never exceeds a safe GL texture width.
+	oversample := 3
+	storeScale := renderScale / oversample
+	for oversample > 1 && totalHrW/storeScale > 16384 {
+		oversample--
+		storeScale = renderScale / oversample
+	}
+	displayW := totalHrW / storeScale
+	displayH := hrLineH  / storeScale
+	sdfData  := computeGlyphSDF(dst, displayW, displayH, storeScale)
 
 	fnt := &Font{
-		LineH:    float32(displayH),
+		LineH:    float32(hrLineH) / float32(renderScale), // logical line height
 		atlasW:   int32(displayW),
 		atlasHpx: int32(displayH),
 		pixels:   sdfData,
@@ -2340,9 +2373,11 @@ func buildProportionalFontAtlas(ttfData []byte, ptSize float64) (*Font, error) {
 
 	atlasWf := float32(displayW)
 	for _, s := range slots {
-		advDisplay := float32(s.hrAdv-pad) / float32(renderScale)
-		x0 := float32(s.hrXOff) / float32(renderScale)
-		x1 := x0 + advDisplay
+		advDisplay := float32(s.hrAdv-pad) / float32(renderScale) // logical advance (unchanged)
+		// UVs live in atlas-texel space (storeScale), decoupled from the
+		// logical advance so the denser atlas doesn't shift layout.
+		x0 := float32(s.hrXOff) / float32(storeScale)
+		x1 := x0 + float32(s.hrAdv-pad)/float32(storeScale)
 		fnt.glyphs[s.r] = glyphMetric{
 			u0:      x0 / atlasWf,
 			u1:      x1 / atlasWf,

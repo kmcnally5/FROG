@@ -45,7 +45,10 @@ A full parallel security scanner built entirely in FROG. Scans codebases and git
 
 ## Try it Online
 
-**[Launch the kLex REPL](https://kmcnally5.github.io/FROG/)** — run FROG code directly in your browser, no installation required. Multi-line input, persistent session state, full stdlib. Powered by the WASM build — [see below](#wasm--frog-in-the-browser).
+Two zero-install browser playgrounds, both powered by the WASM build — [see below](#wasm--frog-in-the-browser):
+
+- **[Text Playground / REPL](https://kmcnally5.github.io/FROG/)** — write and run FROG code with **text output** (`print` / `println`). Multi-line input, persistent session state, full stdlib. Best for language features, algorithms, and stdlib exploration.
+- **[Graphics Playground](https://kmcnally5.github.io/FROG/graphics.html)** — write FROG **sketches that draw to a canvas**: `window()` render loop, shapes, gradients, images, particles, mouse + keyboard input. Edit your sketch, hit **Run**, **Stop** to end the loop.
 
 ---
 

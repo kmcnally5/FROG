@@ -457,6 +457,24 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 				// locals slice was supplied by the caller (Run
 				// or callCompiledOnce/Twice), which owns its
 				// lifetime, so we don't release here.
+				//
+				// Enforce the declared return type here too: a function
+				// invoked via ExternalCallable (safe/async/apply/generic
+				// map fallback) runs as a fresh execute() and returns at
+				// frameCount==0, so the post-iter check below never runs
+				// for it. Skip when retVal is already an error (don't mask
+				// it) — and the top-level program chunk has ReturnType=""
+				// so it's a no-op there.
+				if chunk.ReturnType != "" && !eval.IsError(retVal) {
+					retName := chunk.FnName
+					if retName == "" {
+						retName = "anonymous"
+					}
+					if e := eval.CheckReturnAnnotation(chunk.ReturnType, retVal, retName,
+						ast.Pos{Line: lineForOffset(chunk, pc-1)}); e != nil {
+						return e, nil
+					}
+				}
 				return retVal, nil
 			}
 			// A2 intrinsic flat-dispatch: if the frame we're
@@ -510,6 +528,24 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 			if eval.IsError(retVal) {
 				bubbleErrVal = retVal
 				goto bubbleError
+			}
+			// Enforce the callee's declared return type (if any). `chunk`
+			// is still the callee's chunk here (reassigned to the caller's
+			// below). Skip the intrinsic-finalisation path
+			// (parentFrame.iter != nil): there retVal is the assembled
+			// map/filter/reduce result attributed to the callback chunk,
+			// not a single callback return — type-checking it against the
+			// callback's annotation would be a false positive.
+			if chunk.ReturnType != "" && parentFrame.iter == nil {
+				retName := chunk.FnName
+				if retName == "" {
+					retName = "anonymous"
+				}
+				if e := eval.CheckReturnAnnotation(chunk.ReturnType, retVal, retName,
+					ast.Pos{Line: lineForOffset(chunk, pc-1)}); e != nil {
+					bubbleErrVal = e
+					goto bubbleError
+				}
 			}
 			// Inner-call return: discard everything the callee
 			// pushed (truncate to its stackBase), release its
@@ -874,6 +910,13 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 				SelfSlot:      template.SelfSlot,
 				UpvalueRefs:   template.UpvalueRefs,
 				Upvalues:      caps,
+				// Annotations are per-template, not per-capture — but they
+				// MUST be copied or a closure silently loses type checking
+				// (same class of bug as the Variadic-copy fix above).
+				Params:      template.Params,
+				ParamTypes:  template.ParamTypes,
+				ReturnType:  template.ReturnType,
+				TypeChecked: template.TypeChecked,
 			}
 			stack = append(stack, closure)
 
@@ -1688,7 +1731,14 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 			// scheme keeps memory traffic flat for the common case
 			// (no closures created inside the callee).
 			calleeLocals := acquireLocals(cf.Chunk.NumLocals)
-			bindStackArgs(cf, calleeLocals, stack, calleeIdx+1, argc)
+			if e := bindStackArgs(cf, calleeLocals, stack, calleeIdx+1, argc, ast.Pos{Line: lineForOffset(chunk, pc-2)}); e != nil {
+				// Annotation violation — release the freshly-acquired
+				// (never-pushed, uncaptured) locals back to the pool and
+				// bubble the type error.
+				releaseLocals(calleeLocals)
+				bubbleErrVal = e
+				goto bubbleError
+			}
 			// Recursion support: if the callee was compiled with a
 			// self-slot, put the CompiledFunction itself into that
 			// slot so LoadLocal of the function's own name inside
@@ -1817,7 +1867,11 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 							}
 							calleeLocals := acquireLocals(cf.Chunk.NumLocals)
 							calleeLocals[0].Value = receiver
-							bindMethodArgs(cf, calleeLocals, stack, recvIdx+1, argc)
+							if e := bindMethodArgs(cf, calleeLocals, stack, recvIdx+1, argc, callPos); e != nil {
+								releaseLocals(calleeLocals)
+								bubbleErrVal = e
+								goto bubbleError
+							}
 							stack = stack[:recvIdx]
 							frames[frameCount] = callFrame{
 								chunk:     chunk,
@@ -1986,7 +2040,11 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 					frames = grown
 				}
 				calleeLocals := acquireLocals(cf.Chunk.NumLocals)
-				bindStackArgs(cf, calleeLocals, stack, calleeIdxFB+1, argc)
+				if e := bindStackArgs(cf, calleeLocals, stack, calleeIdxFB+1, argc, callPos); e != nil {
+					releaseLocals(calleeLocals)
+					bubbleErrVal = e
+					goto bubbleError
+				}
 				if cf.SelfSlot >= 0 && cf.SelfSlot < len(calleeLocals) {
 					calleeLocals[cf.SelfSlot].Value = cf
 				}
@@ -2040,7 +2098,13 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 				}
 				goto bubbleError
 			}
-			if mapCF, isCF := mapFn.(*CompiledFunction); isCF && mapCF.NumParams == 1 && !mapCF.Variadic {
+			// !mapCF.TypeChecked: an annotated callback skips the flat-
+			// dispatch fast path and takes the generic eval.CallCallable
+			// fallback below, which enforces the callback's param/return
+			// annotations exactly like the tree-walker's map builtin. The
+			// intrinsic binds elements straight into locals and would
+			// otherwise bypass the check — this keeps TW↔VM parity.
+			if mapCF, isCF := mapFn.(*CompiledFunction); isCF && mapCF.NumParams == 1 && !mapCF.Variadic && !mapCF.TypeChecked {
 				elements := mapArr.Elements
 				if len(elements) == 0 {
 					stack = append(stack, &eval.Array{Elements: []eval.Object{}})
@@ -2137,7 +2201,9 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 				}
 				goto bubbleError
 			}
-			if filCF, isCF := filFn.(*CompiledFunction); isCF && filCF.NumParams == 1 && !filCF.Variadic {
+			// !filCF.TypeChecked: annotated callbacks take the generic
+			// fallback so their annotations are enforced — see OpMap.
+			if filCF, isCF := filFn.(*CompiledFunction); isCF && filCF.NumParams == 1 && !filCF.Variadic && !filCF.TypeChecked {
 				elements := filArr.Elements
 				if len(elements) == 0 {
 					stack = append(stack, &eval.Array{Elements: []eval.Object{}})
@@ -2240,7 +2306,9 @@ func execute(chunk *BytecodeChunk, locals []*UpvalueCell, upvalues []*UpvalueCel
 				}
 				goto bubbleError
 			}
-			if redCF, isCF := redFn.(*CompiledFunction); isCF && redCF.NumParams == 2 && !redCF.Variadic {
+			// !redCF.TypeChecked: annotated callbacks take the generic
+			// fallback so their annotations are enforced — see OpMap.
+			if redCF, isCF := redFn.(*CompiledFunction); isCF && redCF.NumParams == 2 && !redCF.Variadic && !redCF.TypeChecked {
 				elements := redArr.Elements
 				if len(elements) == 0 {
 					stack = append(stack, redInit)
@@ -2603,7 +2671,11 @@ func validateArity(cf *CompiledFunction, argc int) string {
 // functions the last declared param collects the trailing args into a
 // fresh *eval.Array. The caller still owns slots beyond cf.NumParams
 // (e.g. self-slot for recursion) and populates those separately.
-func bindStackArgs(cf *CompiledFunction, calleeLocals []*UpvalueCell, stack []eval.Object, srcStart, argc int) {
+// bindStackArgs returns a non-nil *eval.Error when the callee carries type
+// annotations and a supplied argument violates one (TypeChecked gates the
+// check, so unannotated functions pay nothing). callPos locates the error at
+// the call site. Returns nil on success.
+func bindStackArgs(cf *CompiledFunction, calleeLocals []*UpvalueCell, stack []eval.Object, srcStart, argc int, callPos ast.Pos) *eval.Error {
 	if !cf.Variadic {
 		for i := 0; i < argc; i++ {
 			calleeLocals[i].Value = stack[srcStart+i]
@@ -2615,16 +2687,28 @@ func bindStackArgs(cf *CompiledFunction, calleeLocals []*UpvalueCell, stack []ev
 		// non-nil DefaultValues entry.
 		for i := argc; i < cf.NumParams; i++ {
 			calleeLocals[i].Value = cf.DefaultValues[i]
+			// A default must satisfy its own parameter annotation.
+			if cf.TypeChecked && i < len(cf.ParamTypes) && i < len(cf.Params) {
+				if e := eval.CheckDefaultAnnotation(cf.ParamTypes[i], cf.Params[i],
+					cf.DefaultValues[i], cf.displayName(), callPos); e != nil {
+					return e
+				}
+			}
 		}
-		return
+	} else {
+		required := cf.NumParams - 1
+		for i := 0; i < required; i++ {
+			calleeLocals[i].Value = stack[srcStart+i]
+		}
+		restEls := make([]eval.Object, argc-required)
+		copy(restEls, stack[srcStart+required:srcStart+argc])
+		calleeLocals[required].Value = &eval.Array{Elements: restEls}
 	}
-	required := cf.NumParams - 1
-	for i := 0; i < required; i++ {
-		calleeLocals[i].Value = stack[srcStart+i]
+	if cf.TypeChecked {
+		return eval.CheckArgAnnotations(cf.Params, cf.ParamTypes, cf.Variadic,
+			stack[srcStart:srcStart+argc], cf.displayName(), callPos)
 	}
-	restEls := make([]eval.Object, argc-required)
-	copy(restEls, stack[srcStart+required:srcStart+argc])
-	calleeLocals[required].Value = &eval.Array{Elements: restEls}
+	return nil
 }
 
 // bindMethodArgs is the OpCallMethod-shaped variant: calleeLocals[0] is
@@ -2633,29 +2717,42 @@ func bindStackArgs(cf *CompiledFunction, calleeLocals []*UpvalueCell, stack []ev
 // self. For variadic methods, `required` = cf.NumParams - 1 still, but
 // the first one is already self; user args fill slots 1..required-1, and
 // any extras become the rest-array at slot[required].
-func bindMethodArgs(cf *CompiledFunction, calleeLocals []*UpvalueCell, stack []eval.Object, srcStart, argc int) {
+func bindMethodArgs(cf *CompiledFunction, calleeLocals []*UpvalueCell, stack []eval.Object, srcStart, argc int, callPos ast.Pos) *eval.Error {
 	if !cf.Variadic {
 		// Non-variadic method: caller already wrote slot[0]=receiver.
 		for i := 0; i < argc; i++ {
 			calleeLocals[i+1].Value = stack[srcStart+i]
 		}
-		return
+	} else {
+		required := cf.NumParams - 1
+		// Slot 0 is self (caller-populated). Required user slots start
+		// at slot 1; rest-array slot is at `required`.
+		userRequired := required - 1
+		for i := 0; i < userRequired; i++ {
+			calleeLocals[i+1].Value = stack[srcStart+i]
+		}
+		restEls := make([]eval.Object, argc-userRequired)
+		copy(restEls, stack[srcStart+userRequired:srcStart+argc])
+		calleeLocals[required].Value = &eval.Array{Elements: restEls}
 	}
-	required := cf.NumParams - 1
-	// Slot 0 is self (caller-populated). Required user slots start
-	// at slot 1; rest-array slot is at `required`.
-	userRequired := required - 1
-	for i := 0; i < userRequired; i++ {
-		calleeLocals[i+1].Value = stack[srcStart+i]
+	if cf.TypeChecked && len(cf.Params) >= 1 && len(cf.ParamTypes) >= 1 {
+		// Skip self (Params[0]/slot 0) — check only the user-supplied args
+		// against the user params. cf.Params/cf.ParamTypes are parallel
+		// with "self" prepended, so [1:] lines up with the stack args.
+		return eval.CheckArgAnnotations(cf.Params[1:], cf.ParamTypes[1:], cf.Variadic,
+			stack[srcStart:srcStart+argc], cf.displayName(), callPos)
 	}
-	restEls := make([]eval.Object, argc-userRequired)
-	copy(restEls, stack[srcStart+userRequired:srcStart+argc])
-	calleeLocals[required].Value = &eval.Array{Elements: restEls}
+	return nil
 }
 
 // bindArgs is the ExternalCallable-shaped variant: args come from a
 // []eval.Object rather than the value stack. Same arity rules.
-func bindArgs(cf *CompiledFunction, calleeLocals []*UpvalueCell, args []eval.Object) {
+// bindArgs returns a non-nil *eval.Error when the callee carries type
+// annotations and a supplied argument violates one (gated by TypeChecked).
+// This is the ExternalCallable path — args arrive as a slice rather than off
+// the value stack — so the error position is the zero Pos (line-less), matching
+// the convention for cross-interpreter boundary calls. Returns nil on success.
+func bindArgs(cf *CompiledFunction, calleeLocals []*UpvalueCell, args []eval.Object) *eval.Error {
 	if !cf.Variadic {
 		for i, a := range args {
 			calleeLocals[i].Value = a
@@ -2665,16 +2762,28 @@ func bindArgs(cf *CompiledFunction, calleeLocals []*UpvalueCell, args []eval.Obj
 		// when the eval side calls into a VM function.
 		for i := len(args); i < cf.NumParams; i++ {
 			calleeLocals[i].Value = cf.DefaultValues[i]
+			// A default must satisfy its own parameter annotation.
+			if cf.TypeChecked && i < len(cf.ParamTypes) && i < len(cf.Params) {
+				if e := eval.CheckDefaultAnnotation(cf.ParamTypes[i], cf.Params[i],
+					cf.DefaultValues[i], cf.displayName(), ast.Pos{}); e != nil {
+					return e
+				}
+			}
 		}
-		return
+	} else {
+		required := cf.NumParams - 1
+		for i := 0; i < required; i++ {
+			calleeLocals[i].Value = args[i]
+		}
+		restEls := make([]eval.Object, len(args)-required)
+		copy(restEls, args[required:])
+		calleeLocals[required].Value = &eval.Array{Elements: restEls}
 	}
-	required := cf.NumParams - 1
-	for i := 0; i < required; i++ {
-		calleeLocals[i].Value = args[i]
+	if cf.TypeChecked {
+		return eval.CheckArgAnnotations(cf.Params, cf.ParamTypes, cf.Variadic,
+			args, cf.displayName(), ast.Pos{})
 	}
-	restEls := make([]eval.Object, len(args)-required)
-	copy(restEls, args[required:])
-	calleeLocals[required].Value = &eval.Array{Elements: restEls}
+	return nil
 }
 
 // buildCallStackLines returns an innermost-first list of source lines

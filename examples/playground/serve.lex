@@ -15,6 +15,7 @@ let ROOT = _scriptDir() + "/../.."
 let s = srv.new()
 s.get("/",                            base.logged(_scriptDir() + "/index.html"))
 s.get("/index.html",                  base.logged(_scriptDir() + "/index.html"))
+s.get("/graphics.html",               base.logged(_scriptDir() + "/graphics.html"))
 s.get("/klex.wasm",                   base.logged(ROOT + "/bin/klex.wasm"))
 s.get("/wasm_exec.js",                base.logged(ROOT + "/stdlib/wasm/wasm_exec.js"))
 s.get("/style.css",                   base.logged(_scriptDir() + "/style.css"))

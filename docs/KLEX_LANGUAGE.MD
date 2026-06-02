@@ -20,7 +20,7 @@ The kLex language is nicknamed FROG: **Functional, Reactive, Opinionated, Govern
 - [Modules](#modules)
 - [Structs](#structs)
 - [Enums](#enums)
-- [Async / Await](#async-await)
+- [Async / Await](#async--await)
 - [Channels](#channels)
 - [Actor Model](#actor-model)
 - [Native Bridges](#native-bridges)
@@ -31,9 +31,9 @@ The kLex language is nicknamed FROG: **Functional, Reactive, Opinionated, Govern
 - [MCP Client (Model Context Protocol)](#mcp-client-model-context-protocol)
 - [MCP Server (Expose a kLex Program to External Agents)](#mcp-server-expose-a-klex-program-to-external-agents)
 - [Database Access](#database-access)
-- [Error Propagation — the ? Operator](#error-propagation-the-operator)
+- [Error Propagation — the ? Operator](#error-propagation--the--operator)
 - [Bitwise Operations](#bitwise-operations)
-- [WASM / Browser-Only Builtins](#wasm-browser-only-builtins)
+- [WASM / Browser-Only Builtins](#wasm--browser-only-builtins)
 
 kLex is a small, dynamically typed, tree-walking interpreter written in Go. It is strict about types, has no implicit coercion, and handles errors the Go way — by returning them as values rather than throwing exceptions.
 
@@ -1016,7 +1016,7 @@ environment — they are not frozen at definition time.
 
 ### Optional Type Annotations
 
-Function parameters and return types can be annotated with type names. Type annotations are optional and purely for documentation and IDE support — they are not enforced at runtime.
+Function parameters and return types can be annotated with type names. Annotations are **optional**, but where present they are **enforced at runtime** — on both the tree-walker and the bytecode VM, identically. A type violation raises a `TypeError` at the call boundary, naming the offending parameter, instead of surfacing as a confusing operator error deep inside the body. Annotations are opt-in but recommended: the `_` aside, annotating new code is the project's typing convention.
 
 Syntax: type-first, with return type after the closing parenthesis.
 
@@ -1034,19 +1034,33 @@ fn process(array data) {
 }
 ```
 
-Valid type names: integer, float, string, boolean, array, hash, function, null, task, channel, error, tuple, struct
+**Valid type names:**
 
-Rules: - Type annotations are optional (not required). - If any parameter has a type annotation, ALL parameters must be annotated
+- Primitives: `int` (alias `integer`), `float`, `number` (int or float, alias `num`), `string` (alias `str`), `bool` (alias `boolean`), `null`, `bytes`
+- Collections: `array`, `hash` (alias `map`)
+- Callable: `function` (alias `fn`)
+- Concurrency: `channel`, `task`
+- Other: `tuple`, `error`, `image`, `font`
+- Escape hatch: `any` (accepts any value)
+- User types: any `struct` or `enum` type name, e.g. `Point` — the value must be an instance of that exact type
 
-```lex
-(all-or-nothing rule).
-```
+**What is enforced:**
 
-- Return type annotation is optional even if parameters are annotated. - Annotations apply to named functions, anonymous functions, and struct methods. - Type annotations improve IDE hover tooltips and enable better code
+- Each annotated parameter is checked against the supplied argument.
+- For a variadic parameter (`int nums...`), the annotation applies to **each** collected element.
+- A defaulted parameter's default value must itself satisfy the annotation (checked when the default is applied).
+- The return type is checked against the value the function returns — including the implicit `null` when a body with a declared return type falls off the end.
+- Struct methods, anonymous functions, closures, and callbacks passed to `map`/`filter`/`reduce` are all enforced the same way.
+- **Strict null:** a typed parameter rejects `null` unless it is annotated `any` or `null`. There is no nullable shorthand yet.
+- An annotation that names no built-in type and matches no struct/enum instance fails — this catches typos as well as genuine type mismatches.
 
-```lex
-documentation without changing runtime behavior.
-```
+**Rules:**
+
+- Type annotations are optional (not required).
+- If any parameter has a type annotation, ALL parameters must be annotated — mixing is a `ParseError` (the all-or-nothing rule).
+- A return type annotation is optional even when parameters are annotated.
+- Annotations apply to named functions, anonymous functions, and struct methods.
+- Annotations also improve IDE hover tooltips and signature help.
 
 Example with mixed features:
 

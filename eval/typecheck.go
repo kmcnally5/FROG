@@ -113,3 +113,188 @@ func undefinedIdentifierMessage(name string) string {
 	}
 	return "undefined variable: " + name
 }
+
+// -------------------- FUNCTION TYPE ANNOTATIONS --------------------
+//
+// kLex function parameters and return values may carry optional type
+// annotations (type-first syntax: `fn add(int a, int b) : int { ... }`).
+// Annotations are OPT-IN per function (the parser enforces all-or-nothing on
+// the parameter list) and, when present, ENFORCED at call time here.
+//
+// This extends kLex's strict-typing rule from operators to function contracts:
+// a wrong-typed argument fails loudly AT THE CALL BOUNDARY, naming the
+// parameter — instead of surfacing as a confusing operator error deep inside
+// the body. Unannotated functions pay nothing: the call paths gate every check
+// behind fn.TypeChecked.
+//
+// Design decisions (Karl, 2026-06-02):
+//   - Strict null: null satisfies only `null` or `any`. There is no implicit
+//     nullability — `T?` optional syntax is deferred future work.
+//   - Both params AND return values are enforced.
+//   - A non-keyword annotation is treated as a user struct/enum type name and
+//     matched against the value's concrete type name; anything else fails
+//     (this catches typos and genuine type mismatches alike).
+
+// HasTypeAnnotations reports whether a function carries any enforceable
+// annotation — any non-empty param type, or a return type. Computed once at
+// function construction (tree-walker *Function and VM *CompiledFunction both)
+// and cached in a TypeChecked flag so the common unannotated case skips the
+// per-call check entirely.
+func HasTypeAnnotations(paramTypes []string, returnType string) bool {
+	if returnType != "" {
+		return true
+	}
+	for _, t := range paramTypes {
+		if t != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// AnnotationAccepts reports whether a runtime value satisfies a parameter or
+// return-type annotation. typeName is the source-level annotation — either a
+// built-in type keyword (with common aliases) or a user-defined struct/enum
+// name. Callers skip this for unannotated ("") slots before reaching here.
+//
+// Exported so the bytecode VM (package vm) shares this exact vocabulary —
+// there is ONE definition of what each type keyword accepts, used by both
+// interpreters.
+func AnnotationAccepts(typeName string, obj Object) bool {
+	switch typeName {
+	case "any":
+		return true
+	case "int", "integer":
+		return obj.Type() == INTEGER_OBJ
+	case "float":
+		return obj.Type() == FLOAT_OBJ
+	case "number", "num":
+		return obj.Type() == INTEGER_OBJ || obj.Type() == FLOAT_OBJ
+	case "string", "str":
+		return obj.Type() == STRING_OBJ
+	case "bool", "boolean":
+		return obj.Type() == BOOLEAN_OBJ
+	case "array":
+		return obj.Type() == ARRAY_OBJ
+	case "hash", "map":
+		return obj.Type() == HASH_OBJ || obj.Type() == CONCURRENT_HASH_OBJ
+	case "function", "fn":
+		t := obj.Type()
+		return t == FUNCTION_OBJ || t == BUILTIN_OBJ || t == COMPILED_FUNCTION_OBJ
+	case "null":
+		return obj.Type() == NULL_OBJ
+	case "bytes":
+		return obj.Type() == BYTES_OBJ
+	case "tuple":
+		return obj.Type() == TUPLE_OBJ
+	case "channel":
+		return obj.Type() == CHANNEL_OBJ
+	case "task":
+		return obj.Type() == TASK_OBJ
+	case "error":
+		return obj.Type() == ERROR_OBJ
+	case "image":
+		return obj.Type() == IMAGE_OBJ
+	case "font":
+		return obj.Type() == FONT_OBJ
+	}
+	// Not a built-in keyword → treat as a user struct/enum type name and match
+	// the value's concrete type. A non-instance value (or a name mismatch)
+	// fails: it's either a real type error or a typo'd annotation.
+	switch v := obj.(type) {
+	case *StructInstance:
+		return v.Def.Name == typeName
+	case *EnumInstance:
+		return v.TypeName == typeName
+	}
+	return false
+}
+
+// CheckArgAnnotations validates supplied positional arguments against a
+// parallel (params, paramTypes) annotation list. Slice-based rather than
+// tied to *Function so the VM can pass *CompiledFunction's fields through the
+// same single implementation. Callers gate on a TypeChecked flag and run the
+// arity check first. Unannotated ("") params are skipped. For a variadic
+// function the trailing rest parameter's annotation applies to EACH collected
+// element (mirroring Go's `nums ...int`). Returns nil on success, else a
+// TypeError located at pos.
+//
+// paramTypes is assumed parallel to params (the parser guarantees this); a
+// defensive length guard avoids any out-of-range panic on the hot path.
+func CheckArgAnnotations(params, paramTypes []string, variadic bool, args []Object, fnName string, pos ast.Pos) *Error {
+	n := len(params)
+	if n == 0 || len(paramTypes) < n {
+		return nil
+	}
+	for i, arg := range args {
+		var typeName, paramName string
+		switch {
+		case variadic && i >= n-1:
+			typeName, paramName = paramTypes[n-1], params[n-1]
+		case i < n:
+			typeName, paramName = paramTypes[i], params[i]
+		default:
+			// More args than params on a non-variadic fn — the arity
+			// check already rejected this; nothing left to validate.
+			return nil
+		}
+		if typeName == "" {
+			continue
+		}
+		if !AnnotationAccepts(typeName, arg) {
+			return typeError(fmt.Sprintf("%s: parameter %q expects %s, got %s",
+				fnName, paramName, typeName, arg.Type()), pos)
+		}
+	}
+	return nil
+}
+
+// CheckReturnAnnotation validates a function's result against its return-type
+// annotation. Slice-friendly companion to CheckArgAnnotations, shared with the
+// VM. An empty returnType means no annotation (skip). A function declared with
+// a return type that falls off its body (implicit null) or returns the wrong
+// type fails here. Returns nil on success, else a TypeError at pos.
+func CheckReturnAnnotation(returnType string, result Object, fnName string, pos ast.Pos) *Error {
+	if returnType == "" {
+		return nil
+	}
+	if !AnnotationAccepts(returnType, result) {
+		return typeError(fmt.Sprintf("%s: declared return type %s, but returned %s",
+			fnName, returnType, result.Type()), pos)
+	}
+	return nil
+}
+
+// CheckDefaultAnnotation validates a defaulted parameter value against its
+// annotation — used when a caller omits an argument and the default fills the
+// slot. Without this, `fn f(string x = 42)` would silently bind an int to a
+// string-annotated parameter. Checked at bind time (not definition time) so
+// the tree-walker and VM agree on WHEN the error surfaces. Empty typeName or a
+// satisfying value → nil; otherwise a TypeError at pos.
+func CheckDefaultAnnotation(typeName, paramName string, defVal Object, fnName string, pos ast.Pos) *Error {
+	if typeName == "" || AnnotationAccepts(typeName, defVal) {
+		return nil
+	}
+	return typeError(fmt.Sprintf("%s: parameter %q default value expects %s, got %s",
+		fnName, paramName, typeName, defVal.Type()), pos)
+}
+
+// checkArgTypes / checkReturnType are the tree-walker's *Function-shaped
+// wrappers over the exported slice-based checkers above. Kept so eval call
+// sites read cleanly; both delegate to the single shared implementation.
+func checkArgTypes(fn *Function, args []Object, fnName string, pos ast.Pos) *Error {
+	return CheckArgAnnotations(fn.Params, fn.ParamTypes, fn.Variadic, args, fnName, pos)
+}
+
+func checkReturnType(fn *Function, result Object, fnName string, pos ast.Pos) *Error {
+	return CheckReturnAnnotation(fn.ReturnType, result, fnName, pos)
+}
+
+// fnDisplayName is the name used in type-error messages — the function's own
+// name, or "anonymous" for lambdas.
+func fnDisplayName(fn *Function) string {
+	if fn.Name == "" {
+		return "anonymous"
+	}
+	return fn.Name
+}

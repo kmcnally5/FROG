@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>kLex Canvas2D — new builtins proof</title>
+<style>
+body { font-family: -apple-system, system-ui, sans-serif; max-width: 900px; margin: 1.5em auto; padding: 0 1em; background: #fafafa; }
+h1 { font-size: 1.3em; margin: 0 0 .5em 0; }
+p  { color: #555; margin: 0 0 1em 0; }
+canvas { display: block; border: 1px solid #444; border-radius: 4px; background: #000; image-rendering: pixelated; }
+button { font-size: 1em; padding: 0.5em 1em; cursor: pointer; margin: 0.5em 0; }
+button:disabled { opacity: 0.5; cursor: wait; }
+pre { background: #111; color: #cfc; padding: 0.6em 1em; border-radius: 4px; overflow-x: auto; font-size: 0.85em; }
+.row { display: flex; gap: 1em; align-items: center; margin-top: 0.5em; }
+ul { color: #555; margin: 0 0 1em 1em; padding: 0; }
+</style>
+</head>
+<body>
+
+<h1>kLex Canvas2D — new builtins proof</h1>
+<p>Proves the four desktop graphics builtins ported to the browser
+Canvas2D backend. Click <strong>Run</strong>:</p>
+<ul>
+  <li><strong>gradient</strong> — horizontal + vertical linear fills</li>
+  <li><strong>imageToRgba / imageFromRgba</strong> — original → <code>_imgInvert</code> / <code>_imgSepia</code> → redrawn (the image-fx round-trip)</li>
+  <li><strong>drawParticles</strong> — animated SoA particle field (every 10th is alpha 0, proving the skip)</li>
+  <li><strong>saveImage</strong> — renders the clean "no filesystem in the browser" error on-canvas</li>
+</ul>
+
+<canvas id="klex-canvas" width="700" height="520"></canvas>
+
+<div class="row">
+  <button id="run" disabled>Loading WASM…</button>
+  <span id="status" style="color:#888"></span>
+</div>
+
+<details style="margin-top: 1em;">
+<summary>kLex script (click to view)</summary>
+<pre id="script"></pre>
+</details>
+
+<script src="wasm_exec.js"></script>
+<script>
+(async () => {
+    const status = document.getElementById('status');
+    const runBtn = document.getElementById('run');
+
+    const [scriptResp, wasmResp] = await Promise.all([
+        fetch('proof.lex'),
+        fetch('klex.wasm'),
+    ]);
+    if (!scriptResp.ok) { status.textContent = 'Failed to load proof.lex'; return; }
+    if (!wasmResp.ok)   { status.textContent = 'Failed to load klex.wasm'; return; }
+
+    const scriptText = await scriptResp.text();
+    const wasmBuffer = await wasmResp.arrayBuffer();
+
+    document.getElementById('script').textContent = scriptText;
+
+    const go = new Go();
+    const { instance } = await WebAssembly.instantiate(wasmBuffer, go.importObject);
+    go.run(instance);
+
+    runBtn.disabled = false;
+    runBtn.textContent = 'Run';
+
+    runBtn.addEventListener('click', async () => {
+        runBtn.disabled = true;
+        status.textContent = 'running…';
+        try {
+            const result = await globalThis.klex_eval(scriptText);
+            if (result.isError || result.error) {
+                status.textContent = 'error: ' + (result.error || 'see canvas');
+            } else {
+                status.textContent = 'completed';
+            }
+        } catch (e) {
+            status.textContent = 'js error: ' + (e && e.message || e);
+        } finally {
+            runBtn.disabled = false;
+        }
+    });
+})().catch(e => {
+    document.getElementById('status').textContent = 'init failed: ' + (e && e.message || e);
+});
+</script>
+
+</body>
+</html>

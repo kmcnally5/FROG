@@ -6,12 +6,23 @@ package eval
 // in the browser. Parallel to eval/builtins_graphics.go (the GLFW/OpenGL
 // implementation) which is //go:build !js.
 //
-// MVP scope: window/render loop, transform stack, basic shapes (rect,
-// circle, ellipse, line, triangle, roundedRect), fill/stroke state,
-// background, default-font text, and mouse + keyboard input. Image
-// loading, custom fonts, particles, gradients, shadows, clipping,
-// and drag-and-drop are deferred to follow-up sessions — none of them
-// are architectural risks, just mechanical translation to canvas calls.
+// Implemented: window/render loop, transform stack (push/popMatrix,
+// rotate, scale, translate), shapes (rect, circle, ellipse, arc, line,
+// point, polygon, triangle, roundedRect), fill/stroke state, background,
+// blendMode, gradient, shadows (shadow/noShadow), clipping (push/popClip),
+// text with custom fonts (loadFont/textFont), image loading + drawing
+// (loadImage/drawImage/imageSize), RGBA pixel round-trip
+// (imageFromRgba/imageToRgba — which unlocks the builtins_image_fx.go
+// filters in the browser), drawParticles, mouse + keyboard input, and
+// drag-and-drop (droppedFiles, wired to the canvas drop listener below).
+//
+// saveImage is registered but intentionally raises a clear "no filesystem
+// in the browser" RuntimeError — pixel export from the browser is out of
+// scope by design; run on desktop to write image files.
+//
+// The WASM backend now covers every desktop graphics builtin. Keep this
+// list honest: it is derived from the Builtins[…] registrations in this
+// file vs builtins_graphics.go, NOT from memory.
 //
 // The render loop uses the same cooperative-async pattern as the worker
 // bridge: window() calls requestAnimationFrame, blocks the eval
@@ -169,15 +180,19 @@ func init() {
 		// CSS-size (visual layout) stays at the requested w/h.
 		canvas.Get("style").Set("width", fmt.Sprintf("%dpx", cssW))
 		canvas.Get("style").Set("height", fmt.Sprintf("%dpx", cssH))
-		// Backing-store size scales for crisp rendering.
-		canvas.Set("width", int(float64(cssW)*dpr))
-		canvas.Set("height", int(float64(cssH)*dpr))
+		// Backing-store size scales by devicePixelRatio AND wasmSuperSample
+		// (SSAA) so Canvas2D's greyscale-only text reads crisp on standard-DPI
+		// screens. The CSS display size stays at cssW×cssH, so the browser
+		// downscales the larger backing store on screen.
+		backingScale := dpr * wasmSuperSample
+		canvas.Set("width", int(float64(cssW)*backingScale))
+		canvas.Set("height", int(float64(cssH)*backingScale))
 		js.Global().Get("document").Set("title", titleArg.Value)
 
 		ctx := canvas.Call("getContext", "2d")
-		// Apply the DPR transform once — all subsequent draw coordinates
-		// are interpreted in CSS pixels, matching widget conventions.
-		ctx.Call("scale", dpr, dpr)
+		// Draw coordinates stay in CSS pixels (widget convention); the combined
+		// DPR×supersample transform maps them onto the backing store.
+		ctx.Call("scale", backingScale, backingScale)
 
 		gfxState.canvas = canvas
 		gfxState.ctx = ctx
@@ -185,6 +200,17 @@ func init() {
 		gfxState.height = cssH
 		gfxState.initialised = true
 		gfxState.mu.Unlock()
+
+		// Reset on EVERY exit path — clean break, a drawFn error returned
+		// from inside the loop, or a panic. Without this, the in-loop error
+		// return below skipped the reset and left initialised=true, wedging
+		// the next window() call with "already open" (only visible once you
+		// run sketches back-to-back, e.g. the graphics playground).
+		defer func() {
+			gfxState.mu.Lock()
+			gfxState.initialised = false
+			gfxState.mu.Unlock()
+		}()
 
 		installInputHandlers()
 
@@ -208,6 +234,16 @@ func init() {
 			// Ask the browser for the next paint.
 			raf.Invoke(rafCallback)
 			<-gfxState.frameAck
+
+			// Cooperative stop: an external host (e.g. the graphics
+			// playground's Stop button) can set window.__klex_stop_requested
+			// to break the loop cleanly, without the sketch's drawFn having
+			// to return false. Read-and-cleared so the next run starts
+			// fresh. Inert for hosts that never set the flag.
+			if js.Global().Get("__klex_stop_requested").Truthy() {
+				js.Global().Set("__klex_stop_requested", false)
+				break
+			}
 
 			// Bump frame counter. Per-frame one-shot inputs
 			// (mouseClicked, keysPressed) MUST stay set through drawFn
@@ -278,9 +314,6 @@ func init() {
 			runtimeGosched()
 		}
 
-		gfxState.mu.Lock()
-		gfxState.initialised = false
-		gfxState.mu.Unlock()
 		return NULL
 	}}
 
@@ -359,6 +392,64 @@ func init() {
 		}
 		ctx.Set("fillStyle", col)
 		ctx.Call("fillRect", 0, 0, gfxState.width, gfxState.height)
+		// Restore the saved fillStyle so subsequent fill()s aren't surprised.
+		applyFillStyle(ctx)
+		return NULL
+	}}
+
+	// gradient fills a rectangle with a two-colour linear gradient — the
+	// Canvas2D parallel to the desktop GPU gradient in builtins_graphics.go.
+	// Same signature and semantics: color1→color2 runs left→right for dir
+	// "h" and top→bottom for "v". The active transform and clip apply
+	// automatically (Canvas gradient coords are in current user space).
+	Builtins["gradient"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 7 {
+			return typeError("gradient expects 7 arguments: x, y, w, h, color1, color2, dir", ast.Pos{})
+		}
+		x, okx := toFloat(args[0])
+		y, oky := toFloat(args[1])
+		w, okw := toFloat(args[2])
+		h, okh := toFloat(args[3])
+		if !okx || !oky || !okw || !okh {
+			return typeError("gradient: x, y, w, h must be numeric", ast.Pos{})
+		}
+		toColor4 := func(o Object) ([4]float32, bool) {
+			arr, ok := o.(*Array)
+			if !ok || len(arr.Elements) != 4 {
+				return [4]float32{}, false
+			}
+			var c [4]float32
+			for i, el := range arr.Elements {
+				f, ok := toFloat(el)
+				if !ok {
+					return [4]float32{}, false
+				}
+				c[i] = float32(f)
+			}
+			return c, true
+		}
+		c1, ok1 := toColor4(args[4])
+		c2, ok2 := toColor4(args[5])
+		if !ok1 || !ok2 {
+			return typeError("gradient: color1 and color2 must be [r,g,b,a] float arrays", ast.Pos{})
+		}
+		dirObj, ok3 := args[6].(*String)
+		if !ok3 || (dirObj.Value != "h" && dirObj.Value != "v") {
+			return typeError(`gradient: dir must be "h" (horizontal) or "v" (vertical)`, ast.Pos{})
+		}
+		ctx, ok := getCtx("gradient")
+		if !ok {
+			return runtimeError("gradient: window() must be called first", ast.Pos{})
+		}
+		x1, y1 := x+w, y // horizontal: left → right
+		if dirObj.Value == "v" {
+			x1, y1 = x, y+h // vertical: top → bottom
+		}
+		g := ctx.Call("createLinearGradient", x, y, x1, y1)
+		g.Call("addColorStop", 0, cssColor(c1))
+		g.Call("addColorStop", 1, cssColor(c2))
+		ctx.Set("fillStyle", g)
+		ctx.Call("fillRect", x, y, w, h)
 		// Restore the saved fillStyle so subsequent fill()s aren't surprised.
 		applyFillStyle(ctx)
 		return NULL
@@ -537,6 +628,75 @@ func init() {
 		ctx.Set("fillStyle", col)
 		ctx.Call("fillRect", x-half, y-half, size, size)
 		applyFillStyle(ctx) // restore so subsequent fill()-based draws aren't surprised
+		return NULL
+	}}
+
+	// drawParticles(xs, ys, rs, gs, bs, alphas, count, pointSize) → null
+	//
+	// Browser parallel to the desktop GPU particle batch. SoA layout:
+	// xs/ys are positions; rs/gs/bs/alphas are per-particle colour
+	// components (0–1). Particles with alpha < 0.01 are skipped. Each live
+	// particle is a filled dot of diameter pointSize. The active transform
+	// and clip apply automatically.
+	//
+	// Perf note: Canvas2D has no batched point draw, so this is one fill
+	// per live particle — fine for hundreds/low-thousands; the desktop GL
+	// build (single draw call) will outrun it at very high counts.
+	Builtins["drawParticles"] = &Builtin{Fn: func(args []Object) Object {
+		if len(args) != 8 {
+			return runtimeError("drawParticles expects 8 arguments: xs,ys,rs,gs,bs,alphas,count,pointSize", ast.Pos{})
+		}
+		xs, ok0 := args[0].(*Array)
+		ys, ok1 := args[1].(*Array)
+		rs, ok2 := args[2].(*Array)
+		gs, ok3 := args[3].(*Array)
+		bs, ok4 := args[4].(*Array)
+		alphas, ok5 := args[5].(*Array)
+		if !ok0 || !ok1 || !ok2 || !ok3 || !ok4 || !ok5 {
+			return typeError("drawParticles: xs,ys,rs,gs,bs,alphas must be arrays", ast.Pos{})
+		}
+		cf, okc := toFloat(args[6])
+		ps, okp := toFloat(args[7])
+		if !okc || !okp {
+			return typeError("drawParticles: count and pointSize must be numbers", ast.Pos{})
+		}
+		count := int(cf)
+		// Clamp to the shortest array so a malformed SoA call can't trap
+		// the WASM runtime on an out-of-range index.
+		for _, a := range []*Array{xs, ys, rs, gs, bs, alphas} {
+			if len(a.Elements) < count {
+				count = len(a.Elements)
+			}
+		}
+		half := ps / 2
+		if count <= 0 || half <= 0 {
+			return NULL
+		}
+		ctx, ok := getCtx("drawParticles")
+		if !ok {
+			return runtimeError("drawParticles: window() must be called first", ast.Pos{})
+		}
+		drew := false
+		for i := 0; i < count; i++ {
+			a, _ := toFloat(alphas.Elements[i])
+			if a < 0.01 {
+				continue
+			}
+			x, _ := toFloat(xs.Elements[i])
+			y, _ := toFloat(ys.Elements[i])
+			r, _ := toFloat(rs.Elements[i])
+			g, _ := toFloat(gs.Elements[i])
+			b, _ := toFloat(bs.Elements[i])
+			ctx.Set("fillStyle", cssColor([4]float32{float32(r), float32(g), float32(b), float32(a)}))
+			ctx.Call("beginPath")
+			ctx.Call("arc", x, y, half, 0.0, 2*math.Pi)
+			ctx.Call("fill")
+			drew = true
+		}
+		if drew {
+			// Restore the saved fillStyle so later fill()-based draws aren't surprised.
+			applyFillStyle(ctx)
+		}
 		return NULL
 	}}
 
@@ -1109,6 +1269,128 @@ func init() {
 		}}
 	}}
 
+	// imageFromRgba(bytes, width, height) → image
+	//
+	// Browser parallel to the desktop builtin. Wraps raw RGBA8 pixels
+	// (row-major, width*height*4 bytes) into a drawable kLex Image: the
+	// pixels are painted onto an offscreen <canvas> via putImageData, and
+	// that canvas is registered as the image's draw source so drawImage()
+	// can blit it. The pixels are also kept on the Image so imageToRgba()
+	// round-trips without a readback. Bytes are copied — later caller
+	// mutations don't affect the image.
+	Builtins["imageFromRgba"] = &Builtin{Fn: func(args []Object) (res Object) {
+		if len(args) != 3 {
+			return runtimeError("imageFromRgba expects (bytes, width, height)", ast.Pos{})
+		}
+		bs, bok := args[0].(*Bytes)
+		w, wok := args[1].(*Integer)
+		h, hok := args[2].(*Integer)
+		if !bok || !wok || !hok {
+			return typeError("imageFromRgba expects (bytes: bytes, width: int, height: int)", ast.Pos{})
+		}
+		if w.Value <= 0 || h.Value <= 0 {
+			return runtimeError("imageFromRgba: width and height must be positive", ast.Pos{})
+		}
+		expected := w.Value * h.Value * 4
+		if len(bs.Value) != expected {
+			return runtimeError(fmt.Sprintf(
+				"imageFromRgba: bytes length %d does not match width*height*4 = %d",
+				len(bs.Value), expected), ast.Pos{})
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				res = runtimeError(fmt.Sprintf("imageFromRgba: offscreen canvas build failed: %v", r), ast.Pos{})
+			}
+		}()
+		pix := make([]byte, len(bs.Value))
+		copy(pix, bs.Value)
+
+		doc := js.Global().Get("document")
+		canvas := doc.Call("createElement", "canvas")
+		canvas.Set("width", w.Value)
+		canvas.Set("height", h.Value)
+		cctx := canvas.Call("getContext", "2d")
+		imgData := cctx.Call("createImageData", w.Value, h.Value)
+		// ImageData.data is a Uint8ClampedArray; view its backing buffer
+		// as a Uint8Array so CopyBytesToJS accepts it, then write pixels in.
+		u8 := js.Global().Get("Uint8Array").New(imgData.Get("data").Get("buffer"))
+		js.CopyBytesToJS(u8, pix)
+		cctx.Call("putImageData", imgData, 0, 0)
+
+		imageRegistryMu.Lock()
+		imageNextID++
+		id := imageNextID
+		imageRegistry[id] = canvas
+		imageRegistryMu.Unlock()
+
+		return &Image{TextureID: id, W: w.Value, H: h.Value, pixels: pix}
+	}}
+
+	// imageToRgba(img) → bytes
+	//
+	// Browser parallel to the desktop builtin. Returns the image's raw
+	// RGBA8 pixels (row-major, width*height*4 bytes). Source priority:
+	//   1. img.pixels — present for images made via imageFromRgba.
+	//   2. the registered draw source (HTMLImageElement from loadImage, or
+	//      an offscreen canvas) — drawn to a scratch canvas and read back
+	//      with getImageData.
+	// getImageData throws on a cross-origin-tainted canvas; the recover
+	// surfaces that as a clean kLex RuntimeError instead of a WASM trap.
+	Builtins["imageToRgba"] = &Builtin{Fn: func(args []Object) (res Object) {
+		if len(args) != 1 {
+			return runtimeError("imageToRgba expects 1 argument: img", ast.Pos{})
+		}
+		img, ok := args[0].(*Image)
+		if !ok {
+			return typeError(fmt.Sprintf("imageToRgba: argument must be an image, got %s", args[0].Type()), ast.Pos{})
+		}
+		if img.W <= 0 || img.H <= 0 {
+			return runtimeError("imageToRgba: image has no dimensions", ast.Pos{})
+		}
+		expected := img.W * img.H * 4
+		if len(img.pixels) >= expected {
+			// Defensive copy so caller mutations don't leak into the image.
+			out := make([]byte, expected)
+			copy(out, img.pixels)
+			return &Bytes{Value: out}
+		}
+		imageRegistryMu.Lock()
+		src, found := imageRegistry[img.TextureID]
+		imageRegistryMu.Unlock()
+		if !found {
+			return runtimeError("imageToRgba: image has no pixel data (was it loaded in this WASM build?)", ast.Pos{})
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				res = runtimeError(fmt.Sprintf("imageToRgba: pixel read failed (cross-origin image?): %v", r), ast.Pos{})
+			}
+		}()
+		doc := js.Global().Get("document")
+		canvas := doc.Call("createElement", "canvas")
+		canvas.Set("width", img.W)
+		canvas.Set("height", img.H)
+		cctx := canvas.Call("getContext", "2d")
+		cctx.Call("drawImage", src, 0, 0)
+		imgData := cctx.Call("getImageData", 0, 0, img.W, img.H)
+		u8 := js.Global().Get("Uint8Array").New(imgData.Get("data").Get("buffer"))
+		out := make([]byte, expected)
+		js.CopyBytesToGo(out, u8)
+		return &Bytes{Value: out}
+	}}
+
+	// saveImage(img, path) → null
+	//
+	// Desktop writes the image to disk; browsers have no filesystem, so in
+	// the WASM build this is intentionally unsupported. It is registered
+	// (rather than left undefined) purely so the failure is a clear,
+	// actionable message instead of an "undefined name" error — the same
+	// pattern _httpServe uses for browser-impossible operations. Pixel
+	// export in the browser is out of scope by design; run on desktop to
+	// save image files.
+	Builtins["saveImage"] = &Builtin{Fn: func(args []Object) Object {
+		return runtimeError("saveImage is not available in the browser — there is no filesystem. Run the script on a desktop kLex build to write image files.", ast.Pos{})
+	}}
+
 	// ── Input: mouse + keyboard ────────────────────────────────────────
 	Builtins["mouseX"] = &Builtin{Fn: func(args []Object) Object {
 		gfxState.mu.Lock()
@@ -1381,6 +1663,37 @@ func ctxTwoFloats(klexName, ctxMethod string) *Builtin {
 
 // installInputHandlers wires mouse and keyboard events on the canvas.
 // Idempotent isn't strictly required — window() rejects a second call.
+// wasmSuperSample renders the canvas backing store this many times larger
+// than devicePixelRatio, then lets the browser downscale it on display —
+// brute-force SSAA. Canvas2D fillText only does greyscale AA (no subpixel/LCD
+// like DOM text), so on standard-DPI screens its text looks softer than HTML;
+// supersampling recovers much of that crispness for text AND shapes. The cost
+// is fill-rate: 2.0 means 4× the pixels. Tune toward 1.0 if a heavy sketch
+// drops frames; 1.0 = off (DPR only). Affects every WASM graphics app.
+var wasmSuperSample = 2.0
+
+// targetIsHostEditable reports whether a key/clipboard event originated in a
+// host-page editable field (e.g. the graphics playground's <textarea> code
+// editor) rather than the canvas app. The WASM keeps its own hidden
+// "__klex_clip" textarea focused to capture clipboard events — that one is
+// explicitly NOT treated as host-editable, so canvas keyboard input keeps
+// working. For any other <input>/<textarea>/contentEditable target we let the
+// browser handle typing/paste natively instead of intercepting it.
+func targetIsHostEditable(evt js.Value) bool {
+	t := evt.Get("target")
+	if t.IsNull() || t.IsUndefined() {
+		return false
+	}
+	if t.Get("id").String() == "__klex_clip" {
+		return false
+	}
+	switch strings.ToUpper(t.Get("tagName").String()) {
+	case "INPUT", "TEXTAREA":
+		return true
+	}
+	return t.Get("isContentEditable").Truthy()
+}
+
 func installInputHandlers() {
 	canvas := gfxState.canvas
 
@@ -1526,6 +1839,9 @@ func installInputHandlers() {
 		if len(args) < 1 {
 			return nil
 		}
+		if targetIsHostEditable(args[0]) {
+			return nil // native paste into the host editor
+		}
 		evt := args[0]
 		data := evt.Get("clipboardData")
 		if data.IsUndefined() || data.IsNull() {
@@ -1564,6 +1880,12 @@ func installInputHandlers() {
 	win := js.Global().Get("window")
 	win.Call("addEventListener", "keydown", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if len(args) < 1 {
+			return nil
+		}
+		// Let the host page's own editable fields (e.g. the graphics
+		// playground editor) receive keystrokes natively — don't capture
+		// or preventDefault them for the canvas app.
+		if targetIsHostEditable(args[0]) {
 			return nil
 		}
 		rawKey := args[0].Get("key").String()
@@ -1618,6 +1940,9 @@ func installInputHandlers() {
 	}))
 	win.Call("addEventListener", "keyup", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if len(args) < 1 {
+			return nil
+		}
+		if targetIsHostEditable(args[0]) {
 			return nil
 		}
 		key := strings.ToLower(args[0].Get("key").String())

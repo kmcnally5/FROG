@@ -117,6 +117,19 @@ type BytecodeChunk struct {
 	// module-load time (not on a hot path) so the simple map shape
 	// is fine.
 	TopLevelNames map[string]int
+
+	// ReturnType is the function's optional return-type annotation
+	// ("" = none), copied from the FunctionLiteral at compile time.
+	// OpReturn reads it off the executing chunk (which is loop-local
+	// in the dispatch) to enforce the declared return type — the same
+	// check the tree-walker does at its function-return points. Empty
+	// for the top-level program chunk (top-level can't be annotated).
+	ReturnType string
+
+	// FnName is the function's source name ("" for anonymous / the
+	// top-level program), used purely to make the return-type error
+	// message match the tree-walker's wording.
+	FnName string
 }
 
 // Compiler holds the in-progress compile state. New one per chunk.
@@ -402,11 +415,11 @@ func (c *Compiler) compileNode(n ast.Node) error {
 	case *ast.EnumDecl:
 		return c.compileEnumDecl(v)
 	case *ast.EnumPattern:
-		return c.unimplementedAt(v.Pos,"EnumPattern")
+		return c.unimplementedAt(v.Pos, "EnumPattern")
 	case *ast.StructDecl:
 		return c.compileStructDecl(v)
 	case *ast.MethodDecl:
-		return c.unimplementedAt(v.Pos,"MethodDecl")
+		return c.unimplementedAt(v.Pos, "MethodDecl")
 	case *ast.ImportStmt:
 		return c.compileImport(v)
 	}
@@ -534,14 +547,14 @@ func (c *Compiler) compileInterpolatedString(s *ast.InterpolatedString) error {
 
 // compileIdent emits a Load for the named binding. Resolution order:
 //
-//	1. THIS compiler's locals     → OpLoadLocal slot
-//	2. Any enclosing compiler's   → register as an upvalue via
-//	   locals or upvalues           resolveUpvalue, OpGetUpvalue idx
-//	3. Not found                  → compile-time error (the only
-//	                                names the VM doesn't statically
-//	                                resolve are builtins, which
-//	                                CallExpr handles before reaching
-//	                                this arm)
+//  1. THIS compiler's locals     → OpLoadLocal slot
+//  2. Any enclosing compiler's   → register as an upvalue via
+//     locals or upvalues           resolveUpvalue, OpGetUpvalue idx
+//  3. Not found                  → compile-time error (the only
+//     names the VM doesn't statically
+//     resolve are builtins, which
+//     CallExpr handles before reaching
+//     this arm)
 //
 // resolveUpvalue may recurse upward through multiple compiler frames,
 // registering an upvalue chain so an Ident reaching three levels out
@@ -656,7 +669,7 @@ func (c *Compiler) compileAssign(a *ast.AssignStmt) error {
 	// the self-slot. Bare anonymous lambdas (RHS is a different
 	// shape) fall through to the regular compile path.
 	if fl, ok := a.Value.(*ast.FunctionLiteral); ok && a.Name != "_" {
-		if err := c.compileFunctionLiteralNamed(fl, a.Name); err != nil {
+		if err := c.compileFunctionLiteralNamed(fl, a.Name, a.Name); err != nil {
 			return err
 		}
 	} else if err := c.compileNode(a.Value); err != nil {
@@ -723,7 +736,7 @@ func (c *Compiler) compileLet(l *ast.LetStmt) error {
 	// inside another function's body must still allow recursive
 	// self-reference. Anonymous RHS falls through.
 	if fl, ok := l.Value.(*ast.FunctionLiteral); ok && l.Name != "_" {
-		if err := c.compileFunctionLiteralNamed(fl, l.Name); err != nil {
+		if err := c.compileFunctionLiteralNamed(fl, l.Name, l.Name); err != nil {
 			return err
 		}
 	} else if err := c.compileNode(l.Value); err != nil {
@@ -846,11 +859,11 @@ func (c *Compiler) compileInfix(n *ast.InfixExpr) error {
 // compileSwitch lowers both forms of switch into a chain of
 // equality tests + JumpIfFalse hops. Two shapes:
 //
-//   Value switch:       switch subj { case v1, v2 { body } default { } }
-//                       — every case value is compared with subj via ==.
+//	Value switch:       switch subj { case v1, v2 { body } default { } }
+//	                    — every case value is compared with subj via ==.
 //
-//   Expression switch:  switch       { case bool_expr { body } default { } }
-//                       — every case value is itself a boolean expr.
+//	Expression switch:  switch       { case bool_expr { body } default { } }
+//	                    — every case value is itself a boolean expr.
 //
 // Within one case, multiple values OR together — any match runs
 // the body. Cases are tried in source order; first match wins; no
@@ -858,16 +871,16 @@ func (c *Compiler) compileInfix(n *ast.InfixExpr) error {
 //
 // Layout (value switch with two values per case):
 //
-//   <compile subj>; StoreLocal subjSlot
-//   case 0:
-//     try_v0_0:  LoadLocal subj; <v0_0>; Eq; JumpIfFalse → try_v0_1
-//                Jump → body_0
-//     try_v0_1:  LoadLocal subj; <v0_1>; Eq; JumpIfFalse → case_1
-//                Jump → body_0
-//   body_0:      <body>; Jump → end
-//   case_1:      ... (next case or default)
-//   default:     <defaultBody>
-//   end:
+//	<compile subj>; StoreLocal subjSlot
+//	case 0:
+//	  try_v0_0:  LoadLocal subj; <v0_0>; Eq; JumpIfFalse → try_v0_1
+//	             Jump → body_0
+//	  try_v0_1:  LoadLocal subj; <v0_1>; Eq; JumpIfFalse → case_1
+//	             Jump → body_0
+//	body_0:      <body>; Jump → end
+//	case_1:      ... (next case or default)
+//	default:     <defaultBody>
+//	end:
 //
 // Expression switch is identical minus the LoadLocal/Eq pair —
 // each value is compiled directly as a bool expression.
@@ -1215,11 +1228,15 @@ func (c *Compiler) compileStructDecl(s *ast.StructDecl) error {
 	// dispatches through OpCallMethod, not the self-slot trick.
 	for _, m := range s.Methods {
 		fl := &ast.FunctionLiteral{
-			Pos:      m.Pos,
-			Params:   append([]string{"self"}, m.Params...),
-			Defaults: append([]ast.Node{nil}, m.Defaults...),
-			Variadic: m.Variadic,
-			Body:     m.Body,
+			Pos:    m.Pos,
+			Params: append([]string{"self"}, m.Params...),
+			// self is untyped; keep ParamTypes parallel to Params so the
+			// annotation checker (which indexes them together) stays aligned.
+			ParamTypes: append([]string{""}, m.ParamTypes...),
+			ReturnType: m.ReturnType,
+			Defaults:   append([]ast.Node{nil}, m.Defaults...),
+			Variadic:   m.Variadic,
+			Body:       m.Body,
 		}
 		// compileFunctionLiteralNamed with selfName="" produces an
 		// anonymous *CompiledFunction. Crucially, if the body
@@ -1228,7 +1245,10 @@ func (c *Compiler) compileStructDecl(s *ast.StructDecl) error {
 		// function-with-methods), the sub-compiler registers them
 		// as upvalues and the emit logic chooses OpMakeClosure over
 		// OpPushConst — so the runtime cf has populated Upvalues.
-		if err := c.compileFunctionLiteralNamed(fl, ""); err != nil {
+		// selfName="" (methods recurse via self.method(), not a bare
+		// self-slot), but displayName=m.Name so method type-errors and
+		// stack traces name the method instead of "anonymous".
+		if err := c.compileFunctionLiteralNamed(fl, "", m.Name); err != nil {
 			return err
 		}
 		// The cf is now on top of the stack; the def is below it.
@@ -1396,17 +1416,17 @@ func (c *Compiler) compilePipe(p *ast.PipeExpr) error {
 //
 // Approach
 //
-//   1. Create a fresh Compiler instance (newCompiler() — its own
-//      chunk, constant pool, locals map, and loopStack).
-//   2. Pre-bind every parameter as a local in slot 0..N-1. At call
-//      time, the VM places the actual args into those slots before
-//      execution begins, so the body code just LoadLocal-s by slot.
-//   3. Compile each statement in the body.
-//   4. Emit a tail PushNull + Return so a function that falls off
-//      the bottom without a `return` still produces NULL — matches
-//      the tree-walker's "missing return → null" semantics.
-//   5. Wrap the resulting chunk in a CompiledFunction and pool it
-//      as a constant on the OUTER chunk; emit PushConst <idx>.
+//  1. Create a fresh Compiler instance (newCompiler() — its own
+//     chunk, constant pool, locals map, and loopStack).
+//  2. Pre-bind every parameter as a local in slot 0..N-1. At call
+//     time, the VM places the actual args into those slots before
+//     execution begins, so the body code just LoadLocal-s by slot.
+//  3. Compile each statement in the body.
+//  4. Emit a tail PushNull + Return so a function that falls off
+//     the bottom without a `return` still produces NULL — matches
+//     the tree-walker's "missing return → null" semantics.
+//  5. Wrap the resulting chunk in a CompiledFunction and pool it
+//     as a constant on the OUTER chunk; emit PushConst <idx>.
 //
 // Variadic, closures, and parameter defaults are implemented:
 //
@@ -1437,11 +1457,14 @@ func (c *Compiler) compilePipe(p *ast.PipeExpr) error {
 //     require compiling each default as a sub-chunk evaluated at
 //     call time). Tracked as a future upgrade; the on-disk wire
 //     format already reserves the right shape via DefaultValues.
-//   - Type annotations (n.ParamTypes / n.ReturnType ignored — kLex
-//     doesn't enforce annotations at the tree-walker either, so
-//     this is parity, not a gap)
+//
+// Type annotations (n.ParamTypes / n.ReturnType) ARE enforced: they
+// flow onto CompiledFunction.{Params,ParamTypes,ReturnType,TypeChecked}
+// and chunk.ReturnType, checked in bindStackArgs/bindMethodArgs/bindArgs
+// (args) and at OpReturn (return) via the shared eval.* checkers — full
+// parity with the tree-walker.
 func (c *Compiler) compileFunctionLiteral(f *ast.FunctionLiteral) error {
-	return c.compileFunctionLiteralNamed(f, "")
+	return c.compileFunctionLiteralNamed(f, "", "")
 }
 
 // compileFunctionLiteralNamed is the inner form that knows the
@@ -1458,7 +1481,13 @@ func (c *Compiler) compileFunctionLiteral(f *ast.FunctionLiteral) error {
 // `fn(x) { x }` literals call compileFunctionLiteral (selfName="")
 // and get no self slot — recursion isn't possible for them anyway
 // since they have no name to recurse through.
-func (c *Compiler) compileFunctionLiteralNamed(f *ast.FunctionLiteral, selfName string) error {
+// selfName drives the recursion self-slot (non-empty → the function can
+// call itself by that bare name). displayName is the name shown in
+// diagnostics (stack traces, Inspect, type-annotation errors). They're
+// usually identical, but methods pass selfName="" (no bare-name recursion —
+// methods recurse via self.method()) with displayName=methodName so error
+// messages still name the method instead of "anonymous".
+func (c *Compiler) compileFunctionLiteralNamed(f *ast.FunctionLiteral, selfName, displayName string) error {
 	sub := newCompiler()
 	sub.outer = c // enables resolveUpvalue to walk back to outer scope
 	for i, p := range f.Params {
@@ -1499,7 +1528,7 @@ func (c *Compiler) compileFunctionLiteralNamed(f *ast.FunctionLiteral, selfName 
 	var defaultValues []eval.Object
 	numRequired := len(f.Params)
 	if !f.Variadic {
-		dv, numReq, derr := resolveConstantDefaults(f, selfName)
+		dv, numReq, derr := resolveConstantDefaults(f, displayName)
 		if derr != nil {
 			return derr
 		}
@@ -1512,8 +1541,14 @@ func (c *Compiler) compileFunctionLiteralNamed(f *ast.FunctionLiteral, selfName 
 		}
 	}
 
+	// Carry the optional type annotations so the VM enforces them just
+	// like the tree-walker. ReturnType also lives on the chunk so
+	// OpReturn can read it via the loop-local `chunk` pointer.
+	sub.chunk.ReturnType = f.ReturnType
+	sub.chunk.FnName = displayName
+
 	cf := &CompiledFunction{
-		Name:          selfName,
+		Name:          displayName,
 		Chunk:         sub.chunk,
 		NumParams:     len(f.Params),
 		NumRequired:   numRequired,
@@ -1521,6 +1556,10 @@ func (c *Compiler) compileFunctionLiteralNamed(f *ast.FunctionLiteral, selfName 
 		Variadic:      f.Variadic,
 		SelfSlot:      selfSlot,
 		UpvalueRefs:   sub.upvalueRefs,
+		Params:        f.Params,
+		ParamTypes:    f.ParamTypes,
+		ReturnType:    f.ReturnType,
+		TypeChecked:   eval.HasTypeAnnotations(f.ParamTypes, f.ReturnType),
 	}
 	idx := c.poolConstant(cf)
 
@@ -1807,7 +1846,8 @@ func (c *Compiler) compileConst(s *ast.ConstStmt) error {
 
 // compileMultiAssign handles `a, b = expr` by stashing the RHS
 // tuple in a temp slot, then for each name emitting:
-//   LoadLocal tempSlot ; PushInt i ; OpIndex ; StoreLocal nameSlot
+//
+//	LoadLocal tempSlot ; PushInt i ; OpIndex ; StoreLocal nameSlot
 //
 // The tree-walker requires the RHS to evaluate to a Tuple with
 // exactly len(Names) elements. We don't have arity verification at
@@ -2289,7 +2329,7 @@ func (c *Compiler) compileBreak(b *ast.BreakStmt) error {
 //
 //   - compileWhile  → patches to loop top (re-check condition)
 //   - compileForIn  → patches to the increment block (so the index
-//                      advances before the next iteration's check)
+//     advances before the next iteration's check)
 //
 // Uniform patch-list model means break and continue work the same
 // way structurally, and the per-loop arm chooses the destination.
@@ -2607,14 +2647,14 @@ func (c *Compiler) lastLine() int {
 
 // poolConstant adds obj to the constant pool and returns its index.
 // Dedupes only "value-typed" constants — Integer, Float, String,
-// Bool, Null, Bytes — where Inspect() is a faithful identity. For
-// reference-typed entries (CompiledFunction, StructDef, EnumDef)
-// we MUST NOT dedupe: two anonymous functions both Inspect() as
-// "fn:<anon>" but are completely different programs; deduping them
-// silently aliases one onto the other and every subsequent call
-// runs the first definition's body. The same trap applies to
-// StructDef / EnumDef since two declarations with identical
-// name+fields would still be distinct types in practice.
+// Bool, Null — where Inspect() is a faithful identity. For entries
+// whose Inspect() is NOT faithful we MUST NOT dedupe, or distinct
+// values silently alias onto one shared slot:
+//   - CompiledFunction / StructDef / EnumDef — two anonymous fns both
+//     Inspect() as "fn:<anon>" but are completely different programs.
+//   - Bytes — Inspect() is "bytes(N)" (length only, by design), so
+//     every byte literal of the same length would otherwise collapse
+//     to one constant (b"Hi!" aliasing b"\x00\x01\x02", etc.).
 //
 // Panics if the pool grows past uint16 range — that's a hard wire-
 // format limit; programs hitting it need a PushConstW opcode that
@@ -2648,11 +2688,13 @@ func (c *Compiler) poolConstant(obj eval.Object) uint16 {
 // faithful identity — two values that Inspect() the same can safely
 // share a constant pool slot. CompiledFunction / StructDef / EnumDef
 // fail this — different definitions can produce identical Inspect()
-// strings but must remain distinct constants.
+// strings but must remain distinct constants. Bytes also fails: its
+// Inspect() is the length-only "bytes(N)", so deduping would alias
+// every same-length byte literal onto one backing slice.
 func isValueDedupable(obj eval.Object) bool {
 	switch obj.(type) {
 	case *eval.Integer, *eval.Float, *eval.String, *eval.Boolean,
-		*eval.Null, *eval.Bytes:
+		*eval.Null:
 		return true
 	}
 	return false

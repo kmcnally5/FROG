@@ -50,27 +50,27 @@ var stdinReader = bufio.NewReader(os.Stdin)
 
 // Module import state.
 //
-//   moduleCache    — absolute path → evaluated *Environment. Populated
-//                    on successful import; subsequent imports of the
-//                    same path hand back a Module wrapping the cached
-//                    Env (under whatever alias the new importer used).
-//                    This makes module-level mutable state (cost
-//                    ledgers, registries, pools) act as process-global
-//                    — which is how a sane scripting language reads
-//                    "two files importing the same library see the same
-//                    variables." The previous fresh-env-per-import
-//                    behaviour silently broke cross-module coordination.
+//	moduleCache    — absolute path → evaluated *Environment. Populated
+//	                 on successful import; subsequent imports of the
+//	                 same path hand back a Module wrapping the cached
+//	                 Env (under whatever alias the new importer used).
+//	                 This makes module-level mutable state (cost
+//	                 ledgers, registries, pools) act as process-global
+//	                 — which is how a sane scripting language reads
+//	                 "two files importing the same library see the same
+//	                 variables." The previous fresh-env-per-import
+//	                 behaviour silently broke cross-module coordination.
 //
-//   importingFiles — set of paths currently mid-import. Used for cycle
-//                    detection; an entry is added before Eval runs the
-//                    module's top-level code and removed on completion.
+//	importingFiles — set of paths currently mid-import. Used for cycle
+//	                 detection; an entry is added before Eval runs the
+//	                 module's top-level code and removed on completion.
 //
-//   moduleCacheMu  — guards BOTH maps. import evaluation recurses
-//                    through Eval, and async() goroutines can do their
-//                    own imports, so concurrent access is possible.
-//                    The lock is released across the Eval call itself
-//                    to avoid reentrant-deadlock when an imported file
-//                    imports another file.
+//	moduleCacheMu  — guards BOTH maps. import evaluation recurses
+//	                 through Eval, and async() goroutines can do their
+//	                 own imports, so concurrent access is possible.
+//	                 The lock is released across the Eval call itself
+//	                 to avoid reentrant-deadlock when an imported file
+//	                 imports another file.
 //
 // Failures are never cached: if Eval returns an error, the path is left
 // out so a subsequent retry will re-attempt the import.
@@ -103,11 +103,11 @@ func ResetModuleCache() {
 // the resolved path, the list of paths it tried (for error messages), and
 // ok=true on success.
 //
-//	1. path as-is                  — CWD-relative
-//	2. <script-dir>/path           — next to the importing file
-//	3. $KLEX_PATH/path             — user override
-//	4. <klex-exe-dir>/path         — drop-in install
-//	5. <klex-exe-parent>/path      — bin/klex + share style install
+//  1. path as-is                  — CWD-relative
+//  2. <script-dir>/path           — next to the importing file
+//  3. $KLEX_PATH/path             — user override
+//  4. <klex-exe-dir>/path         — drop-in install
+//  5. <klex-exe-parent>/path      — bin/klex + share style install
 //
 // Duplicates in the list are dropped (e.g. when CWD happens to equal the
 // script directory) so the error message stays clean.
@@ -1665,6 +1665,12 @@ func bindArgs(fn *Function, args []Object, env *Environment) Object {
 			if isError(defVal) {
 				return defVal
 			}
+			// A default must satisfy its own parameter annotation.
+			if fn.TypeChecked && i < len(fn.ParamTypes) {
+				if errObj := CheckDefaultAnnotation(fn.ParamTypes[i], param, defVal, fnDisplayName(fn), ast.Pos{}); errObj != nil {
+					return errObj
+				}
+			}
 			env.Set(param, defVal)
 		}
 	}
@@ -1702,14 +1708,30 @@ func applyFunction(fn *Function, args []Object) (Object, Object) {
 			return nil, errObj
 		}
 	}
+	if fn.TypeChecked {
+		if errObj := checkArgTypes(fn, args, fnDisplayName(fn), ast.Pos{}); errObj != nil {
+			return nil, errObj
+		}
+	}
 	var result Object = NULL
 	for _, node := range fn.Body {
 		result = Eval(node, env)
 		if isReturn(result) {
-			return result.(*ReturnValue).Value, nil
+			rv := result.(*ReturnValue).Value
+			if fn.TypeChecked {
+				if errObj := checkReturnType(fn, rv, fnDisplayName(fn), ast.Pos{}); errObj != nil {
+					return nil, errObj
+				}
+			}
+			return rv, nil
 		}
 		if isError(result) {
 			return nil, result
+		}
+	}
+	if fn.TypeChecked {
+		if errObj := checkReturnType(fn, result, fnDisplayName(fn), ast.Pos{}); errObj != nil {
+			return nil, errObj
 		}
 	}
 	return result, nil
@@ -1744,14 +1766,30 @@ func applyFunctionInEnv(fn *Function, args []Object, taskEnv *Environment) (Obje
 			return nil, errObj
 		}
 	}
+	if fn.TypeChecked {
+		if errObj := checkArgTypes(fn, args, fnDisplayName(fn), ast.Pos{}); errObj != nil {
+			return nil, errObj
+		}
+	}
 	var result Object = NULL
 	for _, node := range fn.Body {
 		result = Eval(node, env)
 		if isReturn(result) {
-			return result.(*ReturnValue).Value, nil
+			rv := result.(*ReturnValue).Value
+			if fn.TypeChecked {
+				if errObj := checkReturnType(fn, rv, fnDisplayName(fn), ast.Pos{}); errObj != nil {
+					return nil, errObj
+				}
+			}
+			return rv, nil
 		}
 		if isError(result) {
 			return nil, result
+		}
+	}
+	if fn.TypeChecked {
+		if errObj := checkReturnType(fn, result, fnDisplayName(fn), ast.Pos{}); errObj != nil {
+			return nil, errObj
 		}
 	}
 	return result, nil
@@ -1868,11 +1906,11 @@ func toBool(obj Object) (bool, bool) {
 //
 // Returns (handled, equal):
 //   - handled=true  → both args are primitives of the same type and
-//                     `equal` is the result of the value comparison.
+//     `equal` is the result of the value comparison.
 //   - handled=false → at least one arg is nil, the types differ, or the
-//                     type isn't a primitive (e.g. *Array, *Function,
-//                     *EnumInstance). Callers dispatch their own rules
-//                     (reference-equality, recursive enum compare, etc.).
+//     type isn't a primitive (e.g. *Array, *Function,
+//     *EnumInstance). Callers dispatch their own rules
+//     (reference-equality, recursive enum compare, etc.).
 //
 // Keeping this in one place means a future numeric coercion rule or new
 // primitive type lands once and both `==` and CAS pick it up automatically.
@@ -2172,16 +2210,34 @@ func evalCall(c *ast.CallExpr, env *Environment) Object {
 			}
 		}
 
+		// Enforce optional parameter type annotations at the call boundary.
+		if fn.TypeChecked {
+			if errObj := checkArgTypes(fn, args, name, c.Pos); errObj != nil {
+				return errObj
+			}
+		}
+
 		var result Object = NULL
 		for _, node := range fn.Body {
 			result = Eval(node, newEnv)
 			if isReturn(result) {
-				return result.(*ReturnValue).Value // unwrap the ReturnValue signal
+				rv := result.(*ReturnValue).Value // unwrap the ReturnValue signal
+				if fn.TypeChecked {
+					if errObj := checkReturnType(fn, rv, name, c.Pos); errObj != nil {
+						return errObj
+					}
+				}
+				return rv
 			}
 			if isError(result) {
 				err := result.(*Error)
 				err.Stack = append(err.Stack, Frame{FnName: fn.Name, CallPos: c.Pos})
 				return err
+			}
+		}
+		if fn.TypeChecked {
+			if errObj := checkReturnType(fn, result, name, c.Pos); errObj != nil {
+				return errObj
 			}
 		}
 		return result
@@ -2338,9 +2394,12 @@ func Eval(node ast.Node, env *Environment) Object {
 			def.Methods[m.Name] = &Function{
 				Name:        m.Name,
 				Params:      m.Params,
+				ParamTypes:  m.ParamTypes,
+				ReturnType:  m.ReturnType,
 				Defaults:    m.Defaults,
 				Variadic:    m.Variadic,
 				NumRequired: computeNumRequired(m.Defaults, len(m.Params)),
+				TypeChecked: HasTypeAnnotations(m.ParamTypes, m.ReturnType),
 				Body:        m.Body,
 				Env:         env,
 			}
@@ -2409,9 +2468,12 @@ func Eval(node ast.Node, env *Environment) Object {
 	case *ast.FunctionLiteral:
 		return &Function{
 			Params:      n.Params,
+			ParamTypes:  n.ParamTypes,
+			ReturnType:  n.ReturnType,
 			Defaults:    n.Defaults,
 			Variadic:    n.Variadic,
 			NumRequired: computeNumRequired(n.Defaults, len(n.Params)),
+			TypeChecked: HasTypeAnnotations(n.ParamTypes, n.ReturnType),
 			Body:        n.Body,
 			Env:         env, // closure captured here
 		}

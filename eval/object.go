@@ -36,30 +36,30 @@ import (
 type ObjectType string
 
 const (
-	INTEGER_OBJ  ObjectType = "INTEGER"
-	FLOAT_OBJ    ObjectType = "FLOAT"
-	BOOLEAN_OBJ  ObjectType = "BOOLEAN"
-	STRING_OBJ   ObjectType = "STRING"
-	BYTES_OBJ    ObjectType = "BYTES"
-	NULL_OBJ     ObjectType = "NULL"
-	RETURN_OBJ   ObjectType = "RETURN"  // wraps a value being returned
-	ERROR_OBJ    ObjectType = "ERROR"   // runtime or type error
-	FUNCTION_OBJ ObjectType = "FUNCTION"
-	BUILTIN_OBJ  ObjectType = "BUILTIN" // built-in functions (println, len, etc.)
-	BREAK_OBJ    ObjectType = "BREAK"   // signal that bubbles up to the while loop
-	CONTINUE_OBJ ObjectType = "CONTINUE"
-	ARRAY_OBJ    ObjectType = "ARRAY"
-	HASH_OBJ     ObjectType = "HASH"
-	TUPLE_OBJ    ObjectType = "TUPLE"
-	MODULE_OBJ      ObjectType = "MODULE"
-	TASK_OBJ        ObjectType = "TASK"
-	STRUCT_DEF_OBJ  ObjectType = "STRUCT_DEF"
-	STRUCT_INST_OBJ ObjectType = "STRUCT"
-	CHANNEL_OBJ     ObjectType = "CHANNEL"
-	NET_CONN_OBJ    ObjectType = "NET_CONN"
-	ENUM_DEF_OBJ    ObjectType = "ENUM_DEF"
-	ENUM_VARIANT_OBJ ObjectType = "ENUM_VARIANT"
-	ENUM_OBJ        ObjectType = "ENUM"
+	INTEGER_OBJ            ObjectType = "INTEGER"
+	FLOAT_OBJ              ObjectType = "FLOAT"
+	BOOLEAN_OBJ            ObjectType = "BOOLEAN"
+	STRING_OBJ             ObjectType = "STRING"
+	BYTES_OBJ              ObjectType = "BYTES"
+	NULL_OBJ               ObjectType = "NULL"
+	RETURN_OBJ             ObjectType = "RETURN" // wraps a value being returned
+	ERROR_OBJ              ObjectType = "ERROR"  // runtime or type error
+	FUNCTION_OBJ           ObjectType = "FUNCTION"
+	BUILTIN_OBJ            ObjectType = "BUILTIN" // built-in functions (println, len, etc.)
+	BREAK_OBJ              ObjectType = "BREAK"   // signal that bubbles up to the while loop
+	CONTINUE_OBJ           ObjectType = "CONTINUE"
+	ARRAY_OBJ              ObjectType = "ARRAY"
+	HASH_OBJ               ObjectType = "HASH"
+	TUPLE_OBJ              ObjectType = "TUPLE"
+	MODULE_OBJ             ObjectType = "MODULE"
+	TASK_OBJ               ObjectType = "TASK"
+	STRUCT_DEF_OBJ         ObjectType = "STRUCT_DEF"
+	STRUCT_INST_OBJ        ObjectType = "STRUCT"
+	CHANNEL_OBJ            ObjectType = "CHANNEL"
+	NET_CONN_OBJ           ObjectType = "NET_CONN"
+	ENUM_DEF_OBJ           ObjectType = "ENUM_DEF"
+	ENUM_VARIANT_OBJ       ObjectType = "ENUM_VARIANT"
+	ENUM_OBJ               ObjectType = "ENUM"
 	ATOMIC_INT_ARRAY_OBJ   ObjectType = "ATOMIC_INT_ARRAY"
 	ATOMIC_FLOAT_ARRAY_OBJ ObjectType = "ATOMIC_FLOAT_ARRAY"
 	CONCURRENT_HASH_OBJ    ObjectType = "CONCURRENT_HASH"
@@ -315,13 +315,13 @@ type Frame struct {
 
 // Error serves two roles depending on IsUserError:
 //
-//  false (default) — an internal propagation signal. Bubbles up through Eval
-//  until it reaches the top-level loop or is caught by safe(). Users never
-//  hold one of these directly.
+//	false (default) — an internal propagation signal. Bubbles up through Eval
+//	until it reaches the top-level loop or is caught by safe(). Users never
+//	hold one of these directly.
 //
-//  true — a first-class user value created by error(code, message) or
-//  returned by safe() when it catches a system error. Does NOT propagate;
-//  isError() ignores it so it stays put in the environment.
+//	true — a first-class user value created by error(code, message) or
+//	returned by safe() when it catches a system error. Does NOT propagate;
+//	isError() ignores it so it stays put in the environment.
 //
 // Code is only meaningful when IsUserError is true. For internal signals,
 // the kind is already carried by the Kind field.
@@ -486,9 +486,12 @@ func (c *ContinueSignal) Inspect() string  { return "continue" }
 type Function struct {
 	Name        string // empty for anonymous functions
 	Params      []string
+	ParamTypes  []string   // parallel to Params; "" means unannotated. Enforced at call time when TypeChecked.
+	ReturnType  string     // "" means no return annotation. Enforced at call time when TypeChecked.
 	Defaults    []ast.Node // parallel to Params; nil entry means the param is required
 	Variadic    bool       // true if the last param collects remaining args as an array
 	NumRequired int        // count of leading required params; set once at construction
+	TypeChecked bool       // true if any param is annotated or ReturnType is set; gates the call-time type check (hot-path guard)
 	Body        []ast.Node
 	Env         *Environment // the closure environment captured at definition time
 }
@@ -1001,27 +1004,27 @@ const bridgeMetricsSampleN = 256
 // fnMetrics tracks per-function counters and a circular buffer of recent
 // call latencies (milliseconds) used to compute p50/p95/p99 on read.
 type fnMetrics struct {
-	count    int64
-	errors   int64
-	samples  [bridgeMetricsSampleN]float64
-	wrIdx    int  // next slot to overwrite
-	wrapped  bool // true once samples has filled at least once
+	count   int64
+	errors  int64
+	samples [bridgeMetricsSampleN]float64
+	wrIdx   int  // next slot to overwrite
+	wrapped bool // true once samples has filled at least once
 }
 
 // bridgeMetrics holds the per-bridge observability state. All fields are
 // mutated under mu; the bridgeMetrics() builtin reads them as a snapshot.
 type bridgeMetrics struct {
-	mu             sync.Mutex
-	callsTotal     int64
-	callsFailed    int64
-	callsInflight  int64
-	streamsTotal   int64
-	streamsActive  int64
-	streamsFailed  int64
-	bytesSent      int64
-	bytesReceived  int64
-	errorsByCode   map[string]int64
-	perFunction    map[string]*fnMetrics
+	mu            sync.Mutex
+	callsTotal    int64
+	callsFailed   int64
+	callsInflight int64
+	streamsTotal  int64
+	streamsActive int64
+	streamsFailed int64
+	bytesSent     int64
+	bytesReceived int64
+	errorsByCode  map[string]int64
+	perFunction   map[string]*fnMetrics
 }
 
 // recordCall adds one sample for fn and updates the relevant counters.
@@ -1063,9 +1066,9 @@ func (m *bridgeMetrics) recordCall(fn string, elapsedMs float64, errCode string)
 // raw bytes and re-parse, which doubled the JSON work and forced a
 // defensive copy out of bufio.Scanner's buffer per message.
 //
-//   msg   — the decoded JSON object the caller would otherwise re-Unmarshal.
-//   bytes — the raw line length, used by bridgeMetrics.bytesReceived. The
-//           reader records this so the call site doesn't need the raw slice.
+//	msg   — the decoded JSON object the caller would otherwise re-Unmarshal.
+//	bytes — the raw line length, used by bridgeMetrics.bytesReceived. The
+//	        reader records this so the call site doesn't need the raw slice.
 //
 // A nil *bridgeResponse delivered on a pending channel is the lifecycle
 // signal used by taintAllBridge ("bridge became unavailable"), matching
@@ -1094,9 +1097,9 @@ type Bridge struct {
 
 	// mu protects all mutable lifecycle state: tainted, closed, pending, nextID.
 	// It is held only briefly (never during the long wait for a response).
-	mu      sync.Mutex
-	nextID  int
-	pending map[int]chan *bridgeResponse // per-call response channels; keyed by request id
+	mu        sync.Mutex
+	nextID    int
+	pending   map[int]chan *bridgeResponse // per-call response channels; keyed by request id
 	tainted   bool
 	taintMsg  string
 	taintCode string // error code delivered to the FIRST waiting call (BRIDGE_CLOSED, BRIDGE_TIMEOUT, etc.)
@@ -1176,15 +1179,15 @@ func (b *Bridge) Inspect() string {
 
 // Accessors used by builtins_bridge.go (same package, so unexported fields are
 // visible directly — these exist for readability and test use).
-func (b *Bridge) Stdin() io.WriteCloser    { return b.stdin }
-func (b *Bridge) Stdout() *bufio.Scanner   { return b.stdout }
-func (b *Bridge) Timeout() time.Duration   { return b.timeout }
+func (b *Bridge) Stdin() io.WriteCloser        { return b.stdin }
+func (b *Bridge) Stdout() *bufio.Scanner       { return b.stdout }
+func (b *Bridge) Timeout() time.Duration       { return b.timeout }
 func (b *Bridge) StderrBuf() *BridgeRingBuffer { return b.stderrBuf }
-func (b *Bridge) StderrLog() string        { return b.stderrLog }
-func (b *Bridge) IsClosed() bool           { return b.closed }
-func (b *Bridge) IsTainted() bool          { return b.tainted }
-func (b *Bridge) TaintMsg() string         { return b.taintMsg }
-func (b *Bridge) NotifCh() *Channel        { return b.notifCh }
+func (b *Bridge) StderrLog() string            { return b.stderrLog }
+func (b *Bridge) IsClosed() bool               { return b.closed }
+func (b *Bridge) IsTainted() bool              { return b.tainted }
+func (b *Bridge) TaintMsg() string             { return b.taintMsg }
+func (b *Bridge) NotifCh() *Channel            { return b.notifCh }
 
 // -------------------- ENUM --------------------
 
@@ -1302,9 +1305,12 @@ func (s *StructDef) MethodWithSelf(name string) *Function {
 	wrapped := &Function{
 		Name:        fn.Name,
 		Params:      append([]string{"self"}, fn.Params...),
+		ParamTypes:  append([]string{""}, fn.ParamTypes...), // self is untyped; keep parallel to Params
+		ReturnType:  fn.ReturnType,
 		Defaults:    append([]ast.Node{nil}, fn.Defaults...),
 		Variadic:    fn.Variadic,
 		NumRequired: fn.NumRequired + 1,
+		TypeChecked: fn.TypeChecked,
 		Body:        fn.Body,
 		Env:         fn.Env,
 	}
@@ -1409,12 +1415,12 @@ type glyphMetric struct {
 // glyphs is keyed by Unicode codepoint; fallback is rendered for missing codepoints.
 type Font struct {
 	TextureID uint32
-	LineH     float32             // line height at scale 1
+	LineH     float32 // line height at scale 1
 	glyphs    map[rune]glyphMetric
-	fallback  glyphMetric         // rendered for codepoints not in glyphs (· middle dot)
-	atlasW    int32               // atlas pixel width for GPU upload
-	atlasHpx  int32               // atlas pixel height for GPU upload
-	pixels    []byte              // non-nil until first textFont() uploads to GPU
+	fallback  glyphMetric // rendered for codepoints not in glyphs (· middle dot)
+	atlasW    int32       // atlas pixel width for GPU upload
+	atlasHpx  int32       // atlas pixel height for GPU upload
+	pixels    []byte      // non-nil until first textFont() uploads to GPU
 }
 
 func (f *Font) Type() ObjectType { return FONT_OBJ }

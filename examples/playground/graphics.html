@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kLex Graphics Playground</title>
+<style>
+  :root { --bg:#0e1018; --panel:#161a26; --ink:#e6e8ef; --muted:#8b90a0; --accent:#ff8c3b; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
+  header { display: flex; align-items: center; gap: .75em; padding: .6em 1em; background: var(--panel); border-bottom: 1px solid #000; flex-wrap: wrap; }
+  header h1 { font-size: 1.05em; margin: 0; font-weight: 600; }
+  header .spacer { flex: 1; }
+  header a { color: var(--muted); font-size: .85em; text-decoration: none; }
+  header a:hover { color: var(--ink); }
+  #status { color: var(--muted); font-size: .85em; min-width: 8em; }
+  label.ex { color: var(--muted); font-size: .85em; }
+  select, button { font: inherit; font-size: .9em; border-radius: 5px; cursor: pointer; }
+  select { padding: .35em .5em; background: #11131c; color: var(--ink); border: 1px solid #2a2f3d; }
+  button { padding: .4em 1.1em; border: 0; }
+  #run  { background: var(--accent); color: #1a1208; font-weight: 600; }
+  #stop, #share { background: #2a2f3d; color: var(--ink); }
+  button:disabled { opacity: .45; cursor: default; }
+  main { display: flex; gap: 0; height: calc(100vh - 53px); }
+
+  /* Editor: a transparent <textarea> over a highlighted <pre> sharing the
+     exact same text metrics. The textarea is the real input (native caret,
+     selection, undo); the <pre> behind it shows the colours. */
+  .left { flex: 1 1 46%; min-width: 320px; display: flex; flex-direction: column; }
+  .editor-wrap { flex: 1 1 auto; position: relative; overflow: hidden; background: #11131c; }
+  #hl, #editor {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    margin: 0; border: 0; padding: 1em;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px; line-height: 1.5; tab-size: 4;
+    white-space: pre-wrap; overflow-wrap: break-word; box-sizing: border-box;
+  }
+  #hl     { z-index: 0; pointer-events: none; overflow: hidden; color: #d8dcea; }
+  #editor { z-index: 1; overflow: auto; background: transparent; color: transparent; caret-color: #e6e8ef; resize: none; outline: none; }
+  #editor::selection { background: rgba(122,162,247,0.35); }
+  .tok-com { color: #6a7385; font-style: italic; }
+  .tok-str { color: #9ece6a; }
+  .tok-num { color: #e0af68; }
+  .tok-kw  { color: #bb9af7; }
+  .tok-fn  { color: #7aa2f7; }
+
+  /* Footer: builtin search. Results pop up above the input so they don't
+     shrink the editor. Data reused from docs-index.json. */
+  .footer { flex: 0 0 auto; position: relative; background: var(--panel); border-top: 1px solid #000; padding: .45em .6em; }
+  #search { width: 100%; font: inherit; font-size: .85em; padding: .4em .6em; border: 1px solid #2a2f3d; border-radius: 5px; background: #11131c; color: var(--ink); outline: none; }
+  #search:focus { border-color: var(--accent); }
+  #search::placeholder { color: var(--muted); }
+  #results { display: none; position: absolute; left: .6em; right: .6em; bottom: 100%; margin-bottom: .3em; max-height: 42vh; overflow: auto;
+             background: #0c0e16; border: 1px solid #2a2f3d; border-radius: 6px; box-shadow: 0 -6px 22px rgba(0,0,0,.55); }
+  .result { padding: .4em .6em; border-bottom: 1px solid #1b1f2b; cursor: pointer; }
+  .result:last-child { border-bottom: 0; }
+  .result:hover { background: #182030; }
+  .r-sig { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .8em; color: #7aa2f7; }
+  .r-sum { font-size: .78em; color: var(--muted); margin-top: .15em; }
+  .r-empty { padding: .5em .6em; font-size: .8em; color: var(--muted); }
+
+  .stage { flex: 1 1 54%; display: flex; align-items: center; justify-content: center; padding: 1em; overflow: auto; background: #0a0c12; }
+  canvas { background: #000; border: 1px solid #2a2f3d; border-radius: 4px; max-width: 100%; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>kLex <span style="color:var(--accent)">Graphics</span> Playground</h1>
+  <label class="ex" for="examples">Example:</label>
+  <select id="examples"></select>
+  <button id="run" disabled>Loading…</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="share">Share</button>
+  <span id="status"></span>
+  <span class="spacer"></span>
+  <a href="index.html">← Text Playground</a>
+</header>
+
+<main>
+  <div class="left">
+    <div class="editor-wrap">
+      <pre id="hl" aria-hidden="true"></pre>
+      <textarea id="editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    </div>
+    <div class="footer">
+      <div id="results"></div>
+      <input id="search" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Search builtins…  (e.g. circle, gradient, http) — click a result to insert">
+    </div>
+  </div>
+  <div class="stage"><canvas id="klex-canvas" width="640" height="400"></canvas></div>
+</main>
+
+<script src="wasm_exec.js"></script>
+<script>
+const EXAMPLES = {
+"Bouncing ball": `// A ball bounces around a gradient backdrop.
+// window(w, h, title, drawFn) opens a canvas and runs drawFn every frame.
+// Edit anything below, then press Run (or Cmd/Ctrl+Enter). Stop ends the loop.
+
+let x = 120.0
+let dx = 4.0
+let y = 160.0
+let dy = 3.0
+
+window(640, 400, "sketch", fn(frame) {
+    gradient(0.0, 0.0, 640.0, 400.0, [0.08, 0.10, 0.18, 1.0], [0.18, 0.10, 0.22, 1.0], "v")
+
+    x = x + dx
+    y = y + dy
+    if x < 30.0  { dx = 4.0 }
+    if x > 610.0 { dx = -4.0 }
+    if y < 30.0  { dy = 3.0 }
+    if y > 370.0 { dy = -3.0 }
+
+    shadow(0.0, 0.0, 28.0, 1.0, 0.6, 0.2, 0.85)
+    fill(1.0, 0.72, 0.26)
+    noStroke()
+    circle(x, y, 26.0)
+    noShadow()
+
+    fill(1.0, 1.0, 1.0)
+    text("bouncing ball — frame " + str(frame), 16.0, 18.0, 1.4)
+})
+`,
+
+"Particles": `// drawParticles draws a whole array of coloured dots in one call.
+// xs/ys are positions; rs/gs/bs/alphas are per-particle colour (0..1).
+
+let N = 120
+let pxs = makeArray(N, 0.0)
+let pys = makeArray(N, 0.0)
+let prs = makeArray(N, 0.0)
+let pgs = makeArray(N, 0.0)
+let pbs = makeArray(N, 0.0)
+let pas = makeArray(N, 0.0)
+let i = 0
+while i < N {
+    prs[i] = 0.4 + 0.6 * (float(i % 7) / 7.0)
+    pgs[i] = 0.3 + 0.4 * (float(i % 5) / 5.0)
+    pbs[i] = 0.85
+    pas[i] = 0.85
+    i = i + 1
+}
+
+window(640, 400, "particles", fn(frame) {
+    background(0.04, 0.05, 0.09)
+    let a = 0
+    while a < N {
+        let ang = float(a) * 0.20 + frame * 0.015
+        let rad = 30.0 + float(a) * 1.3
+        pxs[a] = 320.0 + rad * cos(ang) * 0.9
+        pys[a] = 200.0 + rad * sin(ang) * 0.55
+        a = a + 1
+    }
+    drawParticles(pxs, pys, prs, pgs, pbs, pas, N, 6.0)
+    fill(1.0, 1.0, 1.0)
+    text("drawParticles — " + str(N) + " points", 16.0, 18.0, 1.2)
+})
+`,
+
+"Mouse follow": `// Read input with mouseX(), mouseY(), mouseDown().
+
+window(640, 400, "mouse", fn(frame) {
+    background(0.06, 0.07, 0.11)
+    let mx = float(mouseX())
+    let my = float(mouseY())
+
+    stroke(0.3, 0.4, 0.6)
+    strokeWeight(1.0)
+    line(0.0, my, 640.0, my)
+    line(mx, 0.0, mx, 400.0)
+
+    noStroke()
+    fill(1.0, 0.7, 0.3)
+    circle(mx, my, 18.0)
+
+    if mouseDown() {
+        fill(1.0, 0.3, 0.4, 0.4)
+        circle(mx, my, 44.0)
+    }
+
+    fill(1.0, 1.0, 1.0)
+    text("move the mouse · click to pulse", 16.0, 18.0, 1.2)
+})
+`,
+
+"Sine wave": `// An animated wave drawn as short line segments.
+
+window(640, 400, "sine", fn(frame) {
+    gradient(0.0, 0.0, 640.0, 400.0, [0.05, 0.06, 0.12, 1.0], [0.10, 0.05, 0.14, 1.0], "v")
+    stroke(0.4, 0.9, 1.0)
+    strokeWeight(2.0)
+    let x = 0
+    while x < 640 {
+        let t  = float(x) * 0.02 + frame * 0.05
+        let y1 = 200.0 + sin(t) * 90.0
+        let y2 = 200.0 + sin(t + 0.3) * 90.0
+        line(float(x), y1, float(x) + 4.0, y2)
+        x = x + 4
+    }
+    fill(1.0, 1.0, 1.0)
+    text("sine wave", 16.0, 18.0, 1.2)
+})
+`,
+
+"Shapes & gradient": `// A still composition: gradient backdrop, shadow, and shapes.
+
+window(640, 400, "shapes", fn(frame) {
+    gradient(0.0, 0.0, 640.0, 400.0, [0.10, 0.12, 0.20, 1.0], [0.05, 0.06, 0.10, 1.0], "v")
+
+    shadow(0.0, 6.0, 16.0, 0.0, 0.0, 0.0, 0.5)
+    fill(0.95, 0.4, 0.45)
+    noStroke()
+    roundedRect(60.0, 120.0, 160.0, 110.0, 18.0)
+    noShadow()
+
+    fill(0.3, 0.8, 0.6)
+    circle(360.0, 175.0, 70.0)
+
+    fill(0.95, 0.85, 0.3)
+    triangle(460.0, 240.0, 560.0, 240.0, 510.0, 120.0)
+
+    fill(1.0, 1.0, 1.0)
+    text("gradient · shadow · shapes", 16.0, 18.0, 1.4)
+})
+`,
+};
+
+// kLex keywords — the lexer's reserved words (small, stable set). Builtins
+// are NOT hardcoded: they're pulled live from the WASM via klex_builtins()
+// so the highlighter can never drift from the running binary.
+const KEYWORDS = new Set([
+  "let","const","fn","return","if","else","while","for","in","break","continue",
+  "true","false","null","import","as","struct","switch","case","default"
+]);
+let BUILTINS = new Set();
+
+function esc(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+// URL-safe base64 of UTF-8 text — used for shareable sketch links in the
+// location hash. TextEncoder/Decoder keep non-ASCII (em-dashes etc.) intact.
+function b64encode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64decode(b64) {
+  b64 = b64.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+// Single-pass tokeniser → coloured spans. Order matters: comments, strings,
+// numbers, identifiers (classified as keyword/builtin/plain), then any other
+// single character verbatim so nothing is dropped.
+function highlight(code) {
+  const re = /(\/\/[^\n]*)|("(?:[^"\\]|\\.)*")|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)|([\s\S])/g;
+  let out = "", m;
+  while ((m = re.exec(code)) !== null) {
+    if      (m[1] !== undefined) out += '<span class="tok-com">' + esc(m[1]) + '</span>';
+    else if (m[2] !== undefined) out += '<span class="tok-str">' + esc(m[2]) + '</span>';
+    else if (m[3] !== undefined) out += '<span class="tok-num">' + esc(m[3]) + '</span>';
+    else if (m[4] !== undefined) {
+      const w = m[4];
+      if      (KEYWORDS.has(w)) out += '<span class="tok-kw">' + esc(w) + '</span>';
+      else if (BUILTINS.has(w)) out += '<span class="tok-fn">' + esc(w) + '</span>';
+      else                      out += esc(w);
+    } else {
+      out += esc(m[5]);
+    }
+  }
+  return out;
+}
+
+(async () => {
+  const ed     = document.getElementById('editor');
+  const hl     = document.getElementById('hl');
+  const sel    = document.getElementById('examples');
+  const runBtn = document.getElementById('run');
+  const stopBtn= document.getElementById('stop');
+  const status = document.getElementById('status');
+
+  const names = Object.keys(EXAMPLES);
+  for (const name of names) {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+  }
+
+  const refresh = () => { hl.innerHTML = highlight(ed.value); hl.scrollTop = ed.scrollTop; hl.scrollLeft = ed.scrollLeft; };
+  const setCode = (code) => { ed.value = code; refresh(); };
+  const setStatus = (t, err) => { status.textContent = t; status.style.color = err ? '#ff7b7b' : 'var(--muted)'; };
+
+  // A shared link carries the sketch in the URL hash. If present, load that
+  // instead of the default example (and auto-run it once the runtime is up).
+  const sharedCode = (() => {
+    const h = location.hash.replace(/^#/, "");
+    if (!h) return null;
+    try { return b64decode(h); } catch (e) { return null; }
+  })();
+  setCode(sharedCode !== null ? sharedCode : EXAMPLES[names[0]]);
+
+  // Boot the WASM runtime (shared with the text playground).
+  const wasmResp = await fetch('klex.wasm');
+  if (!wasmResp.ok) { setStatus('failed to load klex.wasm', true); return; }
+  const go = new Go();
+  const { instance } = await WebAssembly.instantiate(await wasmResp.arrayBuffer(), go.importObject);
+  go.run(instance);
+
+  // Pull the canonical builtin list from the binary itself, then recolour.
+  try {
+    const list = globalThis.klex_builtins();
+    for (let i = 0; i < list.length; i++) BUILTINS.add(list[i]);
+  } catch (e) { /* highlighting just won't colour builtins — editing still fine */ }
+  refresh();
+
+  let running = false;
+  let current = Promise.resolve();
+
+  const setRunning = (on) => {
+    running = on;
+    runBtn.disabled = false;
+    runBtn.textContent = 'Run';
+    stopBtn.disabled = !on;
+  };
+
+  const stopSketch = () => { window.__klex_stop_requested = true; };
+
+  const runSketch = async () => {
+    if (running) { stopSketch(); await current; }
+    window.__klex_stop_requested = false;   // clear before the fresh run
+    globalThis.klex_reset();                 // fresh environment each run
+    setStatus('running…');
+    setRunning(true);
+    current = globalThis.klex_eval(ed.value)
+      .then(res => {
+        if (res && (res.isError || res.error)) setStatus('error: ' + (res.error || 'see console'), true);
+        else setStatus('stopped');
+      })
+      .catch(e => setStatus('js error: ' + (e && e.message || e), true))
+      .finally(() => setRunning(false));
+  };
+
+  runBtn.addEventListener('click', runSketch);
+  stopBtn.addEventListener('click', stopSketch);
+
+  // Share: pack the current sketch into the URL hash and copy the link.
+  // No server, no shortener — the whole sketch lives in the URL.
+  document.getElementById('share').addEventListener('click', async () => {
+    history.replaceState(null, '', '#' + b64encode(ed.value));
+    try { await navigator.clipboard.writeText(location.href); setStatus('link copied to clipboard'); }
+    catch (e) { setStatus('shareable link is in the address bar'); }
+  });
+
+  sel.addEventListener('change', () => { setCode(EXAMPLES[sel.value]); runSketch(); });
+
+  // Keep the highlight layer in sync with edits and scrolling.
+  ed.addEventListener('input', refresh);
+  ed.addEventListener('scroll', () => { hl.scrollTop = ed.scrollTop; hl.scrollLeft = ed.scrollLeft; });
+
+  // Cmd/Ctrl+Enter runs; Tab inserts spaces instead of leaving the editor.
+  ed.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runSketch(); }
+    else if (e.key === 'Tab') {
+      e.preventDefault();
+      const s = ed.selectionStart, en = ed.selectionEnd;
+      ed.value = ed.value.slice(0, s) + '    ' + ed.value.slice(en);
+      ed.selectionStart = ed.selectionEnd = s + 4;
+      refresh();
+    }
+  });
+
+  // ── Footer: builtin search ─────────────────────────────────────────────
+  // Reuses the text playground's docs-index.json (name/sig/summary/category)
+  // so the searchable set is the single shared source of truth.
+  const searchEl  = document.getElementById('search');
+  const resultsEl = document.getElementById('results');
+  let DOCS = [];
+  fetch('docs-index.json').then(r => r.ok ? r.json() : []).then(d => { DOCS = d || []; }).catch(() => {});
+
+  const insertAtCaret = (t) => {
+    const s = ed.selectionStart, e = ed.selectionEnd;
+    ed.value = ed.value.slice(0, s) + t + ed.value.slice(e);
+    ed.selectionStart = ed.selectionEnd = s + t.length;
+    ed.focus(); refresh();
+  };
+
+  const renderResults = (items, hadQuery) => {
+    if (!items.length) {
+      resultsEl.innerHTML = hadQuery ? '<div class="r-empty">no matching builtins</div>' : '';
+      resultsEl.style.display = hadQuery ? 'block' : 'none';
+      return;
+    }
+    resultsEl.innerHTML = items.map(e =>
+      '<div class="result" data-name="' + esc(e.name) + '">' +
+        '<div class="r-sig">' + esc(e.sig || e.name) + '</div>' +
+        (e.summary ? '<div class="r-sum">' + esc(e.summary) + '</div>' : '') +
+      '</div>'
+    ).join('');
+    resultsEl.style.display = 'block';
+  };
+
+  const doSearch = () => {
+    const q = searchEl.value.trim().toLowerCase();
+    if (!q) { renderResults([], false); return; }
+    const scored = [];
+    for (const e of DOCS) {
+      const n = e.name.toLowerCase();
+      let s = -1;
+      if      (n === q)             s = 0;
+      else if (n.startsWith(q))     s = 1;
+      else if (n.includes(q))       s = 2;
+      else if ((e.summary || '').toLowerCase().includes(q)) s = 3;
+      if (s >= 0) scored.push([s, e]);
+    }
+    scored.sort((a, b) => a[0] - b[0] || a[1].name.localeCompare(b[1].name));
+    renderResults(scored.slice(0, 40).map(x => x[1]), true);
+  };
+
+  searchEl.addEventListener('input', doSearch);
+  searchEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') { searchEl.value = ''; renderResults([], false); ed.focus(); } });
+  resultsEl.addEventListener('click', (e) => {
+    const row = e.target.closest('.result');
+    if (!row || !row.dataset.name) return;
+    insertAtCaret(row.dataset.name);
+    searchEl.value = ''; renderResults([], false);
+  });
+  // Dismiss the results popup when focus/click moves elsewhere.
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.footer')) renderResults([], false);
+  });
+
+  setRunning(false);
+  setStatus('ready — press Run');
+
+  // A sketch opened from a shared link runs automatically.
+  if (sharedCode !== null) runSketch();
+})().catch(e => {
+  document.getElementById('status').textContent = 'init failed: ' + (e && e.message || e);
+});
+</script>
+
+</body>
+</html>

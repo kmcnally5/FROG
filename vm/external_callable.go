@@ -92,7 +92,12 @@ func init() {
 			snapUpvalues[i] = fresh
 		}
 		calleeLocals := acquireLocals(cf.Chunk.NumLocals)
-		bindArgs(cf, calleeLocals, args)
+		if e := bindArgs(cf, calleeLocals, args); e != nil {
+			// Annotation violation — surface as a kLex-shape error
+			// (caller wraps into the (null, err) tuple via IsError).
+			releaseLocals(calleeLocals)
+			return e, true
+		}
 		if cf.SelfSlot >= 0 && cf.SelfSlot < len(calleeLocals) {
 			calleeLocals[cf.SelfSlot].Value = cf
 		}
@@ -119,7 +124,10 @@ func init() {
 			return makeRuntimeError(msg), true
 		}
 		calleeLocals := acquireLocals(cf.Chunk.NumLocals)
-		bindArgs(cf, calleeLocals, args)
+		if e := bindArgs(cf, calleeLocals, args); e != nil {
+			releaseLocals(calleeLocals)
+			return e, true
+		}
 		if cf.SelfSlot >= 0 && cf.SelfSlot < len(calleeLocals) {
 			calleeLocals[cf.SelfSlot].Value = cf
 		}

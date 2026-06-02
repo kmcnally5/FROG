@@ -556,13 +556,15 @@ fn_literal   = "fn" "(" [ params ] ")" [ ":" type_name ] block
                 "Parameters" section above. *)
 
 type_name    = IDENT
-             (* Valid type names: integer, float, string, boolean, bytes,
-                array, hash, function, null, task, channel, error, tuple,
-                struct.
+             (* Built-in type names (with aliases): int/integer, float,
+                number/num, string/str, bool/boolean, null, bytes, array,
+                hash/map, function/fn, channel, task, tuple, error, image,
+                font, any. A struct or enum type name is also valid and
+                matches an instance of that exact type.
                 Type names are plain identifiers (not reserved keywords);
-                any identifier is syntactically accepted, but kLex tooling
-                only recognises the names above for hover/documentation.
-                Annotations are NOT enforced at runtime. *)
+                any identifier is syntactically accepted. Where present,
+                annotations ARE enforced at runtime — see the semantic
+                rules below. *)
 ```
 
 ### String Interpolation
@@ -713,13 +715,13 @@ These are not grammar rules but are listed here because they shape what programs
 
 * Struct literals must initialise every declared field exactly once. Missing fields and unknown fields are both `RuntimeError`s.
 
-* **Type Annotation Rules** (optional annotations for documentation):
+* **Type Annotation Rules** (optional annotations, enforced where present):
   * Type annotations on function parameters and return types are optional.
   * If ANY parameter in a function has a type annotation, ALL parameters must have type annotations (all-or-nothing rule). Mixing annotated and unannotated parameters is a `ParseError`.
   * Return type annotations are optional even when parameters are annotated.
-  * Type annotations are not enforced at runtime and do not affect runtime behavior.
-  * Valid type names are plain identifiers: `integer`, `float`, `string`, `boolean`, `bytes`, `array`, `hash`, `function`, `null`, `task`, `channel`, `error`, `tuple`, `struct`.
-  * Type annotations are available for IDE hover tooltips and code documentation.
+  * Where present, annotations are **enforced at runtime** (tree-walker and bytecode VM, identically): a mismatched argument, defaulted value, variadic element, or return value raises a `TypeError` at the call boundary. **Strict null** — a typed parameter rejects `null` unless annotated `any` or `null`.
+  * Valid type names (with aliases): `int`/`integer`, `float`, `number`/`num`, `string`/`str`, `bool`/`boolean`, `null`, `bytes`, `array`, `hash`/`map`, `function`/`fn`, `channel`, `task`, `tuple`, `error`, `image`, `font`, `any`, plus any `struct`/`enum` type name.
+  * Annotations also drive IDE hover tooltips and signature help.
 
 * Multi-assign requires the right-hand side to be a `Tuple` with exactly as many elements as there are names on the left.
 

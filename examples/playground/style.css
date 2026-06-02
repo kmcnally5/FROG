@@ -49,3 +49,6 @@ button:hover:not(:disabled) { background: #313244; }
 button:disabled { opacity: 0.45; cursor: wait; }
 
 #status { color: #6c7086; font-size: 0.85rem; }
+
+.alt-link { margin-left: auto; color: #6c7086; font-size: 0.85rem; text-decoration: none; }
+.alt-link:hover { color: #cdd6f4; }

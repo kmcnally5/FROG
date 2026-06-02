@@ -549,10 +549,13 @@ window(1280, 820, "kLex Playground", fn(frame) {
     }
 
     if button("Share", 930, 10, 80, 32) {
+        // Set the URL hash only (reliable on every browser). We deliberately
+        // do NOT auto-copy here: navigator.clipboard.writeText from inside the
+        // render loop is not a user gesture, so Safari silently rejects it and
+        // the clipboard keeps stale content. The shareable link is the URL bar.
         let encoded = _wasmBase64Encode(code)
         _wasmSetHash(encoded)
-        _wasmCopyToClipboard(_wasmGetHref())
-        shareMsg       = "Link copied!"
+        shareMsg       = "Share link is in the address bar - press Cmd/Ctrl+C to copy"
         shareMsgFrames = 0
     }
 
