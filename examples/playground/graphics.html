@@ -52,15 +52,16 @@
   #search::placeholder { color: var(--muted); }
   #results { display: none; position: absolute; left: .6em; right: .6em; bottom: 100%; margin-bottom: .3em; max-height: 42vh; overflow: auto;
              background: #0c0e16; border: 1px solid #2a2f3d; border-radius: 6px; box-shadow: 0 -6px 22px rgba(0,0,0,.55); }
-  .result { position: relative; padding: .4em 1.9em .4em .6em; border-bottom: 1px solid #1b1f2b; cursor: pointer; }
+  .result { display: flex; align-items: center; gap: .5em; padding: .35em .6em; border-bottom: 1px solid #1b1f2b; }
   .result:last-child { border-bottom: 0; }
   .result:hover { background: #182030; }
+  .r-main { flex: 1 1 auto; min-width: 0; cursor: pointer; }
   .r-sig { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .8em; color: #7aa2f7; }
   .r-sum { font-size: .78em; color: var(--muted); margin-top: .15em; }
   .r-empty { padding: .5em .6em; font-size: .8em; color: var(--muted); }
-  .r-gh { position: absolute; right: .45em; top: .35em; font-size: .9em; line-height: 1; color: var(--muted);
-          text-decoration: none; padding: .15em .3em; border-radius: 3px; }
-  .r-gh:hover { color: #7aa2f7; background: #1b2233; }
+  .r-gh { flex: 0 0 auto; cursor: pointer; font-size: .72em; color: #7aa2f7; text-decoration: none; white-space: nowrap;
+          padding: .25em .55em; border: 1px solid #2a2f3d; border-radius: 4px; background: #141a26; }
+  .r-gh:hover { border-color: var(--accent); background: #1b2233; color: #cdd6f4; }
 
   .stage { flex: 1 1 54%; display: flex; align-items: center; justify-content: center; padding: 1em; overflow: auto; background: #0a0c12; }
   canvas { background: #000; border: 1px solid #2a2f3d; border-radius: 4px; max-width: 100%; }
@@ -403,13 +404,15 @@ function highlight(code) {
       return;
     }
     resultsEl.innerHTML = items.map(e =>
-      '<div class="result" data-name="' + esc(e.name) + '">' +
+      '<div class="result">' +
+        '<div class="r-main" data-name="' + esc(e.name) + '">' +
+          '<div class="r-sig">' + esc(e.sig || e.name) + '</div>' +
+          (e.summary ? '<div class="r-sum">' + esc(e.summary) + '</div>' : '') +
+        '</div>' +
         ((e.doc && e.anchor)
           ? '<a class="r-gh" href="' + esc(DOCS_BASE + e.doc + '#' + e.anchor) + '"' +
-            ' target="_blank" rel="noopener" title="Open in GitHub docs">↗</a>'
+            ' target="_blank" rel="noopener" title="Open in GitHub docs">Docs ↗</a>'
           : '') +
-        '<div class="r-sig">' + esc(e.sig || e.name) + '</div>' +
-        (e.summary ? '<div class="r-sum">' + esc(e.summary) + '</div>' : '') +
       '</div>'
     ).join('');
     resultsEl.style.display = 'block';
@@ -435,12 +438,12 @@ function highlight(code) {
   searchEl.addEventListener('input', doSearch);
   searchEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') { searchEl.value = ''; renderResults([], false); ed.focus(); } });
   resultsEl.addEventListener('click', (e) => {
-    // The "↗" is a real <a target="_blank"> — let the browser open it
-    // (reliable, supports middle/⌘-click) instead of a scripted popup.
+    // "Docs ↗" is a real <a target="_blank"> — let the browser open it.
     if (e.target.closest('.r-gh')) return;
-    const row = e.target.closest('.result');
-    if (!row || !row.dataset.name) return;
-    insertAtCaret(row.dataset.name);
+    // Clicking the rest of the row inserts the builtin name.
+    const main = e.target.closest('.r-main');
+    if (!main || !main.dataset.name) return;
+    insertAtCaret(main.dataset.name);
     searchEl.value = ''; renderResults([], false);
   });
   // Dismiss the results popup when focus/click moves elsewhere.
