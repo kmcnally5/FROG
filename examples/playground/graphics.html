@@ -51,6 +51,7 @@
   #search:focus { border-color: var(--accent); }
   #search::placeholder { color: var(--muted); }
   #results { display: none; position: absolute; left: .6em; right: .6em; bottom: 100%; margin-bottom: .3em; max-height: 42vh; overflow: auto;
+             z-index: 50; /* above #editor (z-index:1), which is transparent but otherwise eats the clicks */
              background: #0c0e16; border: 1px solid #2a2f3d; border-radius: 6px; box-shadow: 0 -6px 22px rgba(0,0,0,.55); }
   .result { display: flex; align-items: center; gap: .5em; padding: .35em .6em; border-bottom: 1px solid #1b1f2b; }
   .result:last-child { border-bottom: 0; }
