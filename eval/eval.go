@@ -31,7 +31,6 @@ import (
 	"klex/ast"
 	"klex/lexer"
 	"klex/parser"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -241,12 +240,38 @@ var Builtins = map[string]*Builtin{
 	"__version__": {Fn: func(args []Object) Object {
 		return &String{Value: KLexVersion}
 	}},
+	// println — print values, each followed by a newline.
+	//
+	// Each argument is printed on its own line using its display form; with no
+	// arguments it prints a single blank line. Returns null.
+	//
+	// @sig     println(values...: any) -> null
+	// @param   values  zero or more values to print, one per line
+	// @returns null
+	// @errors  none
+	// @example no-run println("hello, world")
+	// @since   0.1.0
+	// @see     print, str
 	"println": {Fn: func(args []Object) Object {
 		for _, arg := range args {
 			fmt.Fprintln(Output, arg.Inspect())
 		}
 		return NULL
 	}},
+	// len — the number of elements in an array, hash, string, or bytes value.
+	//
+	// For strings, len counts Unicode code points (runes), not bytes — len("café")
+	// is 4. For bytes it's the raw byte count. For arrays and hashes it's the
+	// element/entry count.
+	//
+	// @sig     len(value: any) -> int
+	// @param   value  an array, hash, string, or bytes value
+	// @returns the count: runes for strings, bytes for bytes, elements otherwise
+	// @errors  TypeError if value has no length (e.g. an integer or boolean)
+	// @example len([1, 2, 3])   → 3
+	// @example len("café")      → 4
+	// @since   0.1.0
+	// @see     keys, slice
 	"len": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("len expects 1 argument", ast.Pos{})
@@ -275,8 +300,18 @@ var Builtins = map[string]*Builtin{
 			return typeError(fmt.Sprintf("len not defined for %s", args[0].Type()), ast.Pos{})
 		}
 	}},
-	// keys returns an array of all keys in a hash.
-	// Note: Go maps have no guaranteed order, so the key order is non-deterministic.
+	// keys — an array of all keys in a hash.
+	//
+	// Key order is NOT guaranteed (hash iteration is unordered) — sort the result
+	// if you need a stable order. Accepts a concurrent hash too.
+	//
+	// @sig     keys(h: hash) -> array
+	// @param   h  the hash to read
+	// @returns an array of the hash's keys, in unspecified order
+	// @errors  TypeError if h is not a hash
+	// @example keys({"a": 1})   → [a]
+	// @since   0.1.0
+	// @see     values, hasKey
 	"keys": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("keys expects 1 argument", ast.Pos{})
@@ -304,13 +339,17 @@ var Builtins = map[string]*Builtin{
 			return typeError(fmt.Sprintf("keys expects hash, got %s", args[0].Type()), ast.Pos{})
 		}
 	}},
-	// values returns an array of all values in a hash.
-	// Mirrors keys() — accepts both *Hash and *ConcurrentHash so the two
-	// builtins stay symmetric (calling code can iterate values(ch) the same
-	// way it iterates keys(ch)). Go map iteration is non-deterministic so
-	// do not rely on order across calls; ConcurrentHash uses sync.Map.Range
-	// whose ordering is also non-deterministic and may briefly include or
-	// exclude entries added/removed during iteration.
+	// values — an array of all values in a hash.
+	//
+	// Mirrors keys(): same unspecified order, and also accepts a concurrent hash.
+	//
+	// @sig     values(h: hash) -> array
+	// @param   h  the hash to read
+	// @returns an array of the hash's values, in unspecified order
+	// @errors  TypeError if h is not a hash
+	// @example values({"a": 1})   → [1]
+	// @since   0.1.0
+	// @see     keys, hasKey
 	"values": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("values expects 1 argument", ast.Pos{})
@@ -336,8 +375,20 @@ var Builtins = map[string]*Builtin{
 			return typeError(fmt.Sprintf("values expects hash, got %s", args[0].Type()), ast.Pos{})
 		}
 	}},
-	// hasKey returns true if the hash contains the given key, false otherwise.
-	// hasKey(h, "name") — avoids the null-check pattern of h["name"] == null.
+	// hasKey — whether a hash contains the given key.
+	//
+	// Avoids the h["name"] == null pattern, which can't tell "absent" from
+	// "present but null".
+	//
+	// @sig     hasKey(h: hash, key: any) -> bool
+	// @param   h    the hash to check
+	// @param   key  the key to look for
+	// @returns true if the key is present
+	// @errors  TypeError if h is not a hash or key is unhashable
+	// @example hasKey({"a": 1}, "a")   → true
+	// @example hasKey({"a": 1}, "b")   → false
+	// @since   0.1.0
+	// @see     keys, delete
 	"hasKey": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("hasKey expects 2 arguments", ast.Pos{})
@@ -353,7 +404,19 @@ var Builtins = map[string]*Builtin{
 		_, exists := hash.Get(hk) // OFI #3 — locked read
 		return &Boolean{Value: exists}
 	}},
-	// delete removes a key from a hash in place (mutates the hash).
+	// delete — remove a key from a hash IN PLACE (mutates the hash).
+	//
+	// Unlike most kLex collection ops, delete mutates rather than copying: the
+	// hash is changed and null is returned. Deleting an absent key is a no-op.
+	//
+	// @sig     delete(h: hash, key: any) -> null
+	// @param   h    the hash to modify
+	// @param   key  the key to remove
+	// @returns null — the hash is mutated in place
+	// @errors  TypeError if h is not a hash or key is unhashable; RuntimeError if the hash is frozen
+	// @example delete({"a": 1}, "a")   → null
+	// @since   0.1.0
+	// @see     hasKey, keys
 	"delete": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("delete expects 2 arguments", ast.Pos{})
@@ -382,33 +445,78 @@ var Builtins = map[string]*Builtin{
 			return typeError(fmt.Sprintf("delete expects hash as first argument, got %s", args[0].Type()), ast.Pos{})
 		}
 	}},
-	// print outputs a value without a trailing newline.
-	// Useful for building output on a single line across multiple calls.
+	// print — print values with no trailing newline.
+	//
+	// Each argument is printed using its display form, with nothing added between
+	// or after — useful for building a line across several calls. Returns null.
+	//
+	// @sig     print(values...: any) -> null
+	// @param   values  zero or more values to print
+	// @returns null
+	// @errors  none
+	// @example no-run print("no newline")
+	// @since   0.1.0
+	// @see     println, str
 	"print": {Fn: func(args []Object) Object {
 		for _, arg := range args {
 			fmt.Fprint(Output, arg.Inspect())
 		}
 		return NULL
 	}},
-	// type returns the runtime type name of any value as a string.
-	// Useful for debugging: type(42) → "INTEGER", type("hi") → "STRING"
+	// type — the runtime type name of any value, as a string.
+	//
+	// Returns the strict type tag — "INTEGER", "STRING", "ARRAY", "HASH",
+	// "BOOLEAN", "NULL", "FUNCTION", and so on. Handy for debugging and for
+	// branching on a value's shape.
+	//
+	// @sig     type(value: any) -> string
+	// @param   value  any value
+	// @returns the uppercase type-name string
+	// @errors  none
+	// @example type(42)      → INTEGER
+	// @example type("hi")    → STRING
+	// @example type([1, 2])  → ARRAY
+	// @since   0.1.0
+	// @see     len
 	"type": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("type expects 1 argument", ast.Pos{})
 		}
 		return &String{Value: string(args[0].Type())}
 	}},
-	// str converts any value to its string representation.
-	// This is how you turn an integer into a string for building output.
-	// str(42) → "42", str(true) → "true", str(null) → "null"
+	// str — any value's string representation.
+	//
+	// The standard way to turn a number, bool, or null into text for building
+	// output. Uses each value's display form (e.g. a string array shows as
+	// [a, b], not ["a", "b"]).
+	//
+	// @sig     str(value: any) -> string
+	// @param   value  any value
+	// @returns the value's string form
+	// @errors  none
+	// @example str(42)     → 42
+	// @example str(true)   → true
+	// @since   0.1.0
+	// @see     int, float, type
 	"str": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("str expects 1 argument", ast.Pos{})
 		}
 		return &String{Value: args[0].Inspect()}
 	}},
-	// int converts a string or float to an integer.
-	// int("42") → 42, int(3.9) → 3 (truncates toward zero)
+	// int — convert a float, string, or int to an integer.
+	//
+	// A float truncates toward zero. For untrusted strings (where a bad value
+	// should be handled, not raised), prefer parseInt, which returns (value, err).
+	//
+	// @sig     int(x: any) -> int
+	// @param   x  an integer, a float (truncated), or an integer string
+	// @returns x as an integer
+	// @errors  TypeError for non-numeric types; RuntimeError if a string isn't a valid integer
+	// @example int("42")   → 42
+	// @example int(3.9)    → 3
+	// @since   0.1.0
+	// @see     float, parseInt, str
 	"int": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("int expects 1 argument", ast.Pos{})
@@ -432,8 +540,21 @@ var Builtins = map[string]*Builtin{
 			return typeError(fmt.Sprintf("int: cannot convert %s to integer", args[0].Type()), ast.Pos{})
 		}
 	}},
-	// split breaks a string into an array of substrings on a separator.
-	// split("a,b,c", ",") → ["a", "b", "c"]
+	// split — break a string into pieces on a separator.
+	//
+	// Returns the substrings between each occurrence of sep, in order. Pair with
+	// join to round-trip. Splitting on "" yields one entry per Unicode code
+	// point (rune), not per byte.
+	//
+	// @sig     split(str: string, sep: string) -> array
+	// @param   str  the string to split
+	// @param   sep  the separator; "" splits into individual runes
+	// @returns an array of string pieces; never null
+	// @errors  TypeError if str or sep is not a string
+	// @example split("a,b,c", ",")  → [a, b, c]
+	// @example split("café", "")    → [c, a, f, é]
+	// @since   0.1.0
+	// @see     join, replace, substr
 	"split": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("split expects 2 arguments", ast.Pos{})
@@ -453,9 +574,18 @@ var Builtins = map[string]*Builtin{
 		}
 		return &Array{Elements: elements}
 	}},
-	// join concatenates an array of strings into a single string with a separator.
-	// join(["a", "b", "c"], ",") → "a,b,c"
-	// All array elements must be strings — mixing types is a TypeError.
+	// join — concatenate an array of strings into one, separated by sep.
+	//
+	// The inverse of split. Every element must be a string.
+	//
+	// @sig     join(arr: array, sep: string) -> string
+	// @param   arr  an array of strings
+	// @param   sep  the separator placed between elements
+	// @returns the elements of arr joined by sep
+	// @errors  TypeError if arr isn't an array, an element isn't a string, or sep isn't a string
+	// @example join(["a", "b", "c"], ",")   → a,b,c
+	// @since   0.1.0
+	// @see     split, concat
 	"join": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("join expects 2 arguments", ast.Pos{})
@@ -478,9 +608,18 @@ var Builtins = map[string]*Builtin{
 		}
 		return &String{Value: strings.Join(parts, sep.Value)}
 	}},
-	// pop returns a NEW array with the last element removed — it does not mutate.
-	// Consistent with push: both operations return new arrays rather than modifying in place.
-	// Calling pop on an empty array returns an empty array.
+	// pop — a NEW array with the last element removed (does not mutate).
+	//
+	// Like push, pop copies rather than mutating. Popping an empty array returns
+	// an empty array.
+	//
+	// @sig     pop(arr: array) -> array
+	// @param   arr  the source array (left unchanged)
+	// @returns a new array without arr's last element
+	// @errors  TypeError if arr is not an array
+	// @example pop([1, 2, 3])   → [1, 2]
+	// @since   0.1.0
+	// @see     push, slice
 	"pop": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("pop expects 1 argument", ast.Pos{})
@@ -496,8 +635,22 @@ var Builtins = map[string]*Builtin{
 		copy(newElements, arr.Elements)
 		return &Array{Elements: newElements}
 	}},
-	// push returns a NEW array with the element appended — it does not mutate.
-	// This is intentional: immutable array operations are safer and more predictable.
+	// push — return a NEW array with one element appended (does not mutate).
+	//
+	// Arrays are mutable reference types, but push is deliberately immutable: it
+	// copies, so the original array is untouched and concurrent readers stay
+	// safe. To build a large array, prefer makeArray + index assignment — push in
+	// a loop is O(n²).
+	//
+	// @sig     push(arr: array, value: any) -> array
+	// @param   arr    the source array (left unchanged)
+	// @param   value  the element to append
+	// @returns a new array: arr's elements followed by value
+	// @errors  TypeError if arr is not an array
+	// @example push([1, 2], 3)   → [1, 2, 3]
+	// @example push([], "a")     → [a]
+	// @since   0.1.0
+	// @see     pop, concat, makeArray
 	"push": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("push expects 2 arguments", ast.Pos{})
@@ -511,10 +664,20 @@ var Builtins = map[string]*Builtin{
 		newElements[len(arr.Elements)] = args[1]
 		return &Array{Elements: newElements}
 	}},
-	// makeArray allocates an array of n elements in a single allocation, all set to defaultVal.
-	// Use this instead of building with push() in a loop — push is O(n) per call (O(n²) total),
-	// makeArray is O(n) once. Fill elements with arr[i] = val afterwards.
-	// Usage: arr = makeArray(1000000, 0)   — 1M zeros, O(n)
+	// makeArray — allocate an array of n elements, each set to default.
+	//
+	// One allocation — use this instead of push() in a loop (push is O(n) per
+	// call, O(n²) total; makeArray is O(n) once). Fill with arr[i] = val after.
+	// The default is null when omitted.
+	//
+	// @sig     makeArray(n: int, [default: any]) -> array
+	// @param   n        the number of elements (non-negative)
+	// @param   default  the value each element starts as; defaults to null
+	// @returns a new array of n copies of default
+	// @errors  TypeError if n is not an integer
+	// @example makeArray(3, 0)   → [0, 0, 0]
+	// @since   0.1.0
+	// @see     range, push, concatAll
 	"makeArray": {Fn: func(args []Object) Object {
 		if len(args) < 1 || len(args) > 2 {
 			return runtimeError("makeArray expects 1 or 2 arguments: makeArray(n) or makeArray(n, defaultVal)", ast.Pos{})
@@ -537,14 +700,23 @@ var Builtins = map[string]*Builtin{
 		}
 		return &Array{Elements: elements}
 	}},
-	// concat merges two arrays into a new array in a single allocation.
-	// Faster than looping push when combining two existing arrays.
-	// Usage: concat(arr1, arr2) -> new array containing all elements of arr1 followed by arr2.
+	// concat — merge two arrays into one new array.
 	//
-	// ANTIPATTERN ALERT (OFI #10): `acc = concat(acc, batch)` in a loop
-	// is O(n²) — each call copies the growing accumulator. If you're
-	// merging more than two arrays, collect them into a single outer
-	// array first and call concatAll() — that's O(total) in one pass.
+	// Single-allocation merge of arr1 followed by arr2; faster than looping push
+	// to combine two existing arrays. Neither input is modified.
+	//
+	// ANTIPATTERN: `acc = concat(acc, batch)` in a loop is O(n²) — each call
+	// copies the growing accumulator. To merge many arrays, collect them into one
+	// outer array and call concatAll(), which is O(total) in a single pass.
+	//
+	// @sig     concat(arr1: array, arr2: array) -> array
+	// @param   arr1  the first array
+	// @param   arr2  the array appended after arr1
+	// @returns a new array: all of arr1 followed by all of arr2
+	// @errors  TypeError if either argument is not an array
+	// @example concat([1, 2], [3, 4])   → [1, 2, 3, 4]
+	// @since   0.1.0
+	// @see     concatAll, push
 	"concat": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError(fmt.Sprintf("concat expects 2 arguments, got %d", len(args)), ast.Pos{})
@@ -559,20 +731,19 @@ var Builtins = map[string]*Builtin{
 		copy(newElements[len(arr1.Elements):], arr2.Elements)
 		return &Array{Elements: newElements}
 	}},
-	// concatAll(arrs) — single-allocation flatten of an array of
-	// arrays. Replaces the O(n²) loop antipattern:
+	// concatAll — flatten an array of arrays into one, in a single allocation.
 	//
-	//   // BAD — O(n²)
-	//   acc = []
-	//   for batch in batches { acc = concat(acc, batch) }
+	// Replaces the O(n²) `acc = concat(acc, batch)` loop antipattern: collect the
+	// pieces into one outer array and call concatAll, which sums the total length
+	// first and copies each sub-array once — O(total). Empty input → empty array.
 	//
-	//   // GOOD — O(total)
-	//   acc = concatAll(batches)
-	//
-	// Computes total length first so the result is one allocation, then
-	// copies each sub-array into place. Empty input → empty array.
-	// Non-array elements at any depth fail with a typed error naming
-	// the offending index.
+	// @sig     concatAll(arrs: array) -> array
+	// @param   arrs  an array whose elements are all arrays
+	// @returns one array: every sub-array concatenated in order
+	// @errors  TypeError if arrs isn't an array or any element isn't an array (the error names the offending index)
+	// @example concatAll([[1, 2], [3, 4]])   → [1, 2, 3, 4]
+	// @since   0.1.0
+	// @see     concat, makeArray
 	"concatAll": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError(fmt.Sprintf("concatAll expects 1 argument (array of arrays), got %d", len(args)), ast.Pos{})
@@ -598,7 +769,15 @@ var Builtins = map[string]*Builtin{
 		}
 		return &Array{Elements: out}
 	}},
-	// upper returns a copy of a string with all letters converted to uppercase.
+	// upper — a copy of a string with all letters uppercased.
+	//
+	// @sig     upper(s: string) -> string
+	// @param   s  the string to convert
+	// @returns s with every letter in uppercase
+	// @errors  TypeError if s is not a string
+	// @example upper("hi")   → HI
+	// @since   0.1.0
+	// @see     lower, trim
 	"upper": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("upper expects 1 argument", ast.Pos{})
@@ -609,7 +788,15 @@ var Builtins = map[string]*Builtin{
 		}
 		return &String{Value: strings.ToUpper(s.Value)}
 	}},
-	// lower returns a copy of a string with all letters converted to lowercase.
+	// lower — a copy of a string with all letters lowercased.
+	//
+	// @sig     lower(s: string) -> string
+	// @param   s  the string to convert
+	// @returns s with every letter in lowercase
+	// @errors  TypeError if s is not a string
+	// @example lower("HI")   → hi
+	// @since   0.1.0
+	// @see     upper, trim
 	"lower": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("lower expects 1 argument", ast.Pos{})
@@ -620,8 +807,19 @@ var Builtins = map[string]*Builtin{
 		}
 		return &String{Value: strings.ToLower(s.Value)}
 	}},
-	// float converts an integer or string to a float.
-	// float(3) → 3.0, float("2.5") → 2.5
+	// float — convert an integer, float, or numeric string to a float.
+	//
+	// For untrusted input (where a bad string should be handled rather than raise),
+	// prefer parseFloat, which returns a (value, err) tuple.
+	//
+	// @sig     float(x: any) -> float
+	// @param   x  an integer, float, or numeric string
+	// @returns x as a float
+	// @errors  TypeError for non-numeric types; RuntimeError if a string isn't a valid float
+	// @example float(3)       → 3
+	// @example float("2.5")   → 2.5
+	// @since   0.1.0
+	// @see     int, parseFloat, str
 	"float": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("float expects 1 argument", ast.Pos{})
@@ -641,11 +839,22 @@ var Builtins = map[string]*Builtin{
 			return typeError(fmt.Sprintf("float: cannot convert %s to float", args[0].Type()), ast.Pos{})
 		}
 	}},
-	// range generates an array of integers.
-	// range(stop)             → [0, 1, ..., stop-1]
-	// range(start, stop)      → [start, start+1, ..., stop-1]
-	// range(start, stop, step)→ [start, start+step, ...] up to but not including stop
-	// A negative step counts down. Returns an empty array if the range is empty.
+	// range — an array of integers over a half-open interval.
+	//
+	// Three forms: range(stop) counts 0..stop-1; range(start, stop) counts
+	// start..stop-1; range(start, stop, step) steps by step (a negative step
+	// counts down). The stop value is always excluded. An empty range yields [].
+	//
+	// @sig     range(start: int, [stop: int], [step: int]) -> array
+	// @param   start  with one argument this is the stop and start defaults to 0; otherwise the first value (inclusive)
+	// @param   stop   the exclusive upper (or lower) bound
+	// @param   step   the increment; defaults to 1, may be negative, must be non-zero
+	// @returns an array of integers from start toward stop, excluding stop
+	// @errors  TypeError if any argument is not an integer; RuntimeError if step is zero
+	// @example range(3)      → [0, 1, 2]
+	// @example range(1, 4)   → [1, 2, 3]
+	// @since   0.1.0
+	// @see     makeArray
 	"range": {Fn: func(args []Object) Object {
 		if len(args) < 1 || len(args) > 3 {
 			return runtimeError("range expects 1, 2, or 3 arguments", ast.Pos{})
@@ -712,7 +921,15 @@ var Builtins = map[string]*Builtin{
 		}
 		return &Array{Elements: elements}
 	}},
-	// trim removes leading and trailing whitespace from a string.
+	// trim — a copy of a string with leading and trailing whitespace removed.
+	//
+	// @sig     trim(s: string) -> string
+	// @param   s  the string to trim
+	// @returns s without leading or trailing whitespace
+	// @errors  TypeError if s is not a string
+	// @example trim("  hi  ")   → hi
+	// @since   0.1.0
+	// @see     upper, lower, replace
 	"trim": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("trim expects 1 argument", ast.Pos{})
@@ -723,11 +940,20 @@ var Builtins = map[string]*Builtin{
 		}
 		return &String{Value: strings.TrimSpace(s.Value)}
 	}},
-	// replace returns a copy of str with all occurrences of old replaced by new.
-	// replace("hello world", "world", "kLex") → "hello kLex"
-	// Replaces EVERY occurrence (it's a thin wrapper over Go's
-	// strings.ReplaceAll). `replaceAll` is a JS/Python-friendly alias
-	// for discoverability — same behaviour either way.
+	// replace — a copy of str with EVERY occurrence of old replaced by new.
+	//
+	// Despite the bare name, this is replace-all (it wraps Go's ReplaceAll);
+	// replaceAll is an identical alias for people who expect that name.
+	//
+	// @sig     replace(str: string, old: string, new: string) -> string
+	// @param   str  the source string
+	// @param   old  the substring to find
+	// @param   new  the replacement
+	// @returns str with all occurrences of old replaced by new
+	// @errors  TypeError if any argument is not a string
+	// @example replace("hello world", "world", "kLex")   → hello kLex
+	// @since   0.1.0
+	// @see     replaceAll, trim, split
 	"replace": {Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return runtimeError("replace expects 3 arguments", ast.Pos{})
@@ -746,10 +972,21 @@ var Builtins = map[string]*Builtin{
 		}
 		return &String{Value: strings.ReplaceAll(s.Value, old.Value, new.Value)}
 	}},
-	// replaceAll(s, old, new) — alias of replace. Lives under both
-	// names so people coming from JS / Python (where replace() is
-	// single-replace and replaceAll() is all-occurrences) find what
-	// they expect. Both call strings.ReplaceAll under the hood.
+	// replaceAll — identical alias of replace (replaces every occurrence).
+	//
+	// Lives under both names so people from JS/Python — where replace() is
+	// single and replaceAll() is all-occurrences — find what they expect. Both
+	// replace every occurrence.
+	//
+	// @sig     replaceAll(str: string, old: string, new: string) -> string
+	// @param   str  the source string
+	// @param   old  the substring to find
+	// @param   new  the replacement
+	// @returns str with all occurrences of old replaced by new
+	// @errors  TypeError if any argument is not a string
+	// @example replaceAll("a-b-c", "-", "+")   → a+b+c
+	// @since   0.1.0
+	// @see     replace
 	"replaceAll": {Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return runtimeError("replaceAll expects 3 arguments", ast.Pos{})
@@ -768,9 +1005,20 @@ var Builtins = map[string]*Builtin{
 		}
 		return &String{Value: strings.ReplaceAll(s.Value, old.Value, new.Value)}
 	}},
-	// indexOf returns the index of the first occurrence of substr in str, or -1 if not found.
-	// Operates on Unicode code points, consistent with string indexing.
-	// indexOf("hello", "ll") → 2,  indexOf("hello", "x") → -1
+	// indexOf — the rune index of the first occurrence of substr, or -1.
+	//
+	// Indices count Unicode code points (runes), consistent with string indexing.
+	// An empty substr returns 0.
+	//
+	// @sig     indexOf(str: string, substr: string) -> int
+	// @param   str     the string to search
+	// @param   substr  the substring to find
+	// @returns the 0-based rune index of the first match, or -1 if absent
+	// @errors  TypeError if either argument is not a string
+	// @example indexOf("hello", "ll")   → 2
+	// @example indexOf("hello", "x")    → -1
+	// @since   0.1.0
+	// @see     startsWith, endsWith, substr
 	"indexOf": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("indexOf expects 2 arguments", ast.Pos{})
@@ -796,8 +1044,16 @@ var Builtins = map[string]*Builtin{
 		runeIdx := utf8.RuneCountInString(s.Value[:byteIdx])
 		return &Integer{Value: runeIdx}
 	}},
-	// startsWith returns true if str begins with the given prefix.
-	// startsWith("hello", "he") → true
+	// startsWith — whether str begins with the given prefix.
+	//
+	// @sig     startsWith(str: string, prefix: string) -> bool
+	// @param   str     the string to test
+	// @param   prefix  the prefix to look for
+	// @returns true if str begins with prefix
+	// @errors  TypeError if either argument is not a string
+	// @example startsWith("hello", "he")   → true
+	// @since   0.1.0
+	// @see     endsWith, indexOf
 	"startsWith": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("startsWith expects 2 arguments", ast.Pos{})
@@ -812,8 +1068,16 @@ var Builtins = map[string]*Builtin{
 		}
 		return &Boolean{Value: strings.HasPrefix(s.Value, prefix.Value)}
 	}},
-	// endsWith returns true if str ends with the given suffix.
-	// endsWith("hello", "lo") → true
+	// endsWith — whether str ends with the given suffix.
+	//
+	// @sig     endsWith(str: string, suffix: string) -> bool
+	// @param   str     the string to test
+	// @param   suffix  the suffix to look for
+	// @returns true if str ends with suffix
+	// @errors  TypeError if either argument is not a string
+	// @example endsWith("hello", "lo")   → true
+	// @since   0.1.0
+	// @see     startsWith, indexOf
 	"endsWith": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("endsWith expects 2 arguments", ast.Pos{})
@@ -828,7 +1092,15 @@ var Builtins = map[string]*Builtin{
 		}
 		return &Boolean{Value: strings.HasSuffix(s.Value, suffix.Value)}
 	}},
-	// env returns the value of an environment variable as a string, or null if unset.
+	// env — the value of an environment variable, or null if unset.
+	//
+	// @sig     env(name: string) -> string
+	// @param   name  the variable name
+	// @returns the variable's value, or null if it isn't set
+	// @errors  TypeError if name is not a string
+	// @example no-run env("HOME")
+	// @since   0.1.0
+	// @see     exec
 	"env": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("env expects 1 argument", ast.Pos{})
@@ -843,9 +1115,18 @@ var Builtins = map[string]*Builtin{
 		}
 		return &String{Value: val}
 	}},
-	// readFile reads the entire contents of a file and returns it as a string.
-	// On failure (file not found, permission denied, etc.) it returns a runtime error.
-	// Use safe(readFile, path) to handle the error without crashing.
+	// readFile — read a whole file into a string.
+	//
+	// Raises on failure (missing file, permission denied, …) — wrap with
+	// safe(readFile, path) to handle errors without crashing.
+	//
+	// @sig     readFile(path: string) -> string
+	// @param   path  the file path
+	// @returns the file's contents as a string
+	// @errors  TypeError if path isn't a string; RuntimeError if the file can't be read
+	// @example no-run let text = readFile("notes.txt")
+	// @since   0.1.0
+	// @see     writeFile, appendFile, safe
 	"readFile": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("readFile expects 1 argument", ast.Pos{})
@@ -860,8 +1141,16 @@ var Builtins = map[string]*Builtin{
 		}
 		return &String{Value: string(data)}
 	}},
-	// writeFile writes a string to a file, creating it if it does not exist and
-	// truncating it if it does. On failure returns a runtime error.
+	// writeFile — write a string to a file, creating or truncating it.
+	//
+	// @sig     writeFile(path: string, content: string) -> null
+	// @param   path     the file path (created if absent, truncated if present)
+	// @param   content  the text to write
+	// @returns null on success
+	// @errors  TypeError if either argument isn't a string; RuntimeError if the write fails
+	// @example no-run writeFile("out.txt", "hello")
+	// @since   0.1.0
+	// @see     readFile, appendFile
 	"writeFile": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("writeFile expects 2 arguments", ast.Pos{})
@@ -880,8 +1169,16 @@ var Builtins = map[string]*Builtin{
 		}
 		return NULL
 	}},
-	// appendFile appends a string to a file, creating it if it does not exist.
-	// On failure returns a runtime error.
+	// appendFile — append a string to a file, creating it if absent.
+	//
+	// @sig     appendFile(path: string, content: string) -> null
+	// @param   path     the file path
+	// @param   content  the text to append
+	// @returns null on success
+	// @errors  TypeError if either argument isn't a string; RuntimeError if the write fails
+	// @example no-run appendFile("log.txt", "another line\n")
+	// @since   0.1.0
+	// @see     writeFile, readFile
 	"appendFile": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("appendFile expects 2 arguments", ast.Pos{})
@@ -904,10 +1201,20 @@ var Builtins = map[string]*Builtin{
 		}
 		return NULL
 	}},
-	// exec runs an external binary and returns its stdout as a string.
-	// The first argument is the command name or path; the second is an array
-	// of string arguments. On non-zero exit or any OS error, returns a runtime
-	// error — use safe(exec, cmd, args) to handle failures without crashing.
+	// exec — run an external command and return its stdout.
+	//
+	// The first argument is the command name or path; the second an array of
+	// string arguments. Raises on a non-zero exit or OS error — wrap with
+	// safe(exec, cmd, args) to handle failures.
+	//
+	// @sig     exec(cmd: string, args: array) -> string
+	// @param   cmd   the command name or path
+	// @param   args  an array of string arguments
+	// @returns the command's stdout as a string
+	// @errors  TypeError if cmd isn't a string or args isn't a string array; RuntimeError on non-zero exit or OS error
+	// @example no-run exec("echo", ["hello"])
+	// @since   0.1.0
+	// @see     env, safe
 	"exec": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("exec expects 2 arguments", ast.Pos{})
@@ -934,8 +1241,18 @@ var Builtins = map[string]*Builtin{
 		}
 		return &String{Value: string(out)}
 	}},
-	// input prints an optional prompt and reads one line from stdin.
-	// The trailing newline is stripped. Returns the line as a string.
+	// input — print an optional prompt and read one line from stdin.
+	//
+	// The trailing newline is stripped. Do not call from async — stdin is a single
+	// shared reader.
+	//
+	// @sig     input([prompt: string]) -> string
+	// @param   prompt  optional text printed before reading
+	// @returns the line entered, without its trailing newline
+	// @errors  TypeError if prompt is given and isn't a string
+	// @example no-run let name = input("Name? ")
+	// @since   0.1.0
+	// @see     println, readFile
 	"input": {Fn: func(args []Object) Object {
 		if len(args) > 1 {
 			return runtimeError("input expects 0 or 1 arguments", ast.Pos{})
@@ -957,9 +1274,19 @@ var Builtins = map[string]*Builtin{
 		line = strings.TrimRight(line, "\r\n")
 		return &String{Value: line}
 	}},
-	// channel creates a new channel for passing values between async tasks.
-	// channel()    — unbuffered: send blocks until a receiver is ready.
-	// channel(n)   — buffered with capacity n: send blocks only when the buffer is full.
+	// channel — create a channel for passing values between async tasks.
+	//
+	// An unbuffered channel (no argument) blocks each send until a receiver is
+	// ready; a buffered channel (capacity n) blocks send only when full. Pair with
+	// async/send/recv to coordinate concurrent work.
+	//
+	// @sig     channel([capacity: int]) -> channel
+	// @param   capacity  buffer size; 0 (the default) means unbuffered
+	// @returns a new channel
+	// @errors  TypeError if capacity isn't an integer; RuntimeError if it's negative
+	// @example no-run let ch = channel(8)
+	// @since   0.1.0
+	// @see     send, recv, close, async
 	"channel": {Fn: func(args []Object) Object {
 		capacity := 0
 		if len(args) == 1 {
@@ -977,12 +1304,20 @@ var Builtins = map[string]*Builtin{
 		return &Channel{ch: make(chan Object, capacity), done: make(chan struct{})}
 	}},
 
-	// send transmits a value to a channel.
-	// Blocks until a receiver is ready (unbuffered) or buffer has space (buffered).
-	// Returns null on success.
-	// Returns false (Boolean) if the channel has been cancelled via cancel() or
-	// by a consumer breaking out of a for-in loop — the caller should stop sending.
-	// Returns a RuntimeError if the channel's data side is already closed.
+	// send — transmit a value on a channel.
+	//
+	// Blocks until a receiver is ready (unbuffered) or the buffer has room
+	// (buffered). The value is shared with the receiving task. Returns false if
+	// the channel was cancelled (a for-in consumer broke out) — stop sending then.
+	//
+	// @sig     send(ch: channel, value: any) -> any
+	// @param   ch     the channel to send on
+	// @param   value  the value to transmit
+	// @returns null on success; false if the channel was cancelled
+	// @errors  TypeError if ch isn't a channel; RuntimeError if the channel is already closed
+	// @example no-run send(ch, 42)
+	// @since   0.1.0
+	// @see     recv, channel, cancel, close
 	"send": {Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("send expects 2 arguments", ast.Pos{})
@@ -1016,11 +1351,19 @@ var Builtins = map[string]*Builtin{
 		return result
 	}},
 
-	// cancel signals that the consumer of a channel is done and no more values
-	// should be sent. Any blocked or future send() call on this channel returns
-	// false instead of blocking. cancel() is idempotent — calling it twice is safe.
-	// This is the explicit form; breaking out of a for-in loop over a channel
-	// also cancels it automatically.
+	// cancel — tell a channel's producer to stop; future sends return false.
+	//
+	// Signals that the consumer is done. Any blocked or future send() returns
+	// false instead of blocking. Idempotent. Breaking out of a for-in over a
+	// channel cancels it automatically — this is the explicit form.
+	//
+	// @sig     cancel(ch: channel) -> null
+	// @param   ch  the channel to cancel
+	// @returns null
+	// @errors  TypeError if ch is not a channel
+	// @example no-run cancel(ch)
+	// @since   0.1.0
+	// @see     close, send, recv
 	"cancel": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("cancel expects 1 argument", ast.Pos{})
@@ -1036,9 +1379,19 @@ var Builtins = map[string]*Builtin{
 		return NULL
 	}},
 
-	// isError returns true if val is a RuntimeError or TypeError produced by the
-	// evaluator. Use this inside stream pipeline stages to detect errors returned
-	// by callback functions via safe().
+	// isError — whether a value is an Error.
+	//
+	// True for a runtime/type error or a value made with error(). Handy in stream
+	// pipeline stages to detect errors surfaced by safe().
+	//
+	// @sig     isError(value: any) -> bool
+	// @param   value  any value
+	// @returns true if value is an Error
+	// @errors  none
+	// @example isError(42)                  → false
+	// @example isError(error("X", "oops"))  → true
+	// @since   0.1.0
+	// @see     error, safe
 	"isError": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("isError expects 1 argument", ast.Pos{})
@@ -1047,12 +1400,19 @@ var Builtins = map[string]*Builtin{
 		return &Boolean{Value: ok}
 	}},
 
-	// assert checks that condition is true.
-	// assert(condition)          — fails with "assert: condition is false"
-	// assert(condition, message) — fails with the given message
-	// condition must be bool; a non-bool condition is a TypeError.
-	// On success returns null. On failure raises a RuntimeError that propagates
-	// normally — catchable with safe() like any other error.
+	// assert — raise a RuntimeError unless condition is true.
+	//
+	// On success returns null; on failure raises (catchable with safe(), like any
+	// error). The condition must be a bool — a non-bool is a TypeError, not falsy.
+	//
+	// @sig     assert(condition: bool, [message: string]) -> null
+	// @param   condition  must be exactly true to pass
+	// @param   message    optional failure message; defaults to "assert: condition is false"
+	// @returns null on success
+	// @errors  TypeError if condition isn't a bool; RuntimeError (with message) if it's false
+	// @example assert(true)   → null
+	// @since   0.1.0
+	// @see     safe, error
 	"assert": {Fn: func(args []Object) Object {
 		if len(args) < 1 || len(args) > 2 {
 			return runtimeError("assert expects 1 or 2 arguments", ast.Pos{})
@@ -1075,10 +1435,19 @@ var Builtins = map[string]*Builtin{
 		return runtimeError(msg, ast.Pos{})
 	}},
 
-	// recv receives the next value from a channel.
-	// Returns (value, true) when a value is available.
-	// Returns (null, false) when the channel is closed and empty.
-	// Blocks until a value is available or the channel is closed.
+	// recv — receive the next value from a channel (blocking).
+	//
+	// Blocks until a value arrives or the channel is closed. Returns (value, true)
+	// for a value, or (null, false) once the channel is closed and drained — the
+	// standard `let v, ok = recv(ch)` loop condition.
+	//
+	// @sig     recv(ch: channel) -> (any, bool)
+	// @param   ch  the channel to receive from
+	// @returns (value, true) when a value is available; (null, false) when closed and empty
+	// @errors  TypeError if ch is not a channel
+	// @example no-run let v, ok = recv(ch)
+	// @since   0.1.0
+	// @see     send, recvNonBlock, channel, close
 	"recv": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("recv expects 1 argument", ast.Pos{})
@@ -1094,11 +1463,19 @@ var Builtins = map[string]*Builtin{
 		return &Tuple{Elements: []Object{val, TRUE}}
 	}},
 
-	// recvNonBlock attempts to receive from a channel without blocking.
-	// Returns the value if one is immediately available.
-	// Returns null if the channel is empty (no value available yet).
-	// Returns null if the channel is closed with no buffered values.
-	// Used for cooperative cancellation signaling in parallel workers.
+	// recvNonBlock — receive from a channel without blocking.
+	//
+	// Returns a value if one is immediately available, otherwise null (empty, or
+	// closed with nothing buffered). Used for cooperative cancellation polling in
+	// parallel workers.
+	//
+	// @sig     recvNonBlock(ch: channel) -> any
+	// @param   ch  the channel to poll
+	// @returns the next value, or null if none is ready
+	// @errors  TypeError if ch is not a channel
+	// @example no-run let v = recvNonBlock(ch)
+	// @since   0.1.0
+	// @see     recv, send, channel
 	"recvNonBlock": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("recvNonBlock expects 1 argument", ast.Pos{})
@@ -1115,9 +1492,18 @@ var Builtins = map[string]*Builtin{
 		}
 	}},
 
-	// close signals that no more values will be sent on the channel.
-	// Receivers will drain any buffered values then get (null, false) from recv.
-	// Returns null on success. RuntimeError if the channel is already closed.
+	// close — signal that no more values will be sent on a channel.
+	//
+	// Receivers drain any buffered values, then recv returns (null, false). Use
+	// close to end a producer cleanly; use cancel to stop from the consumer side.
+	//
+	// @sig     close(ch: channel) -> null
+	// @param   ch  the channel to close
+	// @returns null on success
+	// @errors  TypeError if ch isn't a channel; RuntimeError if it's already closed
+	// @example no-run close(ch)
+	// @since   0.1.0
+	// @see     cancel, send, recv, channel
 	"close": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("close expects 1 argument", ast.Pos{})
@@ -1138,8 +1524,15 @@ var Builtins = map[string]*Builtin{
 		return result
 	}},
 
-	// sleep pauses execution for the given number of milliseconds.
-	// sleep(500) waits half a second. Always returns null.
+	// sleep — pause execution for a number of milliseconds.
+	//
+	// @sig     sleep(ms: int) -> null
+	// @param   ms  milliseconds to pause
+	// @returns null
+	// @errors  TypeError if ms is not an integer
+	// @example no-run sleep(500)
+	// @since   0.1.0
+	// @see     async, await
 	"sleep": {Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("sleep expects 1 argument", ast.Pos{})
@@ -1158,20 +1551,20 @@ var Builtins = map[string]*Builtin{
 // cycle checker sees: Builtins → closure → Eval → (indirectly) Builtins.
 // init() runs after all functions are fully defined, so no cycle exists.
 func init() {
-	// apply(fn, args) — call fn with the elements of args as positional arguments.
+	// apply — call fn with the elements of args as its positional arguments.
 	//
-	// This is the spread/variadic-call operator: where `fn(a, b, c)` is fixed at
-	// parse time, `apply(fn, [a, b, c])` lets you build the argument list at
-	// runtime. Indispensable for higher-order utilities like partial, flip,
-	// curry, and pipelines that hand off an arbitrary-arity call.
+	// The spread/variadic-call operator: where fn(a, b, c) is fixed at parse time,
+	// apply(fn, [a, b, c]) builds the argument list at runtime — essential for
+	// partial, flip, curry, and pipelines that forward an arbitrary-arity call.
 	//
-	//   apply(fn(a, b) { a + b }, [3, 4])   → 7
-	//   apply(println, ["hello", "world"])  → prints "hello world"
-	//
-	// Errors:
-	//   - fn must be a *Function or *Builtin
-	//   - args must be an *Array
-	//   - any error raised by fn itself is returned unchanged
+	// @sig     apply(fn: function, args: array) -> any
+	// @param   fn    the function (or builtin) to call
+	// @param   args  an array whose elements become fn's positional arguments
+	// @returns whatever fn returns
+	// @errors  TypeError if fn isn't callable or args isn't an array; any error fn raises propagates
+	// @example apply(fn(a, b) { a + b }, [3, 4])   → 7
+	// @since   0.1.0
+	// @see     filter, map, reduce
 	Builtins["apply"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("apply expects 2 arguments (fn, args)", ast.Pos{})
@@ -1190,8 +1583,19 @@ func init() {
 		return result
 	}}
 
-	// filter returns a new array containing only the elements for which
-	// the function returns true. Example: filter([1,2,3,4], fn(x) { x > 2 }) → [3, 4]
+	// filter — a new array of the elements for which fn returns true.
+	//
+	// Calls fn(element) for each item and keeps those where it returns true. fn
+	// must take one argument and return a bool. The input is not modified.
+	//
+	// @sig     filter(arr: array, fn: function) -> array
+	// @param   arr  the array to filter
+	// @param   fn   a one-argument predicate returning a bool
+	// @returns a new array of the accepted elements, in order
+	// @errors  TypeError if arr isn't an array, fn isn't callable, or fn returns a non-bool; any error fn raises propagates
+	// @example filter([1, 2, 3, 4], fn(x) { x > 2 })   → [3, 4]
+	// @since   0.1.0
+	// @see     map, reduce
 	Builtins["filter"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("filter expects 2 arguments", ast.Pos{})
@@ -1229,9 +1633,21 @@ func init() {
 		return &Array{Elements: out}
 	}}
 
-	// reduce folds an array into a single value by repeatedly applying a function.
-	// The function receives (accumulator, currentElement) and returns the new accumulator.
-	// Example: reduce([1,2,3], fn(acc, x) { acc + x }, 0) → 6
+	// reduce — fold an array into a single value with an accumulator.
+	//
+	// Calls fn(accumulator, element) for each element left to right, starting from
+	// init, and returns the final accumulator. The classic sum/product/build-up
+	// operation.
+	//
+	// @sig     reduce(arr: array, fn: function, init: any) -> any
+	// @param   arr   the array to fold
+	// @param   fn    a two-argument function fn(accumulator, element)
+	// @param   init  the starting accumulator value
+	// @returns the final accumulator after folding every element
+	// @errors  TypeError if arr is not an array or fn is not callable; any error fn raises propagates
+	// @example reduce([1, 2, 3, 4], fn(acc, x) { acc + x }, 0)   → 10
+	// @since   0.1.0
+	// @see     map, filter
 	Builtins["reduce"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return runtimeError("reduce expects 3 arguments", ast.Pos{})
@@ -1263,6 +1679,19 @@ func init() {
 		return accumulator
 	}}
 
+	// map — apply a function to every element, returning a new array.
+	//
+	// Calls fn(element) for each item in order and collects the results. fn must
+	// take exactly one argument. The input array is not modified.
+	//
+	// @sig     map(arr: array, fn: function) -> array
+	// @param   arr  the array to transform
+	// @param   fn   a one-argument function applied to each element
+	// @returns a new array of the same length holding each fn(element)
+	// @errors  TypeError if arr is not an array or fn is not callable; any error fn raises propagates
+	// @example map([1, 2, 3], fn(x) { x * 2 })   → [2, 4, 6]
+	// @since   0.1.0
+	// @see     filter, reduce
 	Builtins["map"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("map expects 2 arguments", ast.Pos{})
@@ -1294,10 +1723,20 @@ func init() {
 		return &Array{Elements: out}
 	}}
 
-	// error creates a first-class Error value with a user-defined code and message.
-	// error("NOT_FOUND", "key was missing")
-	// The returned Error is NOT a propagation signal — it stays in the environment
-	// and can be inspected via .code, .message, and .is(code).
+	// error — build a first-class Error value with a code and message.
+	//
+	// The returned Error is a VALUE, not a raised/propagating error — it sits in a
+	// variable and is inspected via .code, .message, and .is(code). Return it as
+	// the second element of a (value, err) tuple to signal failure.
+	//
+	// @sig     error(code: string, message: string) -> error
+	// @param   code     a short machine-readable code, e.g. "NOT_FOUND"
+	// @param   message  a human-readable description
+	// @returns an Error value carrying code and message
+	// @errors  TypeError if code or message is not a string
+	// @example error("NOT_FOUND", "missing").code   → NOT_FOUND
+	// @since   0.1.0
+	// @see     isError, safe
 	Builtins["error"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("error() expects 2 arguments: code, message", ast.Pos{})
@@ -1313,13 +1752,22 @@ func init() {
 		return &Error{IsUserError: true, Code: code.Value, Message: msg.Value}
 	}}
 
-	// safe calls a function (user-defined or builtin) and turns any runtime error
-	// into a (null, ErrorObject) tuple instead of letting the error propagate and
-	// crash the program.
-	// Usage: val, err = safe(fn, arg1, arg2, ...)
-	// On success returns (result, null); on error returns (null, Error).
-	// The Error carries a .code ("RUNTIME_ERROR" or "TYPE_ERROR") and .message.
-	// If the function already returns a tuple it is passed through unchanged.
+	// safe — call a function and capture any error as a (value, err) tuple.
+	//
+	// Runs fn(...args) and, instead of letting a runtime/type error propagate,
+	// returns it in the second slot of a tuple. This is the canonical way to ask
+	// "did this fail?": `let v, err = safe(fn, ...)`. A function that itself
+	// returns error(...) is routed the same way; a function returning a tuple is
+	// passed through unchanged.
+	//
+	// @sig     safe(fn: function, args...: any) -> (any, error)
+	// @param   fn    the function (or builtin) to call
+	// @param   args  arguments forwarded to fn
+	// @returns (result, null) on success; (null, error) on failure
+	// @errors  none — failures are returned in the tuple, never raised; err.code is "RUNTIME_ERROR" or "TYPE_ERROR" and err.message carries the detail
+	// @example safe(fn() { 42 })   → (42, null)
+	// @since   0.1.0
+	// @see     error, async
 	Builtins["safe"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 1 {
 			return runtimeError("safe expects at least 1 argument", ast.Pos{})
@@ -1358,18 +1806,28 @@ func init() {
 		return &Tuple{Elements: []Object{result, NULL}}
 	}}
 
-	// async launches a function in a background goroutine and returns a Task
-	// immediately. Accepts both user-defined functions and builtins.
-	// Usage: task = async(fn, arg1, arg2, ...)
-	// The function runs in a snapshotted environment: it can read globals from the
-	// time the task was launched, but mutations are task-local and not visible to
-	// the caller. This eliminates mutex contention and prevents shared mutable state bugs.
-	// Note: do not call input() from async — it shares a global stdin reader.
-	// M4 (audit fix, 2026-05-22): async retains args[1:] as fnArgs
-	// inside the spawned goroutine that runs AFTER Fn returns. Mark
-	// so the VM's OpCallBuiltin allocates a fresh args slice rather
-	// than reusing a pooled buffer — otherwise the next caller's
-	// args would clobber what the goroutine still reads.
+	// async — run a function in the background, returning a Task immediately.
+	//
+	// The function runs in a snapshot of the current environment: it can read
+	// globals as they were when the task launched, but its mutations are
+	// task-local and invisible to the caller (no shared-state races). Collect the
+	// result with await. Accepts user functions and builtins. Do not call input()
+	// from async — it shares one global stdin reader.
+	//
+	// @sig     async(fn: function, args...: any) -> task
+	// @param   fn    the function to run in the background
+	// @param   args  arguments forwarded to fn
+	// @returns a Task; pass it to await to block for the result
+	// @errors  TypeError if fn is not callable
+	// @example await(async(fn() { 21 + 21 }))   → 42
+	// @since   0.1.0
+	// @see     await, safe, channel
+	//
+	// impl: RetainsArgs=true — async keeps args[1:] alive in the spawned
+	// goroutine that runs AFTER Fn returns, so the VM's OpCallBuiltin must
+	// allocate a fresh args slice instead of reusing a pooled buffer (M4 audit
+	// fix 2026-05-22); otherwise the next caller's args clobber what the
+	// goroutine still reads.
 	Builtins["async"] = &Builtin{RetainsArgs: true, Fn: func(args []Object) Object {
 		if len(args) < 1 {
 			return runtimeError("async expects at least 1 argument", ast.Pos{})
@@ -1574,30 +2032,18 @@ func evalAsync(args []Object, env *Environment) Object {
 // ============================================================================
 
 func init() {
-	// sqrt returns the square root of a number (integer or float).
-	// Usage: sqrt(16) → 4.0   sqrt(2) → 1.414...
-	Builtins["sqrt"] = &Builtin{Fn: func(args []Object) Object {
-		if len(args) != 1 {
-			return runtimeError("sqrt expects 1 argument", ast.Pos{})
-		}
-		var f float64
-		switch x := args[0].(type) {
-		case *Integer:
-			f = float64(x.Value)
-		case *Float:
-			f = x.Value
-		default:
-			return typeError(fmt.Sprintf("sqrt: argument must be number, got %s", args[0].Type()), ast.Pos{})
-		}
-		if f < 0 {
-			return runtimeError("sqrt: cannot take square root of negative number", ast.Pos{})
-		}
-		return &Float{Value: math.Sqrt(f)}
-	}}
-
-	// await blocks until the given task completes and returns its result.
-	// If the task's function produced an error, await propagates it.
-	// Usage: result = await(task)
+	// await — block until a task finishes and return its result.
+	//
+	// Collects the value produced by an async task. If the task's function raised
+	// an error, await re-raises it here.
+	//
+	// @sig     await(task: task) -> any
+	// @param   task  a Task from async
+	// @returns the task's result
+	// @errors  TypeError if task is not a Task; any error the task raised propagates
+	// @example await(async(fn() { 6 * 7 }))   → 42
+	// @since   0.1.0
+	// @see     async, channel
 	Builtins["await"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("await expects 1 argument", ast.Pos{})

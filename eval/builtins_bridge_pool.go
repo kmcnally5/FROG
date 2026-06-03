@@ -42,6 +42,7 @@ func (p *BridgePool) Inspect() string {
 // take work?". Caller must hold p.mu. It folds two states together:
 //   - p.dead[i]      → init failed, has been marked dead since pool creation
 //   - bridge.tainted → subprocess crashed or hit a fatal error mid-session
+//
 // When it observes a tainted bridge it latches the result into p.dead[i] so
 // subsequent picks skip the b.mu lock entirely. Taint is permanent (the
 // docs say so — you must close and rebuild), so caching the verdict is safe.
@@ -102,28 +103,27 @@ func (p *BridgePool) pick() *Bridge {
 }
 
 func init() {
-	// ── bridgePool(n, transport, opts?) → (pool, err) ────────────────────────
+	// bridgePool — start N identical bridges as one round-robin pool.
 	//
-	// Starts `n` identical bridges from a transport hash and returns them as a
-	// pool. Transport hash takes the same shape as bridgeOpen() — kind, cmd,
-	// args, plus optional timeout_seconds / max_response_mb / stderr_log.
+	// The pattern for fanning the same job across many subprocesses (e.g. 16
+	// Python YARA workers). Starts `n` bridges from a transport hash — same shape
+	// as bridgeOpen ("kind", "cmd", "args", optional timeout_seconds /
+	// max_response_mb / stderr_log) — and hands back a pool that routes
+	// bridgePoolCall/Stream to the next alive member. The optional opts hash takes
+	// "init": a callable run once per bridge after spawn (receives the bridge); if
+	// it returns an error — or a (result, err) tuple with a non-null err — that
+	// bridge is marked dead. Use it to load rules, open connections, etc. If any
+	// spawn fails the whole pool is rolled back so no subprocesses leak.
 	//
-	// Optional opts hash holds pool-only configuration:
-	//   init  — callable run once on each bridge after spawn. Receives the
-	//           bridge as its single argument. If it returns an Error (or a
-	//           Tuple whose second element is an Error — the bridgeCall shape),
-	//           that bridge is marked dead in the pool. Use for loading YARA
-	//           rules, opening connections, etc.
-	//
-	// Example:
-	//   bridgePool(16, {
-	//       "kind": "subprocess",
-	//       "cmd":  "python3",
-	//       "args": ["yara_bridge.py"],
-	//       "timeout_seconds": 30
-	//   }, {
-	//       "init": fn(b) { return bridgeCall(b, "load", ["rules.yar"]) }
-	//   })
+	// @sig     bridgePool(n: int, transport: hash, [opts: hash]) -> (BridgePool, error)
+	// @param   n          how many bridges to start (must be >= 1)
+	// @param   transport  the bridge transport hash (as for bridgeOpen)
+	// @param   opts        pool options, currently {"init": fn(bridge)} (optional)
+	// @returns a (pool, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on bad argument types; returns BRIDGE_TRANSPORT_* / spawn errors in the tuple's second slot
+	// @example no-run pool, err = bridgePool(16, {"kind": "subprocess", "cmd": "python3", "args": ["yara_bridge.py"]})
+	// @since   0.1.0
+	// @see     bridgePoolCall, bridgePoolStream, bridgePoolClose, bridgeOpen
 	Builtins["bridgePool"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 2 || len(args) > 3 {
 			return runtimeError("bridgePool expects 2 or 3 arguments (n, transport, opts?)", ast.Pos{})
@@ -219,7 +219,24 @@ func init() {
 		return &Tuple{Elements: []Object{pool, NULL}}
 	}}
 
-	// ── bridgePoolCall(pool, fn, args, timeoutSec?) → (result, err) ──────────
+	// bridgePoolCall — call a function on the next alive bridge in a pool.
+	//
+	// Picks a member round-robin (via an atomic counter) and forwards to
+	// bridgeCall, so it behaves identically — same timeouts, schema validation,
+	// error codes — just load-balanced. N concurrent async tasks hit N different
+	// bridges with no contention. Returns BRIDGE_POOL_EMPTY when every member is
+	// dead, or BRIDGE_CLOSED if the pool was closed.
+	//
+	// @sig     bridgePoolCall(pool: BridgePool, fn: string, args: array, [timeoutSec: number]) -> (any, error)
+	// @param   pool        a pool from bridgePool
+	// @param   fn          the remote function name to invoke
+	// @param   args        an array of arguments to pass
+	// @param   timeoutSec  per-call timeout override in seconds (optional)
+	// @returns a (result, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on bad argument types; returns BRIDGE_POOL_EMPTY / BRIDGE_CLOSED / per-call errors in the tuple's second slot
+	// @example no-run result, err = bridgePoolCall(pool, "scan_batch", [files])
+	// @since   0.1.0
+	// @see     bridgePool, bridgePoolStream, bridgeCall
 	Builtins["bridgePoolCall"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 && len(args) != 4 {
 			return runtimeError("bridgePoolCall expects 3 or 4 arguments (pool, fn, args, timeoutSec?)", ast.Pos{})
@@ -241,7 +258,23 @@ func init() {
 		return Builtins["bridgeCall"].Fn(forwarded)
 	}}
 
-	// ── bridgePoolStream(pool, fn, args, timeout?) → (channel, err) ──────────
+	// bridgePoolStream — call a streaming handler on the next alive bridge in a pool.
+	//
+	// The streaming counterpart to bridgePoolCall: picks a member round-robin and
+	// forwards to bridgeStream, returning a channel of items. Same semantics as
+	// bridgeStream (channel closes on end-of-stream; a mid-stream Error arrives as
+	// the final item), just load-balanced across the pool.
+	//
+	// @sig     bridgePoolStream(pool: BridgePool, fn: string, args: array, [timeout: number]) -> (channel, error)
+	// @param   pool     a pool from bridgePool
+	// @param   fn       the streaming handler name to invoke
+	// @param   args     an array of arguments to pass
+	// @param   timeout  per-call timeout override in seconds (optional)
+	// @returns a (channel, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on bad argument types; returns BRIDGE_POOL_EMPTY / BRIDGE_CLOSED / stream errors in the tuple's second slot
+	// @example no-run ch, err = bridgePoolStream(pool, "tail", [path])
+	// @since   0.1.0
+	// @see     bridgePoolCall, bridgeStream, bridgePool
 	Builtins["bridgePoolStream"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 3 || len(args) > 4 {
 			return runtimeError("bridgePoolStream expects 3 or 4 arguments (pool, fn, args, timeout?)", ast.Pos{})
@@ -261,7 +294,19 @@ func init() {
 		return Builtins["bridgeStream"].Fn(forwarded)
 	}}
 
-	// ── bridgePoolClose(pool) → null ─────────────────────────────────────────
+	// bridgePoolClose — close every bridge in a pool.
+	//
+	// Calls bridgeClose on each member, reaping all the subprocesses at once.
+	// Idempotent — closing an already-closed pool is a no-op. Always close pools
+	// you open.
+	//
+	// @sig     bridgePoolClose(pool: BridgePool) -> null
+	// @param   pool  the pool to close
+	// @returns null
+	// @errors  TypeError if the argument isn't a bridge pool
+	// @example no-run bridgePoolClose(pool)
+	// @since   0.1.0
+	// @see     bridgePool, bridgeClose
 	Builtins["bridgePoolClose"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bridgePoolClose expects 1 argument (pool)", ast.Pos{})
@@ -287,7 +332,19 @@ func init() {
 		return NULL
 	}}
 
-	// ── bridgePoolHealth(pool) → {size, alive, dead} ─────────────────────────
+	// bridgePoolHealth — how many pool members are alive vs dead.
+	//
+	// Returns a hash {"size", "alive", "dead"} — the total, the count routing
+	// will use, and the count tainted out of service (init failure or a fatal
+	// error). Poll it to decide whether to recreate the pool or alert.
+	//
+	// @sig     bridgePoolHealth(pool: BridgePool) -> hash
+	// @param   pool  the pool to inspect
+	// @returns a hash with "size", "alive", and "dead" counts
+	// @errors  TypeError if the argument isn't a bridge pool
+	// @example no-run bridgePoolHealth(pool)
+	// @since   0.1.0
+	// @see     bridgePoolStderr, bridgeMetrics, bridgePool
 	Builtins["bridgePoolHealth"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bridgePoolHealth expects 1 argument (pool)", ast.Pos{})
@@ -304,9 +361,19 @@ func init() {
 		)
 	}}
 
-	// ── bridgePoolStderr(pool) → array ───────────────────────────────────────
-	// Concatenates the stderr tail of every member, prefixed with "[N] " so
-	// you can tell which subprocess emitted which line.
+	// bridgePoolStderr — the merged stderr of every pool member, tagged by index.
+	//
+	// Concatenates each member's stderr tail into one array, prefixing every line
+	// with "[N] " so you can tell which subprocess emitted it. The first place to
+	// look when a pooled job misbehaves.
+	//
+	// @sig     bridgePoolStderr(pool: BridgePool) -> array
+	// @param   pool  the pool to inspect
+	// @returns an array of "[index] line" strings (empty if none)
+	// @errors  TypeError if the argument isn't a bridge pool
+	// @example no-run bridgePoolStderr(pool)
+	// @since   0.1.0
+	// @see     bridgePoolHealth, bridgeStderr
 	Builtins["bridgePoolStderr"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bridgePoolStderr expects 1 argument (pool)", ast.Pos{})
@@ -338,6 +405,7 @@ func init() {
 //   - the callable returned an Error directly
 //   - the callable returned a (result, err) Tuple — the bridgeCall shape —
 //     and err is non-null
+//
 // Anything else counts as success.
 func isPoolInitFailure(res, callErr Object) bool {
 	if callErr != nil {

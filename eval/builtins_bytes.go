@@ -22,13 +22,20 @@ import (
 
 func init() {
 
-	// ── bytes(x) → bytes ────────────────────────────────────────────────────
+	// bytes — construct a bytes value from a string, array, int, or bytes.
 	//
-	// Construct a bytes value:
-	//   bytes("hello")           — utf-8 encode the string
-	//   bytes([72, 101, 108])    — pack an integer array (each 0..255)
-	//   bytes(5)                 — N zero bytes
-	//   bytes(b"...")            — defensive copy
+	// Four forms: a string (utf-8 encode), an integer array (pack each 0..255), an
+	// integer N (N zero bytes), or another bytes value (defensive copy). A bytes
+	// value prints as bytes(N) — the length only, never the raw content.
+	//
+	// @sig     bytes(x: any) -> bytes
+	// @param   x  a string, an integer array (each 0..255), a non-negative int (length), or a bytes value
+	// @returns a new bytes value
+	// @errors  TypeError for unsupported input; RuntimeError if an array element or length is out of range
+	// @example bytes([72, 105, 33])   → bytes(3)
+	// @example bytes(4)               → bytes(4)
+	// @since   0.1.0
+	// @see     strToBytes, bytesToStr, bytesConcat
 	Builtins["bytes"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bytes expects 1 argument", ast.Pos{})
@@ -63,11 +70,19 @@ func init() {
 		}
 	}}
 
-	// ── strToBytes(s: string) → bytes ───────────────────────────────────────
+	// strToBytes — utf-8 encode a string into bytes.
 	//
-	// utf-8 encode a string. Strings are already utf-8 internally so this is
-	// effectively a typed copy — but having it as an explicit builtin keeps
-	// the conversion direction obvious at the call site.
+	// Strings are already utf-8 internally, so this is effectively a typed copy —
+	// but as an explicit builtin it keeps the conversion direction obvious at the
+	// call site. The inverse is bytesToStr.
+	//
+	// @sig     strToBytes(s: string) -> bytes
+	// @param   s  the string to encode
+	// @returns the utf-8 bytes of s
+	// @errors  TypeError if s is not a string
+	// @example strToBytes("Hi")   → bytes(2)
+	// @since   0.1.0
+	// @see     bytesToStr, bytes
 	Builtins["strToBytes"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("strToBytes expects 1 argument (str)", ast.Pos{})
@@ -79,12 +94,18 @@ func init() {
 		return &Bytes{Value: []byte(s.Value)}
 	}}
 
-	// ── bytesToStr(b: bytes) → (string, error) ──────────────────────────────
+	// bytesToStr — utf-8 decode bytes into a string, returning (value, err).
 	//
-	// utf-8 decode bytes. Returns (str, null) on success, (null, err) when
-	// the bytes are not valid utf-8 — err.code is "BYTES_INVALID_UTF8". Use
-	// this when binary may be text; if the call site is sure the bytes are
-	// utf-8 (e.g. JSON response bodies) unwrap with `?`.
+	// Use this when binary may be text. If the call site is sure the bytes are
+	// utf-8 (e.g. JSON response bodies), unwrap with `?`.
+	//
+	// @sig     bytesToStr(b: bytes) -> (string, error)
+	// @param   b  the bytes to decode
+	// @returns (str, null) on success; (null, error) with code "BYTES_INVALID_UTF8" if b isn't valid utf-8
+	// @errors  TypeError if b is not bytes; the utf-8 failure is returned in the tuple, not raised
+	// @example bytesToStr(bytes("Hi"))   → (Hi, null)
+	// @since   0.1.0
+	// @see     strToBytes, bytes
 	Builtins["bytesToStr"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bytesToStr expects 1 argument (bytes)", ast.Pos{})
@@ -103,11 +124,18 @@ func init() {
 		return &Tuple{Elements: []Object{&String{Value: string(b.Value)}, NULL}}
 	}}
 
-	// ── bytesToBase64(b: bytes) → string ────────────────────────────────────
+	// bytesToBase64 — standard base64 encode (RFC 4648, padded).
 	//
-	// Standard base64 encoding (RFC 4648, with padding). Reverse of
-	// base64ToBytes. Total-encoding wraps into a single string with no
-	// internal line breaks.
+	// Encodes the whole input into a single line with no internal breaks. The
+	// inverse is base64ToBytes.
+	//
+	// @sig     bytesToBase64(b: bytes) -> string
+	// @param   b  the bytes to encode
+	// @returns the base64 string (with padding)
+	// @errors  TypeError if b is not bytes
+	// @example bytesToBase64(bytes("Hi"))   → SGk=
+	// @since   0.1.0
+	// @see     base64ToBytes, bytesToHex
 	Builtins["bytesToBase64"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bytesToBase64 expects 1 argument (bytes)", ast.Pos{})
@@ -119,10 +147,15 @@ func init() {
 		return &String{Value: base64.StdEncoding.EncodeToString(b.Value)}
 	}}
 
-	// ── base64ToBytes(s: string) → (bytes, error) ───────────────────────────
+	// base64ToBytes — decode standard base64, returning (value, err).
 	//
-	// Decode standard base64. Returns (bytes, null) on success, (null, err)
-	// with code "BASE64_INVALID" on bad input.
+	// @sig     base64ToBytes(s: string) -> (bytes, error)
+	// @param   s  a standard (padded) base64 string
+	// @returns (bytes, null) on success; (null, error) with code "BASE64_INVALID" on bad input
+	// @errors  TypeError if s is not a string; decode failures are returned in the tuple, not raised
+	// @example base64ToBytes("SGk=")   → (bytes(2), null)
+	// @since   0.1.0
+	// @see     bytesToBase64, hexToBytes
 	Builtins["base64ToBytes"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("base64ToBytes expects 1 argument (str)", ast.Pos{})
@@ -142,10 +175,17 @@ func init() {
 		return &Tuple{Elements: []Object{&Bytes{Value: decoded}, NULL}}
 	}}
 
-	// ── bytesToHex(b: bytes) → string ───────────────────────────────────────
+	// bytesToHex — lowercase hex encode, two chars per byte, no separator.
 	//
-	// Lowercase hex encoding, two characters per byte, no separator.
-	// "deadbeef" style. Reverse of hexToBytes.
+	// "deadbeef" style. The inverse is hexToBytes.
+	//
+	// @sig     bytesToHex(b: bytes) -> string
+	// @param   b  the bytes to encode
+	// @returns the lowercase hex string (2 chars per byte)
+	// @errors  TypeError if b is not bytes
+	// @example bytesToHex(bytes([222, 173, 190, 239]))   → deadbeef
+	// @since   0.1.0
+	// @see     hexToBytes, bytesToBase64
 	Builtins["bytesToHex"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bytesToHex expects 1 argument (bytes)", ast.Pos{})
@@ -157,11 +197,15 @@ func init() {
 		return &String{Value: hex.EncodeToString(b.Value)}
 	}}
 
-	// ── hexToBytes(s: string) → (bytes, error) ──────────────────────────────
+	// hexToBytes — decode a hex string (upper or lower case), returning (value, err).
 	//
-	// Decode a hex string. Accepts both upper and lower case. Returns
-	// (bytes, null) on success, (null, err) with code "HEX_INVALID" on
-	// bad input (odd length, non-hex character).
+	// @sig     hexToBytes(s: string) -> (bytes, error)
+	// @param   s  a hex string; case-insensitive, even length
+	// @returns (bytes, null) on success; (null, error) with code "HEX_INVALID" on bad input (odd length or non-hex char)
+	// @errors  TypeError if s is not a string; decode failures are returned in the tuple, not raised
+	// @example hexToBytes("deadbeef")   → (bytes(4), null)
+	// @since   0.1.0
+	// @see     bytesToHex, base64ToBytes
 	Builtins["hexToBytes"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("hexToBytes expects 1 argument (str)", ast.Pos{})
@@ -181,17 +225,20 @@ func init() {
 		return &Tuple{Elements: []Object{&Bytes{Value: decoded}, NULL}}
 	}}
 
-	// ── floatsToBytes(arr) → bytes ──────────────────────────────────────────
+	// floatsToBytes — pack a number array as little-endian float32 bytes.
 	//
-	// Pack a kLex float array as little-endian IEEE-754 float32 bytes —
-	// the standard wire format for embeddings, scientific data, audio
-	// samples. Output length is 4 × len(arr). Integer elements are
-	// accepted and converted (so a literal `[1, 2, 3]` works).
+	// The standard wire format for embeddings, scientific data, and audio
+	// samples. Output length is 4 × len(arr). Integer elements are accepted and
+	// converted, so `[1, 2, 3]` works. Round-trips with bytesToFloats, and the
+	// layout matches Metal's MTLBuffer<float> so the bytes go straight to the GPU.
 	//
-	// Round-trips with bytesToFloats. Use for disk-resident vector
-	// indexes (one float32 per element matches Metal MTLBuffer<float>
-	// layout, so the same bytes go straight into _mtlBuffer without
-	// re-packing).
+	// @sig     floatsToBytes(arr: array) -> bytes
+	// @param   arr  an array of numbers (floats or ints)
+	// @returns the little-endian float32 encoding, 4 bytes per element
+	// @errors  TypeError if arr isn't an array or an element isn't numeric
+	// @example floatsToBytes([1.0, 2.0])   → bytes(8)
+	// @since   0.1.0
+	// @see     bytesToFloats
 	Builtins["floatsToBytes"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("floatsToBytes expects 1 argument (array)", ast.Pos{})
@@ -216,12 +263,17 @@ func init() {
 		return &Bytes{Value: out}
 	}}
 
-	// ── bytesToFloats(bs) → array ───────────────────────────────────────────
+	// bytesToFloats — unpack little-endian float32 bytes into a number array.
 	//
-	// Unpack little-endian IEEE-754 float32 bytes into a kLex float
-	// array. Counterpart to floatsToBytes. len(bs) must be a multiple
-	// of 4. Returns (null, err) on size mismatch so callers can branch
-	// cleanly.
+	// Counterpart to floatsToBytes. The input length must be a multiple of 4.
+	//
+	// @sig     bytesToFloats(bs: bytes) -> (array, error)
+	// @param   bs  bytes whose length is a multiple of 4
+	// @returns (array-of-floats, null) on success; (null, error) with code "BYTES_LEN_INVALID" if the length isn't a multiple of 4
+	// @errors  TypeError if bs is not bytes; the length mismatch is returned in the tuple, not raised
+	// @example bytesToFloats(floatsToBytes([1.0, 2.0]))   → ([1, 2], null)
+	// @since   0.1.0
+	// @see     floatsToBytes
 	Builtins["bytesToFloats"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bytesToFloats expects 1 argument (bytes)", ast.Pos{})
@@ -246,17 +298,19 @@ func init() {
 		return &Tuple{Elements: []Object{out, NULL}}
 	}}
 
-	// ── bytesConcat(arr: array of bytes) → bytes ────────────────────────────
+	// bytesConcat — merge an array of bytes values into one.
 	//
-	// Merge an array of *Bytes into a single *Bytes via Go-level memcpy.
-	// The pre-existing workaround was: byte-index each into an int array
-	// then call `bytes(intArray)` — fine for small payloads but ~40ms per
-	// 393kB merge in the interpreter. Doing it here as a Go builtin is one
-	// allocation plus N copy() calls, microsecond-scale.
+	// Single-allocation memcpy of every element in order — far faster than
+	// byte-indexing into an int array and calling bytes(). An empty array yields
+	// empty bytes; a single element yields a copy (not a reference share).
 	//
-	// Empty array → empty bytes (0-length). Single-element array → a copy
-	// of that element (NOT a reference share). Mixed-type array → typeError
-	// identifying the first non-bytes index.
+	// @sig     bytesConcat(arr: array) -> bytes
+	// @param   arr  an array whose elements are all bytes values
+	// @returns one bytes value: every element concatenated in order
+	// @errors  TypeError if arr isn't an array or any element isn't bytes (the error names the first bad index)
+	// @example bytesConcat([bytes("foo"), bytes("bar")])   → bytes(6)
+	// @since   0.1.0
+	// @see     bytes, concat
 	Builtins["bytesConcat"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bytesConcat expects 1 argument (array of bytes)", ast.Pos{})

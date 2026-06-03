@@ -9,12 +9,22 @@ import (
 )
 
 func init() {
-	// substr(str, start) — returns the substring from start to the end of str.
-	// substr(str, start, end) — returns the substring from start up to (not including) end.
-	// Indices are 0-based. A RuntimeError is raised if start or end is out of bounds.
+	// substr — a substring of str by rune index.
 	//
-	//   substr("hello world", 6)     → "world"
-	//   substr("hello world", 0, 5)  → "hello"
+	// Returns the characters from start up to (not including) end. Indices are
+	// 0-based and count Unicode code points (runes), not bytes. Omit end to run
+	// to the end of the string.
+	//
+	// @sig     substr(str: string, start: int, [end: int]) -> string
+	// @param   str    the source string
+	// @param   start  0-based rune index to start from (inclusive)
+	// @param   end    0-based rune index to stop at (exclusive); defaults to len(str)
+	// @returns the substring between start and end
+	// @errors  TypeError if the arguments aren't (string, int[, int]); RuntimeError if start or end is out of bounds
+	// @example substr("hello world", 6)     → world
+	// @example substr("hello world", 0, 5)  → hello
+	// @since   0.1.0
+	// @see     slice, split, len
 	Builtins["substr"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 2 || len(args) > 3 {
 			return runtimeError("substr expects 2 or 3 arguments (str, start [, end])", ast.Pos{})
@@ -46,12 +56,22 @@ func init() {
 		return &String{Value: s.RuneSubstring(start, end)}
 	}}
 
-	// slice(arr, start) — returns a new array from start to the end of arr.
-	// slice(arr, start, end) — returns a new array from start up to (not including) end.
-	// Indices are 0-based. A RuntimeError is raised if start or end is out of bounds.
+	// slice — a sub-range of an array or bytes value (a new copy).
 	//
-	//   slice([1,2,3,4,5], 2)     → [3, 4, 5]
-	//   slice([1,2,3,4,5], 1, 4)  → [2, 3, 4]
+	// Returns elements from start up to (not including) end as a new value of the
+	// same type as the input (array → array, bytes → bytes). Indices are 0-based.
+	// Omit end to run to the end. The input is not modified.
+	//
+	// @sig     slice(seq: array | bytes, start: int, [end: int]) -> array | bytes
+	// @param   seq    the array or bytes value to slice
+	// @param   start  0-based index to start from (inclusive)
+	// @param   end    0-based index to stop at (exclusive); defaults to len(seq)
+	// @returns a new array or bytes (matching seq) holding seq[start:end]
+	// @errors  TypeError if seq isn't an array/bytes or the indices aren't ints; RuntimeError if out of bounds
+	// @example slice([1, 2, 3, 4, 5], 2)     → [3, 4, 5]
+	// @example slice([1, 2, 3, 4, 5], 1, 4)  → [2, 3, 4]
+	// @since   0.1.0
+	// @see     substr, concat, len
 	Builtins["slice"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 2 || len(args) > 3 {
 			return runtimeError("slice expects 2 or 3 arguments (arr|bytes, start [, end])", ast.Pos{})
@@ -102,16 +122,20 @@ func init() {
 		}
 	}}
 
-	// parseInt(str) → (int, err)
+	// parseInt — safely parse a string as an integer, returning (value, err).
 	//
-	// Safely parses a string as an integer. Trims leading/trailing whitespace.
-	// Returns (value, null) on success, (null, error) on failure.
-	// Use this instead of int() when the input is untrusted (CSV, HTTP, database).
+	// Trims surrounding whitespace, then parses. Unlike int(), a failure is
+	// returned as an error in the tuple rather than raised — use it for untrusted
+	// input (CSV, HTTP, database). A float-looking string is rejected with a hint
+	// to use parseFloat.
 	//
-	// Example:
-	//   n, err = parseInt("42")
-	//   if err != null { println("bad number: {err.message}")  return }
-	//   println(n + 1)   // 43
+	// @sig     parseInt(str: string) -> (int, error)
+	// @param   str  the string to parse
+	// @returns (n, null) on success; (null, error) with code "PARSE_ERROR" on failure
+	// @errors  TypeError if str is not a string; the parse failure itself is returned in the tuple, not raised
+	// @example parseInt("42")   → (42, null)
+	// @since   0.1.0
+	// @see     parseFloat, int, safe
 	Builtins["parseInt"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("parseInt expects 1 argument (str)", ast.Pos{})
@@ -139,16 +163,19 @@ func init() {
 		return &Tuple{Elements: []Object{&Integer{Value: n}, NULL}}
 	}}
 
-	// parseFloat(str) → (float, err)
+	// parseFloat — safely parse a string as a float, returning (value, err).
 	//
-	// Safely parses a string as a float. Trims leading/trailing whitespace.
-	// Returns (value, null) on success, (null, error) on failure.
-	// Use this instead of float() when the input is untrusted (CSV, HTTP, database).
+	// Trims surrounding whitespace, then parses. Unlike float(), a failure is
+	// returned as an error in the tuple rather than raised — use it for untrusted
+	// input (CSV, HTTP, database).
 	//
-	// Example:
-	//   f, err = parseFloat("3.14")
-	//   if err != null { println("bad number: {err.message}")  return }
-	//   println(f * 2.0)   // 6.28
+	// @sig     parseFloat(str: string) -> (float, error)
+	// @param   str  the string to parse
+	// @returns (f, null) on success; (null, error) with code "PARSE_ERROR" on failure
+	// @errors  TypeError if str is not a string; the parse failure itself is returned in the tuple, not raised
+	// @example parseFloat("3.14")   → (3.14, null)
+	// @since   0.1.0
+	// @see     parseInt, float, safe
 	Builtins["parseFloat"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("parseFloat expects 1 argument (str)", ast.Pos{})
@@ -169,20 +196,20 @@ func init() {
 		return &Tuple{Elements: []Object{&Float{Value: f}, NULL}}
 	}}
 
-	// ord(c) → int
+	// ord — the Unicode code point of a string's first character.
 	//
-	// Returns the Unicode code point of the first character of c. The argument
-	// must be a non-empty string; supplying an empty string is a RuntimeError.
-	// Multi-character inputs use only the first rune — `ord("Ab")` returns 65.
+	// Reads the first rune of c and returns its code point. Multi-character
+	// inputs use only the first rune (ord("Ab") is 65). Pairs with chr:
+	// chr(ord(c)) == c for any single-rune string.
 	//
-	// Pairs with chr(): chr(ord(c)) == c for any single-rune string.
-	// Use this in place of stdlib/encoding.lex's ord, which scanned a 95-char
-	// ASCII table per call (O(95) per char).
-	//
-	// Examples:
-	//   ord("A")  → 65
-	//   ord(" ")  → 32
-	//   ord("☃")  → 9731
+	// @sig     ord(c: string) -> int
+	// @param   c  a non-empty string; only its first rune is read
+	// @returns the Unicode code point of the first character
+	// @errors  TypeError if c is not a string; RuntimeError if c is empty or not valid UTF-8
+	// @example ord("A")   → 65
+	// @example ord("☃")   → 9731
+	// @since   0.1.0
+	// @see     chr
 	Builtins["ord"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("ord expects 1 argument (str)", ast.Pos{})
@@ -201,17 +228,19 @@ func init() {
 		return intObj(int(r))
 	}}
 
-	// chr(n) → string
+	// chr — the one-character string for a Unicode code point.
 	//
-	// Returns a single-character string containing the rune for code point n.
-	// n must be a valid Unicode code point — negative values, values in the
-	// surrogate range (0xD800–0xDFFF), and values >= 0x110000 are RuntimeErrors.
+	// Returns a single-rune string for code point n. Pairs with ord:
+	// chr(ord(c)) == c for any single-rune string.
 	//
-	// Pairs with ord(): chr(ord(c)) == c for any single-rune string.
-	//
-	// Examples:
-	//   chr(65)    → "A"
-	//   chr(9731)  → "☃"
+	// @sig     chr(n: int) -> string
+	// @param   n  a valid Unicode code point: 0..0x10FFFF, excluding the surrogate range 0xD800..0xDFFF
+	// @returns a one-character string containing rune n
+	// @errors  TypeError if n is not an integer; RuntimeError if n is not a valid code point
+	// @example chr(65)     → A
+	// @example chr(9731)   → ☃
+	// @since   0.1.0
+	// @see     ord
 	Builtins["chr"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("chr expects 1 argument (int)", ast.Pos{})
@@ -227,4 +256,3 @@ func init() {
 		return &String{Value: string(rune(v))}
 	}}
 }
-

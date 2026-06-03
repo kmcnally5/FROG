@@ -25,9 +25,21 @@ import (
 // collapse into a single parallel pass that calls atomicAdd directly.
 
 func init() {
-	// atomicIntArray(size, [initial]) -> AtomicIntArray
-	// Creates a fixed-size lock-free integer array. Optional initial value
-	// fills every slot (default 0).
+	// atomicIntArray — create a fixed-size lock-free integer array.
+	//
+	// Backs shared mutable state that many async tasks can update concurrently
+	// without mutexes (via atomicAdd/atomicCAS). The size is fixed at creation;
+	// every slot starts at `initial` (default 0).
+	//
+	// @sig     atomicIntArray(size: int, [initial: int]) -> AtomicIntArray
+	// @param   size     number of slots (must be >= 0)
+	// @param   initial  value to fill every slot with (default 0)
+	// @returns a new AtomicIntArray of the given size
+	// @errors  TypeError if size/initial aren't integers; RuntimeError if size is negative
+	// @example atomicIntArray(3)        → AtomicIntArray(size=3)
+	// @example atomicLoad(atomicIntArray(4, 7), 2) → 7
+	// @since   0.1.0
+	// @see     atomicFloatArray, atomicLoad, atomicAdd
 	Builtins["atomicIntArray"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 1 || len(args) > 2 {
 			return runtimeError("atomicIntArray expects 1 or 2 arguments (size, [initial])", ast.Pos{})
@@ -56,9 +68,21 @@ func init() {
 		return &AtomicIntArray{Data: data}
 	}}
 
-	// atomicFloatArray(size, [initial]) -> AtomicFloatArray
-	// Creates a fixed-size lock-free float64 array. Optional initial value
-	// fills every slot (default 0.0).
+	// atomicFloatArray — create a fixed-size lock-free float array.
+	//
+	// Like atomicIntArray but for floats. Each slot stores a float64 as its raw
+	// bits; atomicAdd uses a compare-and-swap retry loop to stay lock-free. The
+	// size is fixed at creation; every slot starts at `initial` (default 0.0).
+	//
+	// @sig     atomicFloatArray(size: int, [initial: number]) -> AtomicFloatArray
+	// @param   size     number of slots (must be >= 0)
+	// @param   initial  value to fill every slot with (default 0.0)
+	// @returns a new AtomicFloatArray of the given size
+	// @errors  TypeError if size isn't an integer or initial isn't a number; RuntimeError if size is negative
+	// @example atomicFloatArray(2)      → AtomicFloatArray(size=2)
+	// @example atomicLoad(atomicFloatArray(3, 1.5), 0) → 1.5
+	// @since   0.1.0
+	// @see     atomicIntArray, atomicLoad, atomicAdd
 	Builtins["atomicFloatArray"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 1 || len(args) > 2 {
 			return runtimeError("atomicFloatArray expects 1 or 2 arguments (size, [initial])", ast.Pos{})
@@ -91,9 +115,20 @@ func init() {
 		return &AtomicFloatArray{Bits: bits}
 	}}
 
-	// atomicLoad(arr, idx) -> value
-	// Atomically reads and returns the value at the given index.
-	// Works on AtomicIntArray (returns Integer) or AtomicFloatArray (returns Float).
+	// atomicLoad — atomically read the value at an index.
+	//
+	// Returns an int for an AtomicIntArray, a float for an AtomicFloatArray. The
+	// read is atomic, so it never observes a half-written value during concurrent
+	// updates.
+	//
+	// @sig     atomicLoad(arr: AtomicIntArray|AtomicFloatArray, idx: int) -> number
+	// @param   arr  the atomic array to read from
+	// @param   idx  the slot index (0-based)
+	// @returns the value at idx (int or float, matching the array type)
+	// @errors  TypeError if idx isn't an integer or arr isn't an atomic array; RuntimeError if idx is out of range
+	// @example atomicLoad(atomicIntArray(3, 5), 1) → 5
+	// @since   0.1.0
+	// @see     atomicStore, atomicAdd, atomicCAS
 	Builtins["atomicLoad"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("atomicLoad expects 2 arguments (arr, idx)", ast.Pos{})
@@ -120,8 +155,21 @@ func init() {
 		}
 	}}
 
-	// atomicStore(arr, idx, value) -> null
-	// Atomically writes the value at the given index.
+	// atomicStore — atomically write a value at an index.
+	//
+	// The value's type must match the array: integer for an AtomicIntArray,
+	// number (int or float) for an AtomicFloatArray. Overwrites unconditionally —
+	// use atomicCAS when the write should depend on the current value.
+	//
+	// @sig     atomicStore(arr: AtomicIntArray|AtomicFloatArray, idx: int, value: number) -> null
+	// @param   arr    the atomic array to write to
+	// @param   idx    the slot index (0-based)
+	// @param   value  the value to store (type must match the array)
+	// @returns null
+	// @errors  TypeError if idx isn't an integer, arr isn't an atomic array, or value's type doesn't match; RuntimeError if idx is out of range
+	// @example atomicStore(atomicIntArray(2), 0, 9) → null
+	// @since   0.1.0
+	// @see     atomicLoad, atomicAdd, atomicCAS
 	Builtins["atomicStore"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return runtimeError("atomicStore expects 3 arguments (arr, idx, value)", ast.Pos{})
@@ -161,9 +209,22 @@ func init() {
 		}
 	}}
 
-	// atomicAdd(arr, idx, delta) -> new_value
-	// Atomically adds delta to the value at idx and returns the result.
-	// For AtomicFloatArray, uses a CAS retry loop (lock-free but may retry under contention).
+	// atomicAdd — atomically add delta to a slot and return the new value.
+	//
+	// The whole read-modify-write is atomic, so concurrent adds never lose
+	// updates (unlike load-then-store). For an AtomicFloatArray it uses a
+	// compare-and-swap retry loop — still lock-free, but may spin under heavy
+	// contention. This is the workhorse for parallel accumulators.
+	//
+	// @sig     atomicAdd(arr: AtomicIntArray|AtomicFloatArray, idx: int, delta: number) -> number
+	// @param   arr    the atomic array to update
+	// @param   idx    the slot index (0-based)
+	// @param   delta  the amount to add (type must match the array)
+	// @returns the new value at idx after adding delta
+	// @errors  TypeError if idx isn't an integer, arr isn't an atomic array, or delta's type doesn't match; RuntimeError if idx is out of range
+	// @example atomicAdd(atomicIntArray(3), 0, 5) → 5
+	// @since   0.1.0
+	// @see     atomicLoad, atomicStore, atomicCAS
 	Builtins["atomicAdd"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return runtimeError("atomicAdd expects 3 arguments (arr, idx, delta)", ast.Pos{})
@@ -212,10 +273,24 @@ func init() {
 		}
 	}}
 
-	// atomicCAS(arr, idx, old, new) -> bool
-	// Compare-and-swap. If the current value at idx equals old, replaces it
-	// with new and returns true. Otherwise returns false. Used for building
-	// custom lock-free algorithms.
+	// atomicCAS — compare-and-swap a slot, the building block for lock-free algorithms.
+	//
+	// If the current value at idx equals `old`, atomically replaces it with `new`
+	// and returns true; otherwise leaves it untouched and returns false. Loop on
+	// a false result to build custom retry logic (e.g. atomic max, conditional
+	// update).
+	//
+	// @sig     atomicCAS(arr: AtomicIntArray|AtomicFloatArray, idx: int, old: number, new: number) -> bool
+	// @param   arr  the atomic array to update
+	// @param   idx  the slot index (0-based)
+	// @param   old  the value the slot must currently hold for the swap to happen
+	// @param   new  the value to store if the comparison succeeds
+	// @returns true if the swap happened, false if the current value didn't match old
+	// @errors  TypeError if idx isn't an integer, arr isn't an atomic array, or old/new types don't match; RuntimeError if idx is out of range
+	// @example atomicCAS(atomicIntArray(3), 0, 0, 9) → true
+	// @example atomicCAS(atomicIntArray(3, 1), 0, 0, 9) → false
+	// @since   0.1.0
+	// @see     atomicLoad, atomicStore, atomicAdd
 	Builtins["atomicCAS"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 {
 			return runtimeError("atomicCAS expects 4 arguments (arr, idx, old, new)", ast.Pos{})
@@ -277,11 +352,22 @@ func init() {
 		}
 	}}
 
-	// parallelArrayForEach(arr, fn) -> null
-	// Like parallelArrayMap but discards return values. Use this when the
-	// callback's purpose is side effects (e.g. atomic updates to shared state)
-	// rather than producing a transformed array. Saves the allocation of a
-	// result array.
+	// parallelArrayForEach — run fn over every element across worker goroutines, discarding results.
+	//
+	// Like parallelArrayMap but for side effects: the callback's return value is
+	// thrown away, saving the result-array allocation. The natural partner to the
+	// atomic builtins — workers call atomicAdd/atomicCAS on a shared array while
+	// this fans the elements out. fn receives (element, index). The first error
+	// from any worker aborts and is returned.
+	//
+	// @sig     parallelArrayForEach(arr: array, fn: function) -> null
+	// @param   arr  the array to iterate over
+	// @param   fn   callback invoked as fn(element, index); its return value is ignored
+	// @returns null
+	// @errors  TypeError if arr isn't an array or fn isn't callable; propagates the first error raised by fn
+	// @example no-run parallelArrayForEach([1, 2, 3], fn(x, i) { atomicAdd(counts, 0, x) })
+	// @since   0.1.0
+	// @see     atomicAdd, parallelArrayMap
 	Builtins["parallelArrayForEach"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("parallelArrayForEach expects 2 arguments (array, fn)", ast.Pos{})

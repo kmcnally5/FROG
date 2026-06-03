@@ -13,12 +13,19 @@ import (
 var programStart = time.Now()
 
 func init() {
-	// elapsedTime() → float
-	//   Wall-clock seconds since the kLex interpreter started. Sub-second
-	//   precision. Use for benchmark/timing measurements:
-	//     let start = elapsedTime()
-	//     // ... work ...
-	//     let secs = elapsedTime() - start
+	// elapsedTime — wall-clock seconds since the interpreter started.
+	//
+	// A monotonically increasing float with sub-second precision, measured from
+	// program start. Subtract two readings to time a section of work. Available on
+	// desktop and in the browser/WASM build (it's deliberately kept out of the
+	// graphics file so timing works without a window).
+	//
+	// @sig     elapsedTime() -> float
+	// @returns seconds elapsed since the interpreter started
+	// @errors  RuntimeError if called with any arguments
+	// @example no-run start = elapsedTime()
+	// @since   0.1.0
+	// @see     sleep
 	Builtins["elapsedTime"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 0 {
 			return runtimeError("elapsedTime expects no arguments", ast.Pos{})

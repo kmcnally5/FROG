@@ -5,13 +5,13 @@ package eval
 import (
 	"bytes"
 	"fmt"
+	_ "golang.org/x/image/webp"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
-	_ "golang.org/x/image/webp"
 	"klex/ast"
 	"math"
 	"os"
@@ -294,20 +294,20 @@ func applyScissor(r clipRect) {
 // ── Graphics state ───────────────────────────────────────────────────────────
 
 var gfx struct {
-	win         *glfw.Window
-	shaderProg  uint32
-	vao, vbo    uint32
-	projLoc     int32
-	colorLoc    int32
-	fillColor   [4]float32
-	strokeColor [4]float32
-	strokeWidth float32
-	doFill      bool
-	doStroke    bool
-	winW, winH  int
-	frameCount  int
-	mouseX      float64
-	mouseY      float64
+	win              *glfw.Window
+	shaderProg       uint32
+	vao, vbo         uint32
+	projLoc          int32
+	colorLoc         int32
+	fillColor        [4]float32
+	strokeColor      [4]float32
+	strokeWidth      float32
+	doFill           bool
+	doStroke         bool
+	winW, winH       int
+	frameCount       int
+	mouseX           float64
+	mouseY           float64
 	mouseDown        bool
 	mouseJustClicked bool
 	charBuf          []rune
@@ -318,25 +318,25 @@ var gfx struct {
 	justPressed map[glfw.Key]bool
 	startTime   time.Time
 	// Phase 3 — textured rendering
-	texProg        uint32
-	texProjLoc     int32
-	texTintLoc     int32
-	texTextModeLoc int32
-	texTexLoc      int32
-	texVAO         uint32
-	texVBO         uint32
-	fontTex    uint32
+	texProg         uint32
+	texProjLoc      int32
+	texTintLoc      int32
+	texTextModeLoc  int32
+	texTexLoc       int32
+	texVAO          uint32
+	texVBO          uint32
+	fontTex         uint32
 	fontCellW       int
 	fontCellH       int
 	fontRenderScale int // atlas was rendered at this multiple of 1× DPI
 	// Phase 4
 	frameBudget time.Duration
 	// Particle batch rendering
-	partProg      uint32
-	partProjLoc   int32
-	partSizeLoc   int32
-	partVAO       uint32
-	partVBO       uint32
+	partProg    uint32
+	partProjLoc int32
+	partSizeLoc int32
+	partVAO     uint32
+	partVBO     uint32
 	// SDF rendering
 	sdfProg       uint32
 	sdfProjLoc    int32
@@ -351,36 +351,36 @@ var gfx struct {
 	// Theme, hover/active IDs, nextID counter, element registry, layout
 	// cursors and list maps moved to uiCore (eval/builtins_ui_state.go)
 	// so they're shared with the WASM Canvas2D backend.
-	uiBackspaceCount int                   // number of backspaces this frame
-	uiDeleteCount    int                   // forward-deletes this frame (Delete key)
-	uiLeftCount      int                   // ← arrow presses this frame
-	uiRightCount     int                   // → arrow presses this frame
-	uiUpCount        int                   // ↑ arrow presses this frame
-	uiDownCount      int                   // ↓ arrow presses this frame
-	uiScrollDelta    float64               // vertical mouse wheel delta this frame
-	uiScrollX        float64               // horizontal mouse wheel delta this frame
-	mouseRightClicked   bool                 // right-click fired this frame
-	mouseRightDown      bool                 // right button currently held
+	uiBackspaceCount  int     // number of backspaces this frame
+	uiDeleteCount     int     // forward-deletes this frame (Delete key)
+	uiLeftCount       int     // ← arrow presses this frame
+	uiRightCount      int     // → arrow presses this frame
+	uiUpCount         int     // ↑ arrow presses this frame
+	uiDownCount       int     // ↓ arrow presses this frame
+	uiScrollDelta     float64 // vertical mouse wheel delta this frame
+	uiScrollX         float64 // horizontal mouse wheel delta this frame
+	mouseRightClicked bool    // right-click fired this frame
+	mouseRightDown    bool    // right button currently held
 	// uiMenuOpenFrame moved to uiCore.menuOpenFrame.
 	// uiPendingDropdown / uiToasts moved to uiCore for shared
 	// popup/toast rendering across desktop + WASM.
-	cursorArrow     *glfw.Cursor
-	cursorIBeam     *glfw.Cursor
-	cursorHand      *glfw.Cursor
-	cursorResizeEW  *glfw.Cursor // horizontal drag — vertical splitter bar
-	cursorResizeNS  *glfw.Cursor // vertical drag — horizontal splitter bar
-	clipStack   []clipRect // scissor stack; pushClip pushes, popClip pops and restores
-	gradProg    uint32
-	gradProjLoc int32
-	gradC1Loc   int32
-	gradC2Loc   int32
-	gradDirLoc  int32
-	gradVAO     uint32
-	gradVBO     uint32
+	cursorArrow    *glfw.Cursor
+	cursorIBeam    *glfw.Cursor
+	cursorHand     *glfw.Cursor
+	cursorResizeEW *glfw.Cursor // horizontal drag — vertical splitter bar
+	cursorResizeNS *glfw.Cursor // vertical drag — horizontal splitter bar
+	clipStack      []clipRect   // scissor stack; pushClip pushes, popClip pops and restores
+	gradProg       uint32
+	gradProjLoc    int32
+	gradC1Loc      int32
+	gradC2Loc      int32
+	gradDirLoc     int32
+	gradVAO        uint32
+	gradVBO        uint32
 	// uiUndoStacks / uiRedoStacks / uiTextCursor / uiTextAnchor /
 	// uiTextScroll / uiTextBlink moved to uiCore for shared text-edit
 	// state across desktop + WASM.
-	droppedFiles             []string      // paths from the last file-drop event
+	droppedFiles []string // paths from the last file-drop event
 	// uiLastElementID + tooltip timer / pending state moved to uiCore.
 	// Layout cursors moved to uiCore (eval/builtins_ui_state.go).
 	// Drop shadow state
@@ -430,24 +430,39 @@ var keyNames = map[string]glfw.Key{
 	"TAB":       glfw.KeyTab,
 	"SHIFT":     glfw.KeyLeftShift,
 	"CTRL":      glfw.KeyLeftControl,
-	"F1":  glfw.KeyF1,  "F2":  glfw.KeyF2,  "F3":  glfw.KeyF3,
-	"F4":  glfw.KeyF4,  "F5":  glfw.KeyF5,  "F6":  glfw.KeyF6,
-	"F7":  glfw.KeyF7,  "F8":  glfw.KeyF8,  "F9":  glfw.KeyF9,
+	"F1":        glfw.KeyF1, "F2": glfw.KeyF2, "F3": glfw.KeyF3,
+	"F4": glfw.KeyF4, "F5": glfw.KeyF5, "F6": glfw.KeyF6,
+	"F7": glfw.KeyF7, "F8": glfw.KeyF8, "F9": glfw.KeyF9,
 	"F10": glfw.KeyF10, "F11": glfw.KeyF11, "F12": glfw.KeyF12,
-	"DELETE":  glfw.KeyDelete,
-	"INSERT":  glfw.KeyInsert,
-	"HOME":    glfw.KeyHome,
-	"END":     glfw.KeyEnd,
-	"PGUP":    glfw.KeyPageUp,
-	"PGDOWN":  glfw.KeyPageDown,
-	"CMD":     glfw.KeyLeftSuper,
-	"SUPER":   glfw.KeyLeftSuper,
+	"DELETE": glfw.KeyDelete,
+	"INSERT": glfw.KeyInsert,
+	"HOME":   glfw.KeyHome,
+	"END":    glfw.KeyEnd,
+	"PGUP":   glfw.KeyPageUp,
+	"PGDOWN": glfw.KeyPageDown,
+	"CMD":    glfw.KeyLeftSuper,
+	"SUPER":  glfw.KeyLeftSuper,
 }
 
 func init() {
-	// ── window ──────────────────────────────────────────────────────────────
-	// window(width, height, title, drawFn)
-	// Opens an OpenGL window and calls drawFn(frameCount) every frame until closed.
+	// window — open a window and run the draw loop until it closes.
+	//
+	// The entry point for all graphics: opens a width×height window titled `title`
+	// and calls drawFn(frameCount) every frame (at vsync, or the frameRate cap)
+	// until the user closes it. Call every drawing builtin from inside drawFn. The
+	// coordinate origin is the top-left, x right, y down. Blocks until the window
+	// closes; a drawFn that returns false exits the loop early.
+	//
+	// @sig     window(width: int, height: int, title: string, drawFn: function) -> null
+	// @param   width   window width in pixels
+	// @param   height  window height in pixels
+	// @param   title   the window title-bar text
+	// @param   drawFn  callback invoked as drawFn(frameCount) once per frame
+	// @returns null
+	// @errors  TypeError if width/height aren't integers, title isn't a string, or drawFn isn't callable; RuntimeError unless given 4 arguments
+	// @example no-run window(640, 480, "sketch", fn(frame) { background(0.1, 0.1, 0.1)  circle(320.0, 240.0, 40.0) })
+	// @since   0.1.0
+	// @see     background, circle, frameRate, frameCount
 	Builtins["window"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 {
 			return runtimeError("window expects 4 arguments: width, height, title, drawFn", ast.Pos{})
@@ -472,7 +487,7 @@ func init() {
 		defer glfw.Terminate()
 
 		glfw.WindowHint(glfw.Resizable, glfw.True)
-		glfw.WindowHint(glfw.Samples, 8) // 8× MSAA — smooth edges on all geometry
+		glfw.WindowHint(glfw.Samples, 8)     // 8× MSAA — smooth edges on all geometry
 		glfw.WindowHint(glfw.StencilBits, 8) // required for fillPath() even-odd stencil technique
 		glfw.WindowHint(glfw.ContextVersionMajor, 4)
 		glfw.WindowHint(glfw.ContextVersionMinor, 1)
@@ -548,10 +563,10 @@ func init() {
 		gfx.justPressed = make(map[glfw.Key]bool)
 		gfx.startTime = time.Now()
 		gfx.texProg = texProg
-		gfx.texProjLoc     = gl.GetUniformLocation(texProg, gl.Str("projection\x00"))
-		gfx.texTintLoc     = gl.GetUniformLocation(texProg, gl.Str("tint\x00"))
+		gfx.texProjLoc = gl.GetUniformLocation(texProg, gl.Str("projection\x00"))
+		gfx.texTintLoc = gl.GetUniformLocation(texProg, gl.Str("tint\x00"))
 		gfx.texTextModeLoc = gl.GetUniformLocation(texProg, gl.Str("textMode\x00"))
-		gfx.texTexLoc      = gl.GetUniformLocation(texProg, gl.Str("tex\x00"))
+		gfx.texTexLoc = gl.GetUniformLocation(texProg, gl.Str("tex\x00"))
 		gfx.texVAO = texVAO
 		gfx.texVBO = texVBO
 		gfx.fontTex = buildFontAtlas()
@@ -573,12 +588,12 @@ func init() {
 		gl.EnableVertexAttribArray(sdfLocLoc)
 		gl.VertexAttribPointer(sdfLocLoc, 2, gl.FLOAT, false, 16, gl.PtrOffset(8))
 		gl.BindVertexArray(0)
-		gfx.sdfProg       = sdfProg
-		gfx.sdfProjLoc    = gl.GetUniformLocation(sdfProg, gl.Str("projection\x00"))
-		gfx.sdfColorLoc   = gl.GetUniformLocation(sdfProg, gl.Str("uColor\x00"))
-		gfx.sdfHSizeLoc   = gl.GetUniformLocation(sdfProg, gl.Str("uHalfSize\x00"))
-		gfx.sdfRadiusLoc  = gl.GetUniformLocation(sdfProg, gl.Str("uRadius\x00"))
-		gfx.sdfModeLoc    = gl.GetUniformLocation(sdfProg, gl.Str("uMode\x00"))
+		gfx.sdfProg = sdfProg
+		gfx.sdfProjLoc = gl.GetUniformLocation(sdfProg, gl.Str("projection\x00"))
+		gfx.sdfColorLoc = gl.GetUniformLocation(sdfProg, gl.Str("uColor\x00"))
+		gfx.sdfHSizeLoc = gl.GetUniformLocation(sdfProg, gl.Str("uHalfSize\x00"))
+		gfx.sdfRadiusLoc = gl.GetUniformLocation(sdfProg, gl.Str("uRadius\x00"))
+		gfx.sdfModeLoc = gl.GetUniformLocation(sdfProg, gl.Str("uMode\x00"))
 		gfx.sdfStrokeWLoc = gl.GetUniformLocation(sdfProg, gl.Str("uStrokeW\x00"))
 		gfx.sdfVAO = sdfVAO
 		gfx.sdfVBO = sdfVBO
@@ -602,11 +617,11 @@ func init() {
 		gl.EnableVertexAttribArray(pColLoc)
 		gl.VertexAttribPointer(pColLoc, 4, gl.FLOAT, false, 24, gl.PtrOffset(8))
 		gl.BindVertexArray(0)
-		gfx.partProg    = partProg
+		gfx.partProg = partProg
 		gfx.partProjLoc = gl.GetUniformLocation(partProg, gl.Str("projection\x00"))
 		gfx.partSizeLoc = gl.GetUniformLocation(partProg, gl.Str("pointSize\x00"))
-		gfx.partVAO     = partVAO
-		gfx.partVBO     = partVBO
+		gfx.partVAO = partVAO
+		gfx.partVBO = partVBO
 
 		// ── Gradient shader ───────────────────────────────────────────────
 		gradProg, err := compileShaderProgram(gradVertexShaderSrc, gradFragmentShaderSrc)
@@ -625,13 +640,13 @@ func init() {
 		gl.EnableVertexAttribArray(gradTCLoc)
 		gl.VertexAttribPointer(gradTCLoc, 2, gl.FLOAT, false, 16, gl.PtrOffset(8))
 		gl.BindVertexArray(0)
-		gfx.gradProg    = gradProg
+		gfx.gradProg = gradProg
 		gfx.gradProjLoc = gl.GetUniformLocation(gradProg, gl.Str("projection\x00"))
-		gfx.gradC1Loc   = gl.GetUniformLocation(gradProg, gl.Str("uColor1\x00"))
-		gfx.gradC2Loc   = gl.GetUniformLocation(gradProg, gl.Str("uColor2\x00"))
-		gfx.gradDirLoc  = gl.GetUniformLocation(gradProg, gl.Str("uDir\x00"))
-		gfx.gradVAO     = gradVAO
-		gfx.gradVBO     = gradVBO
+		gfx.gradC1Loc = gl.GetUniformLocation(gradProg, gl.Str("uColor1\x00"))
+		gfx.gradC2Loc = gl.GetUniformLocation(gradProg, gl.Str("uColor2\x00"))
+		gfx.gradDirLoc = gl.GetUniformLocation(gradProg, gl.Str("uDir\x00"))
+		gfx.gradVAO = gradVAO
+		gfx.gradVBO = gradVBO
 
 		// ── Shadow shader ─────────────────────────────────────────────────
 		// Reuses sdfVertexShaderSrc (same position + localPos layout).
@@ -651,16 +666,16 @@ func init() {
 		gl.EnableVertexAttribArray(shLocLoc)
 		gl.VertexAttribPointer(shLocLoc, 2, gl.FLOAT, false, 16, gl.PtrOffset(8))
 		gl.BindVertexArray(0)
-		gfx.shadowProg    = shadowProg
+		gfx.shadowProg = shadowProg
 		gfx.shadowProjLoc = gl.GetUniformLocation(shadowProg, gl.Str("projection\x00"))
-		gfx.shadowHSLoc   = gl.GetUniformLocation(shadowProg, gl.Str("uHalfSize\x00"))
-		gfx.shadowRadLoc  = gl.GetUniformLocation(shadowProg, gl.Str("uRadius\x00"))
+		gfx.shadowHSLoc = gl.GetUniformLocation(shadowProg, gl.Str("uHalfSize\x00"))
+		gfx.shadowRadLoc = gl.GetUniformLocation(shadowProg, gl.Str("uRadius\x00"))
 		gfx.shadowBlurLoc = gl.GetUniformLocation(shadowProg, gl.Str("uBlur\x00"))
-		gfx.shadowOffLoc  = gl.GetUniformLocation(shadowProg, gl.Str("uOffset\x00"))
-		gfx.shadowColLoc  = gl.GetUniformLocation(shadowProg, gl.Str("uColor\x00"))
-		gfx.shadowVAO     = shadowVAO
-		gfx.shadowVBO     = shadowVBO
-		gfx.shadowColor   = [4]float32{0, 0, 0, 0.5}
+		gfx.shadowOffLoc = gl.GetUniformLocation(shadowProg, gl.Str("uOffset\x00"))
+		gfx.shadowColLoc = gl.GetUniformLocation(shadowProg, gl.Str("uColor\x00"))
+		gfx.shadowVAO = shadowVAO
+		gfx.shadowVBO = shadowVBO
+		gfx.shadowColor = [4]float32{0, 0, 0, 0.5}
 
 		win.SetCursorPosCallback(func(_ *glfw.Window, x, y float64) {
 			gfx.mouseX = x
@@ -690,12 +705,18 @@ func init() {
 			// registers per frame and the user has to tap once per character.
 			bumpEditCount := func() {
 				switch key {
-				case glfw.KeyBackspace: gfx.uiBackspaceCount++
-				case glfw.KeyDelete:    gfx.uiDeleteCount++
-				case glfw.KeyLeft:      gfx.uiLeftCount++
-				case glfw.KeyRight:     gfx.uiRightCount++
-				case glfw.KeyUp:        gfx.uiUpCount++
-				case glfw.KeyDown:      gfx.uiDownCount++
+				case glfw.KeyBackspace:
+					gfx.uiBackspaceCount++
+				case glfw.KeyDelete:
+					gfx.uiDeleteCount++
+				case glfw.KeyLeft:
+					gfx.uiLeftCount++
+				case glfw.KeyRight:
+					gfx.uiRightCount++
+				case glfw.KeyUp:
+					gfx.uiUpCount++
+				case glfw.KeyDown:
+					gfx.uiDownCount++
 				}
 			}
 			switch action {
@@ -744,11 +765,11 @@ func init() {
 			gfx.mouseRightClicked = false
 			gfx.charBuf = gfx.charBuf[:0]
 			gfx.uiBackspaceCount = 0
-			gfx.uiDeleteCount    = 0
-			gfx.uiLeftCount      = 0
-			gfx.uiRightCount     = 0
-			gfx.uiUpCount        = 0
-			gfx.uiDownCount      = 0
+			gfx.uiDeleteCount = 0
+			gfx.uiLeftCount = 0
+			gfx.uiRightCount = 0
+			gfx.uiUpCount = 0
+			gfx.uiDownCount = 0
 			gfx.uiScrollDelta = 0
 			gfx.uiScrollX = 0
 			// Safety: reset clip stack in case user left unmatched pushClip/popClip pairs.
@@ -773,6 +794,22 @@ func init() {
 
 	// ── State builtins ───────────────────────────────────────────────────────
 
+	// background — clear the whole canvas to a solid colour.
+	//
+	// Call at the top of each draw frame to erase the previous one. Colour
+	// components are floats in 0.0–1.0: one arg is a grey level, three are RGB,
+	// four are RGBA. (Two args is not accepted.)
+	//
+	// @sig     background(r: number, [g: number], [b: number], [a: number]) -> null
+	// @param   r  red, or the grey level when called with a single argument (0.0–1.0)
+	// @param   g  green (0.0–1.0)
+	// @param   b  blue (0.0–1.0)
+	// @param   a  alpha (0.0–1.0, default 1.0)
+	// @returns null
+	// @errors  TypeError if any argument isn't numeric; RuntimeError unless given 1, 3, or 4 arguments
+	// @example no-run background(0.08, 0.08, 0.12)
+	// @since   0.1.0
+	// @see     fill, stroke, window
 	Builtins["background"] = &Builtin{Fn: func(args []Object) Object {
 		r, g, b, a, err := parseColor("background", args)
 		if err != nil {
@@ -783,6 +820,22 @@ func init() {
 		return NULL
 	}}
 
+	// fill — set the colour shapes are filled with.
+	//
+	// Stays in effect until the next fill/noFill. Components are floats in
+	// 0.0–1.0: one arg is a grey level, three are RGB, four are RGBA. Affects
+	// rect, circle, ellipse, arc, polygon, triangle, roundedRect and text.
+	//
+	// @sig     fill(r: number, [g: number], [b: number], [a: number]) -> null
+	// @param   r  red, or the grey level when called with a single argument (0.0–1.0)
+	// @param   g  green (0.0–1.0)
+	// @param   b  blue (0.0–1.0)
+	// @param   a  alpha (0.0–1.0, default 1.0)
+	// @returns null
+	// @errors  TypeError if any argument isn't numeric; RuntimeError unless given 1, 3, or 4 arguments
+	// @example no-run fill(0.9, 0.3, 0.2)
+	// @since   0.1.0
+	// @see     noFill, stroke, background
 	Builtins["fill"] = &Builtin{Fn: func(args []Object) Object {
 		r, g, b, a, err := parseColor("fill", args)
 		if err != nil {
@@ -793,11 +846,38 @@ func init() {
 		return NULL
 	}}
 
+	// noFill — stop filling shapes, leaving only their stroke.
+	//
+	// After this, rect/circle/etc. draw only their outline (if stroke is on).
+	// Re-enable with any fill() call.
+	//
+	// @sig     noFill() -> null
+	// @returns null
+	// @errors  none
+	// @example no-run noFill()
+	// @since   0.1.0
+	// @see     fill, noStroke
 	Builtins["noFill"] = &Builtin{Fn: func(args []Object) Object {
 		gfx.doFill = false
 		return NULL
 	}}
 
+	// stroke — set the colour shape outlines are drawn with.
+	//
+	// Stays in effect until the next stroke/noStroke. Components are floats in
+	// 0.0–1.0: one arg is a grey level, three are RGB, four are RGBA. Line width
+	// is set separately with strokeWeight.
+	//
+	// @sig     stroke(r: number, [g: number], [b: number], [a: number]) -> null
+	// @param   r  red, or the grey level when called with a single argument (0.0–1.0)
+	// @param   g  green (0.0–1.0)
+	// @param   b  blue (0.0–1.0)
+	// @param   a  alpha (0.0–1.0, default 1.0)
+	// @returns null
+	// @errors  TypeError if any argument isn't numeric; RuntimeError unless given 1, 3, or 4 arguments
+	// @example no-run stroke(1.0, 1.0, 1.0)
+	// @since   0.1.0
+	// @see     noStroke, strokeWeight, fill
 	Builtins["stroke"] = &Builtin{Fn: func(args []Object) Object {
 		r, g, b, a, err := parseColor("stroke", args)
 		if err != nil {
@@ -808,11 +888,33 @@ func init() {
 		return NULL
 	}}
 
+	// noStroke — stop drawing shape outlines, leaving only the fill.
+	//
+	// After this, shapes draw with no border. Re-enable with any stroke() call.
+	//
+	// @sig     noStroke() -> null
+	// @returns null
+	// @errors  none
+	// @example no-run noStroke()
+	// @since   0.1.0
+	// @see     stroke, noFill
 	Builtins["noStroke"] = &Builtin{Fn: func(args []Object) Object {
 		gfx.doStroke = false
 		return NULL
 	}}
 
+	// strokeWeight — set the line width for strokes, in pixels.
+	//
+	// Applies to line, point, and the outlines of filled shapes. Persists until
+	// changed.
+	//
+	// @sig     strokeWeight(width: number) -> null
+	// @param   width  the stroke width in pixels
+	// @returns null
+	// @errors  TypeError unless given a single numeric argument
+	// @example no-run strokeWeight(2.0)
+	// @since   0.1.0
+	// @see     stroke, noStroke
 	Builtins["strokeWeight"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 || !canArithmetic(args[0].Type()) {
 			return typeError("strokeWeight expects 1 numeric argument", ast.Pos{})
@@ -821,9 +923,25 @@ func init() {
 		return NULL
 	}}
 
-	// shadow(offsetX, offsetY, blur) → null              — black @ 50% alpha
-	// shadow(offsetX, offsetY, blur, r, g, b, a) → null — explicit colour
-	// Enable drop shadows on rect(), circle(), and roundedRect() calls.
+	// shadow — turn on drop shadows for subsequent rect/circle/roundedRect draws.
+	//
+	// Offsets the shadow by (offsetX, offsetY) and softens it by `blur` pixels.
+	// With three args the shadow is black at 50% alpha; pass r, g, b, a (0.0–1.0)
+	// for an explicit colour. Stays on until noShadow.
+	//
+	// @sig     shadow(offsetX: number, offsetY: number, blur: number, [r: number], [g: number], [b: number], [a: number]) -> null
+	// @param   offsetX  horizontal shadow offset in pixels
+	// @param   offsetY  vertical shadow offset in pixels
+	// @param   blur     blur radius in pixels
+	// @param   r        shadow red (0.0–1.0)
+	// @param   g        shadow green (0.0–1.0)
+	// @param   b        shadow blue (0.0–1.0)
+	// @param   a        shadow alpha (0.0–1.0)
+	// @returns null
+	// @errors  TypeError if any argument isn't numeric; RuntimeError unless given 3 or 7 arguments
+	// @example no-run shadow(0.0, 4.0, 8.0)
+	// @since   0.1.0
+	// @see     noShadow, rect, roundedRect
 	Builtins["shadow"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 && len(args) != 7 {
 			return runtimeError("shadow expects 3 or 7 arguments: offsetX, offsetY, blur [, r, g, b, a]", ast.Pos{})
@@ -851,17 +969,32 @@ func init() {
 		return NULL
 	}}
 
-	// noShadow() → null — disable drop shadows.
+	// noShadow — turn off drop shadows enabled by shadow().
+	//
+	// @sig     noShadow() -> null
+	// @returns null
+	// @errors  none
+	// @example no-run noShadow()
+	// @since   0.1.0
+	// @see     shadow
 	Builtins["noShadow"] = &Builtin{Fn: func(args []Object) Object {
 		gfx.shadowActive = false
 		return NULL
 	}}
 
-	// blendMode(mode) — set the OpenGL blend equation for subsequent draw calls.
-	// "normal"   — src*alpha + dst*(1-alpha)   (default)
-	// "add"      — src*alpha + dst             (fire, glow, light)
-	// "multiply" — dst * src                  (shadows)
-	// "screen"   — 1 - (1-src)*(1-dst)        (brightening)
+	// blendMode — set how subsequent draws blend with what's already on the canvas.
+	//
+	// Modes: "normal" (standard alpha blending, the default), "add" (additive —
+	// fire, glow, light, particles), "multiply" (darkening, shadows), "screen"
+	// (brightening). Call blendMode("normal") to reset after an effect.
+	//
+	// @sig     blendMode(mode: string) -> null
+	// @param   mode  one of "normal", "add", "multiply", "screen"
+	// @returns null
+	// @errors  TypeError if mode isn't a string or isn't one of the four known modes
+	// @example no-run blendMode("add")
+	// @since   0.1.0
+	// @see     fill, drawParticles
 	Builtins["blendMode"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return typeError("blendMode expects 1 argument: mode string", ast.Pos{})
@@ -885,6 +1018,19 @@ func init() {
 		return NULL
 	}}
 
+	// frameRate — cap the draw loop to a target frames-per-second.
+	//
+	// Pass the desired fps; pass 0 to disable the cap and sync to vsync instead.
+	// The render loop sleeps out any time left in each frame's budget to hold the
+	// rate steady.
+	//
+	// @sig     frameRate(fps: number) -> null
+	// @param   fps  target frames per second, or 0 for vsync
+	// @returns null
+	// @errors  TypeError unless given a single numeric argument
+	// @example no-run frameRate(30.0)
+	// @since   0.1.0
+	// @see     frameCount, window
 	Builtins["frameRate"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 || !canArithmetic(args[0].Type()) {
 			return typeError("frameRate expects 1 numeric argument: fps (0 = vsync)", ast.Pos{})
@@ -906,6 +1052,18 @@ func init() {
 
 	// ── Shape builtins ───────────────────────────────────────────────────────
 
+	// point — draw a single point at (x, y) using the stroke colour.
+	//
+	// The point's size is the current strokeWeight.
+	//
+	// @sig     point(x: number, y: number) -> null
+	// @param   x  x coordinate in pixels
+	// @param   y  y coordinate in pixels
+	// @returns null
+	// @errors  TypeError unless given 2 numeric arguments
+	// @example no-run point(100.0, 100.0)
+	// @since   0.1.0
+	// @see     line, stroke, strokeWeight
 	Builtins["point"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 || !allNumeric(args) {
 			return typeError("point expects 2 numeric arguments: x, y", ast.Pos{})
@@ -918,32 +1076,54 @@ func init() {
 		return NULL
 	}}
 
-	// drawParticles(xs, ys, rs, gs, bs, alphas, count, pointSize)
-	// Renders up to count particles in a SINGLE draw call using per-vertex colour.
-	// xs/ys/rs/gs/bs/alphas are kLex arrays (SoA layout — matches ParticlePool).
-	// Skips particles with alpha < 0.01 automatically.
+	// drawParticles — render thousands of coloured points in a single draw call.
+	//
+	// The fast path for particle systems: positions and per-particle colours are
+	// passed as parallel arrays (struct-of-arrays layout) and uploaded in one
+	// batch, so cost stays flat as particle counts climb. `count` caps how many
+	// to draw; particles with alpha < 0.01 are skipped. Pair with blendMode("add")
+	// for glow. Each array index i describes one particle.
+	//
+	// @sig     drawParticles(xs: array, ys: array, rs: array, gs: array, bs: array, alphas: array, count: int, pointSize: number) -> null
+	// @param   xs         x positions
+	// @param   ys         y positions
+	// @param   rs         red components (0.0–1.0)
+	// @param   gs         green components (0.0–1.0)
+	// @param   bs         blue components (0.0–1.0)
+	// @param   alphas     alpha components (0.0–1.0)
+	// @param   count      how many particles to draw (clamped to xs length)
+	// @param   pointSize  diameter of each particle in pixels
+	// @returns null
+	// @errors  TypeError if the first six arguments aren't arrays; RuntimeError unless given 8 arguments
+	// @example no-run drawParticles(xs, ys, rs, gs, bs, alphas, n, 4.0)
+	// @since   0.1.0
+	// @see     blendMode, point
 	Builtins["drawParticles"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 8 {
 			return runtimeError("drawParticles expects 8 arguments: xs,ys,rs,gs,bs,alphas,count,pointSize", ast.Pos{})
 		}
-		xs,    ok0 := args[0].(*Array)
-		ys,    ok1 := args[1].(*Array)
-		rs,    ok2 := args[2].(*Array)
-		gs,    ok3 := args[3].(*Array)
-		bs,    ok4 := args[4].(*Array)
+		xs, ok0 := args[0].(*Array)
+		ys, ok1 := args[1].(*Array)
+		rs, ok2 := args[2].(*Array)
+		gs, ok3 := args[3].(*Array)
+		bs, ok4 := args[4].(*Array)
 		alphas, ok5 := args[5].(*Array)
 		if !ok0 || !ok1 || !ok2 || !ok3 || !ok4 || !ok5 {
 			return typeError("drawParticles: xs,ys,rs,gs,bs,alphas must be arrays", ast.Pos{})
 		}
-		count    := int(toFloat64(args[6]))
-		pointSz  := float32(toFloat64(args[7]))
-		if count > len(xs.Elements) { count = len(xs.Elements) }
+		count := int(toFloat64(args[6]))
+		pointSz := float32(toFloat64(args[7]))
+		if count > len(xs.Elements) {
+			count = len(xs.Elements)
+		}
 
 		// Build interleaved VBO: [x, y, r, g, b, a] per live particle
 		verts := make([]float32, 0, count*6)
 		for i := 0; i < count; i++ {
 			a := float32(toFloat64(alphas.Elements[i]))
-			if a < 0.01 { continue }
+			if a < 0.01 {
+				continue
+			}
 			verts = append(verts,
 				float32(toFloat64(xs.Elements[i])),
 				float32(toFloat64(ys.Elements[i])),
@@ -953,7 +1133,9 @@ func init() {
 				a,
 			)
 		}
-		if len(verts) == 0 { return NULL }
+		if len(verts) == 0 {
+			return NULL
+		}
 
 		mvp := gfx.ortho.Mul4(gfx.modelStack[len(gfx.modelStack)-1])
 		gl.UseProgram(gfx.partProg)
@@ -967,6 +1149,20 @@ func init() {
 		return NULL
 	}}
 
+	// rect — draw a rectangle with its top-left corner at (x, y).
+	//
+	// Honours the current fill and stroke state, and any active shadow().
+	//
+	// @sig     rect(x: number, y: number, w: number, h: number) -> null
+	// @param   x  left edge in pixels
+	// @param   y  top edge in pixels
+	// @param   w  width in pixels
+	// @param   h  height in pixels
+	// @returns null
+	// @errors  TypeError if any argument isn't numeric; RuntimeError unless given 4 arguments
+	// @example no-run rect(20.0, 20.0, 120.0, 80.0)
+	// @since   0.1.0
+	// @see     roundedRect, circle, fill, stroke
 	Builtins["rect"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 {
 			return runtimeError("rect expects 4 arguments: x, y, w, h", ast.Pos{})
@@ -995,6 +1191,21 @@ func init() {
 		return NULL
 	}}
 
+	// circle — draw a filled and/or stroked circle centred at (x, y).
+	//
+	// Honours the current fill and stroke state (fill / stroke / noFill /
+	// noStroke) and is rendered with a signed-distance field, so the edge stays
+	// crisp at any radius. Call inside a window() draw function.
+	//
+	// @sig     circle(x: number, y: number, radius: number) -> null
+	// @param   x       centre x in pixels
+	// @param   y       centre y in pixels
+	// @param   radius  radius in pixels
+	// @returns null
+	// @errors  RuntimeError unless given exactly 3 numeric arguments
+	// @example no-run circle(200.0, 150.0, 40.0)
+	// @since   0.1.0
+	// @see     ellipse, rect, fill, stroke
 	Builtins["circle"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return runtimeError("circle expects 3 arguments: x, y, radius", ast.Pos{})
@@ -1004,7 +1215,7 @@ func init() {
 		}
 		cx := float32(toFloat64(args[0]))
 		cy := float32(toFloat64(args[1]))
-		r  := float32(toFloat64(args[2]))
+		r := float32(toFloat64(args[2]))
 		// A circle is a rounded rect with radius = half-size — SDF handles it perfectly.
 		drawShadowShape(cx-r, cy-r, r*2, r*2, r)
 		if gfx.doFill {
@@ -1016,6 +1227,22 @@ func init() {
 		return NULL
 	}}
 
+	// roundedRect — draw a rectangle with rounded corners.
+	//
+	// Like rect but with corners rounded to `radius` pixels, drawn with a
+	// signed-distance field for crisp edges. Honours fill, stroke, and shadow.
+	//
+	// @sig     roundedRect(x: number, y: number, w: number, h: number, radius: number) -> null
+	// @param   x       left edge in pixels
+	// @param   y       top edge in pixels
+	// @param   w       width in pixels
+	// @param   h       height in pixels
+	// @param   radius  corner radius in pixels
+	// @returns null
+	// @errors  TypeError unless given 5 numeric arguments
+	// @example no-run roundedRect(20.0, 20.0, 120.0, 80.0, 12.0)
+	// @since   0.1.0
+	// @see     rect, circle, fill
 	Builtins["roundedRect"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 5 || !allNumeric(args) {
 			return typeError("roundedRect expects 5 numeric arguments: x, y, w, h, radius", ast.Pos{})
@@ -1035,9 +1262,25 @@ func init() {
 		return NULL
 	}}
 
-	// gradient(x, y, w, h, color1, color2, dir) → null
-	// Fills a rectangle with a two-color linear gradient.
-	// color1/color2 are [r,g,b,a] float arrays; dir is "h" (left→right) or "v" (top→bottom).
+	// gradient — fill a rectangle with a two-colour linear gradient.
+	//
+	// Blends from color1 to color2 across the rectangle, either horizontally
+	// (dir "h", left→right) or vertically (dir "v", top→bottom). Each colour is a
+	// four-element [r, g, b, a] array of floats in 0.0–1.0.
+	//
+	// @sig     gradient(x: number, y: number, w: number, h: number, color1: array, color2: array, dir: string) -> null
+	// @param   x       left edge in pixels
+	// @param   y       top edge in pixels
+	// @param   w       width in pixels
+	// @param   h       height in pixels
+	// @param   color1  start colour as [r, g, b, a] (0.0–1.0)
+	// @param   color2  end colour as [r, g, b, a] (0.0–1.0)
+	// @param   dir     "h" for horizontal or "v" for vertical
+	// @returns null
+	// @errors  TypeError if x/y/w/h aren't numeric, the colours aren't 4-element float arrays, or dir isn't "h"/"v"; RuntimeError unless given 7 arguments
+	// @example no-run gradient(0.0, 0.0, 200.0, 100.0, [1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], "v")
+	// @since   0.1.0
+	// @see     fill, rect
 	Builtins["gradient"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 7 {
 			return typeError("gradient expects 7 arguments: x, y, w, h, color1, color2, dir", ast.Pos{})
@@ -1100,6 +1343,20 @@ func init() {
 		return NULL
 	}}
 
+	// line — draw a straight line from (x1, y1) to (x2, y2).
+	//
+	// Uses the current stroke colour and strokeWeight.
+	//
+	// @sig     line(x1: number, y1: number, x2: number, y2: number) -> null
+	// @param   x1  start x in pixels
+	// @param   y1  start y in pixels
+	// @param   x2  end x in pixels
+	// @param   y2  end y in pixels
+	// @returns null
+	// @errors  TypeError if any argument isn't numeric; RuntimeError unless given 4 arguments
+	// @example no-run line(0.0, 0.0, 200.0, 150.0)
+	// @since   0.1.0
+	// @see     point, stroke, strokeWeight
 	Builtins["line"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 {
 			return runtimeError("line expects 4 arguments: x1, y1, x2, y2", ast.Pos{})
@@ -1115,6 +1372,21 @@ func init() {
 		return NULL
 	}}
 
+	// ellipse — draw an ellipse centred at (x, y) with radii rx and ry.
+	//
+	// Approximated with 64 segments. Honours fill and stroke. For a circle, use
+	// circle() (it stays perfectly crisp via a signed-distance field).
+	//
+	// @sig     ellipse(x: number, y: number, rx: number, ry: number) -> null
+	// @param   x   centre x in pixels
+	// @param   y   centre y in pixels
+	// @param   rx  horizontal radius in pixels
+	// @param   ry  vertical radius in pixels
+	// @returns null
+	// @errors  TypeError if any argument isn't numeric; RuntimeError unless given 4 arguments
+	// @example no-run ellipse(150.0, 100.0, 80.0, 40.0)
+	// @since   0.1.0
+	// @see     circle, arc, fill
 	Builtins["ellipse"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 {
 			return runtimeError("ellipse expects 4 arguments: x, y, rx, ry", ast.Pos{})
@@ -1146,19 +1418,32 @@ func init() {
 		return NULL
 	}}
 
-	// arc(x, y, r, startAngle, endAngle) → null
-	// Draws an arc centred at (x, y) with radius r from startAngle to endAngle (radians).
-	// Angles follow screen-space convention: 0 = right, π/2 = down (y-down).
-	// With fill: draws a filled sector (pie slice). With stroke: draws the arc line only.
+	// arc — draw an arc (or filled pie slice) centred at (x, y).
+	//
+	// Sweeps from startAngle to endAngle in radians, following screen-space
+	// convention (0 = right, π/2 = down, since y points down). With fill on it
+	// draws a filled sector (pie slice); with stroke on it draws just the arc line.
+	//
+	// @sig     arc(x: number, y: number, r: number, startAngle: number, endAngle: number) -> null
+	// @param   x           centre x in pixels
+	// @param   y           centre y in pixels
+	// @param   r           radius in pixels
+	// @param   startAngle  start angle in radians
+	// @param   endAngle    end angle in radians
+	// @returns null
+	// @errors  TypeError unless given 5 numeric arguments
+	// @example no-run arc(150.0, 100.0, 60.0, 0.0, 3.14159)
+	// @since   0.1.0
+	// @see     circle, ellipse, fill
 	Builtins["arc"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 5 || !allNumeric(args) {
 			return typeError("arc expects 5 numeric arguments: x, y, r, startAngle, endAngle", ast.Pos{})
 		}
-		cx    := float32(toFloat64(args[0]))
-		cy    := float32(toFloat64(args[1]))
-		r     := float32(toFloat64(args[2]))
+		cx := float32(toFloat64(args[0]))
+		cy := float32(toFloat64(args[1]))
+		r := float32(toFloat64(args[2]))
 		start := toFloat64(args[3])
-		end   := toFloat64(args[4])
+		end := toFloat64(args[4])
 		sweep := end - start
 		if sweep == 0 {
 			return NULL
@@ -1187,6 +1472,19 @@ func init() {
 		return NULL
 	}}
 
+	// polygon — draw a closed polygon from a flat array of x,y pairs.
+	//
+	// The array is [x1, y1, x2, y2, …] — an even length, at least 3 points (6
+	// values). Honours fill (triangulated from the centroid) and stroke (closed
+	// outline).
+	//
+	// @sig     polygon(points: array) -> null
+	// @param   points  flat [x1, y1, x2, y2, …] array, even length, >= 3 points
+	// @returns null
+	// @errors  TypeError if points isn't an array or holds a non-numeric element; RuntimeError if the length is odd or under 6
+	// @example no-run polygon([100.0, 20.0, 160.0, 120.0, 40.0, 120.0])
+	// @since   0.1.0
+	// @see     triangle, line, fill
 	Builtins["polygon"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("polygon expects 1 argument: flat array of x,y pairs", ast.Pos{})
@@ -1225,6 +1523,22 @@ func init() {
 		return NULL
 	}}
 
+	// triangle — draw a triangle through three points.
+	//
+	// Honours fill and stroke.
+	//
+	// @sig     triangle(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number) -> null
+	// @param   x1  first vertex x
+	// @param   y1  first vertex y
+	// @param   x2  second vertex x
+	// @param   y2  second vertex y
+	// @param   x3  third vertex x
+	// @param   y3  third vertex y
+	// @returns null
+	// @errors  TypeError if any argument isn't numeric; RuntimeError unless given 6 arguments
+	// @example no-run triangle(100.0, 20.0, 160.0, 120.0, 40.0, 120.0)
+	// @since   0.1.0
+	// @see     polygon, rect, fill
 	Builtins["triangle"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 6 {
 			return runtimeError("triangle expects 6 arguments: x1,y1, x2,y2, x3,y3", ast.Pos{})
@@ -1248,6 +1562,20 @@ func init() {
 
 	// ── Image builtins ───────────────────────────────────────────────────────
 
+	// loadImage — decode an image from a file path or encoded bytes.
+	//
+	// Accepts either a filesystem path string or a bytes value holding an encoded
+	// image (PNG/JPEG/GIF/WebP) — the bytes form lets you draw images fetched over
+	// a bridge or HTTP without touching disk. Returns an image handle for
+	// drawImage / imageSize. GPU upload is deferred to the first drawImage.
+	//
+	// @sig     loadImage(source: string|bytes) -> image
+	// @param   source  a path to an image file, or encoded image bytes
+	// @returns an image handle
+	// @errors  TypeError if source isn't a string or bytes; RuntimeError if the file can't be opened or the data can't be decoded
+	// @example no-run logo = loadImage("logo.png")
+	// @since   0.1.0
+	// @see     drawImage, imageSize, saveImage
 	Builtins["loadImage"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("loadImage expects 1 argument: path | bytes", ast.Pos{})
@@ -1295,8 +1623,22 @@ func init() {
 	// already have raw pixels — Metal surface readbacks, procedural
 	// generators, video frames, screen captures.
 	//
-	// Pixels are copied into the Image's own buffer so the caller can
-	// mutate the source bytes afterwards without affecting the image.
+	// imageFromRgba — wrap raw RGBA8 pixel bytes into an image handle.
+	//
+	// The counterpart to loadImage for sources that already have raw pixels —
+	// surface readbacks, procedural generators, video frames, screen captures —
+	// skipping PNG/JPEG decode. `bytes` must be exactly width*height*4 bytes,
+	// row-major. The pixels are copied, so you may mutate the source afterwards.
+	//
+	// @sig     imageFromRgba(bytes: bytes, width: int, height: int) -> image
+	// @param   bytes   raw RGBA8 pixels, row-major, length width*height*4
+	// @param   width   image width in pixels (> 0)
+	// @param   height  image height in pixels (> 0)
+	// @returns an image handle
+	// @errors  TypeError on wrong argument types; RuntimeError if width/height aren't positive or bytes length doesn't match width*height*4
+	// @example no-run img = imageFromRgba(pixels, 64, 64)
+	// @since   0.1.0
+	// @see     imageToRgba, loadImage, drawImage
 	Builtins["imageFromRgba"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return runtimeError("imageFromRgba expects (bytes, width, height)", ast.Pos{})
@@ -1327,19 +1669,21 @@ func init() {
 		return &Image{W: w.Value, H: h.Value, pixels: pix}
 	}}
 
-	// imageToRgba(img) → bytes
+	// imageToRgba — read an image's raw RGBA8 pixels back out as bytes.
 	//
-	// Returns the Image's raw RGBA8 pixels (row-major, width*height*4
-	// bytes). The natural counterpart to imageFromRgba — round-tripping
-	// `imageFromRgba(imageToRgba(img), w, h)` produces an equivalent
-	// image.
+	// The counterpart to imageFromRgba: round-tripping
+	// imageFromRgba(imageToRgba(img), w, h) reproduces the image. Returns
+	// row-major width*height*4 bytes. If the image has already been drawn (its
+	// pixels uploaded to the GPU), this reads them back from the texture and so
+	// MUST be called from inside a draw frame.
 	//
-	// Source priority:
-	//   1. img.pixels  — pre-GPU-upload CPU bytes (present after loadImage
-	//                    until the first drawImage uploads to a texture).
-	//   2. img.TextureID — once uploaded, reads back from the GPU via
-	//                      glGetTexImage. MUST be called from the GL
-	//                      thread (i.e. inside a draw frame).
+	// @sig     imageToRgba(img: image) -> bytes
+	// @param   img  the image to read
+	// @returns the image's raw RGBA8 pixels (width*height*4 bytes)
+	// @errors  TypeError if img isn't an image; RuntimeError if it has no dimensions or no available pixel data
+	// @example no-run pixels = imageToRgba(img)
+	// @since   0.1.0
+	// @see     imageFromRgba, imageSize, loadImage
 	Builtins["imageToRgba"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("imageToRgba expects 1 argument: img", ast.Pos{})
@@ -1369,11 +1713,17 @@ func init() {
 		return runtimeError("imageToRgba: image has no pixel data — has it been drawn yet?", ast.Pos{})
 	}}
 
-	// imageSize(img) → (width, height)
+	// imageSize — get an image's pixel dimensions as a (width, height) tuple.
 	//
-	// Returns the pixel dimensions of a kLex Image as a two-element tuple.
-	// Cheap (struct field reads); safe to call before the image's first
-	// drawImage (no GPU upload required).
+	// Cheap (struct field reads) and safe to call before the image's first draw.
+	//
+	// @sig     imageSize(img: image) -> (int, int)
+	// @param   img  the image to measure
+	// @returns a (width, height) tuple of integers
+	// @errors  TypeError if img isn't an image; RuntimeError unless given 1 argument
+	// @example no-run w, h = imageSize(img)
+	// @since   0.1.0
+	// @see     loadImage, drawImage
 	Builtins["imageSize"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("imageSize expects 1 argument: img", ast.Pos{})
@@ -1388,11 +1738,21 @@ func init() {
 		}}
 	}}
 
-	// saveImage(img, path) — encode an Image to disk. Format is chosen from
-	// the path extension: .png (default, lossless), .jpg/.jpeg (quality 92),
-	// .gif (palette-quantised). Returns null on success, runtime error on
-	// failure. The image's RGBA pixels are encoded directly — no separate
-	// readback path needed because loadImage already keeps them in memory.
+	// saveImage — encode an image to disk, format chosen by file extension.
+	//
+	// .png (default for unknown extensions, lossless), .jpg/.jpeg (quality 92),
+	// or .gif (palette-quantised). If the image has already been drawn its pixels
+	// are read back from the GPU, so this works post-render. Desktop only — the
+	// browser build raises a clear "no filesystem" error.
+	//
+	// @sig     saveImage(img: image, path: string) -> null
+	// @param   img   the image to encode
+	// @param   path  the output file path; its extension selects the format
+	// @returns null
+	// @errors  TypeError on wrong argument types; RuntimeError if the image has no pixel data or the file can't be written/encoded
+	// @example no-run saveImage(img, "out.png")
+	// @since   0.1.0
+	// @see     loadImage, imageToRgba
 	Builtins["saveImage"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("saveImage expects 2 arguments: img, path", ast.Pos{})
@@ -1452,6 +1812,23 @@ func init() {
 		return NULL
 	}}
 
+	// drawImage — draw a loaded image at (x, y), optionally scaled to (w, h).
+	//
+	// With three args the image draws at its native size; with five it's scaled to
+	// w×h. The GPU texture is created lazily on the first draw. Call inside a
+	// window() draw function.
+	//
+	// @sig     drawImage(img: image, x: number, y: number, [w: number], [h: number]) -> null
+	// @param   img  an image from loadImage or imageFromRgba
+	// @param   x    left position in pixels
+	// @param   y    top position in pixels
+	// @param   w    draw width in pixels (default: image width)
+	// @param   h    draw height in pixels (default: image height)
+	// @returns null
+	// @errors  TypeError if img isn't an image or the coordinates aren't numeric; RuntimeError unless given 3 or 5 arguments
+	// @example no-run drawImage(logo, 20.0, 20.0)
+	// @since   0.1.0
+	// @see     loadImage, imageSize
 	Builtins["drawImage"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 && len(args) != 5 {
 			return runtimeError("drawImage expects 3 or 5 arguments: img, x, y  or  img, x, y, w, h", ast.Pos{})
@@ -1477,6 +1854,19 @@ func init() {
 
 	// ── Transform builtins ───────────────────────────────────────────────────
 
+	// translate — shift the coordinate origin by (x, y) for later draws.
+	//
+	// Multiplies the current transform matrix. Wrap in pushMatrix/popMatrix to
+	// confine the effect to a block.
+	//
+	// @sig     translate(x: number, y: number) -> null
+	// @param   x  horizontal shift in pixels
+	// @param   y  vertical shift in pixels
+	// @returns null
+	// @errors  TypeError unless given 2 numeric arguments
+	// @example no-run translate(100.0, 50.0)
+	// @since   0.1.0
+	// @see     rotate, scale, pushMatrix
 	Builtins["translate"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 || !allNumeric(args) {
 			return typeError("translate expects 2 numeric arguments: x, y", ast.Pos{})
@@ -1488,6 +1878,18 @@ func init() {
 		return NULL
 	}}
 
+	// rotate — rotate the coordinate system by an angle in radians.
+	//
+	// Rotation is about the current origin (use translate first to pivot
+	// elsewhere). Wrap in pushMatrix/popMatrix to confine the effect.
+	//
+	// @sig     rotate(angle: number) -> null
+	// @param   angle  rotation in radians (positive = clockwise, since y points down)
+	// @returns null
+	// @errors  TypeError unless given a single numeric argument
+	// @example no-run rotate(0.7854)
+	// @since   0.1.0
+	// @see     translate, scale, pushMatrix
 	Builtins["rotate"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 || !canArithmetic(args[0].Type()) {
 			return typeError("rotate expects 1 numeric argument: angle (radians)", ast.Pos{})
@@ -1498,6 +1900,19 @@ func init() {
 		return NULL
 	}}
 
+	// scale — scale the coordinate system by (sx, sy) for later draws.
+	//
+	// Values above 1 enlarge, below 1 shrink; scaling is about the current
+	// origin. Wrap in pushMatrix/popMatrix to confine the effect.
+	//
+	// @sig     scale(sx: number, sy: number) -> null
+	// @param   sx  horizontal scale factor
+	// @param   sy  vertical scale factor
+	// @returns null
+	// @errors  TypeError unless given 2 numeric arguments
+	// @example no-run scale(2.0, 2.0)
+	// @since   0.1.0
+	// @see     translate, rotate, pushMatrix
 	Builtins["scale"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 || !allNumeric(args) {
 			return typeError("scale expects 2 numeric arguments: sx, sy", ast.Pos{})
@@ -1509,12 +1924,35 @@ func init() {
 		return NULL
 	}}
 
+	// pushMatrix — save the current transform onto the matrix stack.
+	//
+	// Pushes a copy of the current transform; later translate/rotate/scale calls
+	// modify the copy, and popMatrix restores the saved one. Always pair with a
+	// popMatrix.
+	//
+	// @sig     pushMatrix() -> null
+	// @returns null
+	// @errors  none
+	// @example no-run pushMatrix()
+	// @since   0.1.0
+	// @see     popMatrix, translate, rotate, scale
 	Builtins["pushMatrix"] = &Builtin{Fn: func(args []Object) Object {
 		top := gfx.modelStack[len(gfx.modelStack)-1]
 		gfx.modelStack = append(gfx.modelStack, top)
 		return NULL
 	}}
 
+	// popMatrix — restore the transform saved by the matching pushMatrix.
+	//
+	// Discards the current transform and pops the one beneath it. Errors on an
+	// empty stack (a popMatrix without a pushMatrix).
+	//
+	// @sig     popMatrix() -> null
+	// @returns null
+	// @errors  RuntimeError on stack underflow (no matching pushMatrix)
+	// @example no-run popMatrix()
+	// @since   0.1.0
+	// @see     pushMatrix, translate, rotate, scale
 	Builtins["popMatrix"] = &Builtin{Fn: func(args []Object) Object {
 		if len(gfx.modelStack) <= 1 {
 			return runtimeError("popMatrix: matrix stack underflow", ast.Pos{})
@@ -1525,8 +1963,22 @@ func init() {
 
 	// ── Text builtin ─────────────────────────────────────────────────────────
 
-	// text(str, x, y) — draw a string using the embedded 8x8 bitmap font.
-	// Optional 4th argument sets scale (default 1 = 8px per character).
+	// text — draw a string in the built-in bitmap font at (x, y).
+	//
+	// Uses the embedded monospace font in the current fill colour; (x, y) is the
+	// top-left of the text. An optional scale multiplies the base size. For
+	// proportional or custom fonts, load one with loadFont and use textFont.
+	//
+	// @sig     text(str: string, x: number, y: number, [scale: number]) -> null
+	// @param   str    the text to draw
+	// @param   x      left position in pixels
+	// @param   y      top position in pixels
+	// @param   scale  size multiplier (default 1.0)
+	// @returns null
+	// @errors  TypeError if str isn't a string or x/y/scale aren't numeric; RuntimeError unless given 3 or 4 arguments
+	// @example no-run text("hello", 20.0, 20.0)
+	// @since   0.1.0
+	// @see     textFont, loadFont, fill
 	Builtins["text"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 3 || len(args) > 4 {
 			return runtimeError("text expects 3 or 4 arguments: str, x, y [, scale]", ast.Pos{})
@@ -1574,12 +2026,12 @@ func init() {
 			qx := cx + float32(pos)*charW
 			qy := cy
 			verts = append(verts,
-				qx, qy,           u0, 0,
-				qx+charW, qy,     u1, 0,
+				qx, qy, u0, 0,
+				qx+charW, qy, u1, 0,
 				qx+charW, qy+charH, u1, 1,
-				qx, qy,           u0, 0,
+				qx, qy, u0, 0,
 				qx+charW, qy+charH, u1, 1,
-				qx, qy+charH,     u0, 1,
+				qx, qy+charH, u0, 1,
 			)
 			pos++
 		}
@@ -1595,6 +2047,18 @@ func init() {
 
 	// ── Keyboard builtins ────────────────────────────────────────────────────
 
+	// keyDown — whether a named key is currently held down.
+	//
+	// Level-triggered: true for every frame the key is held. Use keyPressed for a
+	// one-shot edge. Key names are things like "a", "space", "left", "escape".
+	//
+	// @sig     keyDown(key: string) -> bool
+	// @param   key  the key name to test
+	// @returns true while the key is held, false otherwise
+	// @errors  TypeError if key isn't a string; RuntimeError if the key name is unknown
+	// @example no-run if keyDown("space") { jump() }
+	// @since   0.1.0
+	// @see     keyPressed
 	Builtins["keyDown"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("keyDown expects 1 argument: key name string", ast.Pos{})
@@ -1613,6 +2077,18 @@ func init() {
 		return FALSE
 	}}
 
+	// keyPressed — whether a named key was pressed this frame (edge-triggered).
+	//
+	// True only on the single frame the key transitions from up to down — ideal
+	// for menu navigation or toggles, where keyDown would fire every frame.
+	//
+	// @sig     keyPressed(key: string) -> bool
+	// @param   key  the key name to test
+	// @returns true on the frame the key went down, false otherwise
+	// @errors  TypeError if key isn't a string; RuntimeError if the key name is unknown
+	// @example no-run if keyPressed("escape") { pause() }
+	// @since   0.1.0
+	// @see     keyDown
 	Builtins["keyPressed"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("keyPressed expects 1 argument: key name string", ast.Pos{})
@@ -1633,18 +2109,60 @@ func init() {
 
 	// ── Query builtins ───────────────────────────────────────────────────────
 
+	// frameCount — the number of frames drawn so far.
+	//
+	// Increments once per draw loop iteration; useful for driving animation and
+	// timing. The same value is passed to the window() draw callback.
+	//
+	// @sig     frameCount() -> int
+	// @returns the count of frames rendered since the window opened
+	// @errors  none
+	// @example no-run if frameCount() % 60 == 0 { tick() }
+	// @since   0.1.0
+	// @see     frameRate, window, elapsedTime
 	Builtins["frameCount"] = &Builtin{Fn: func(args []Object) Object {
 		return &Integer{Value: gfx.frameCount}
 	}}
 
+	// mouseX — the mouse cursor's current x position in pixels.
+	//
+	// Measured from the left edge of the window. Pair with mouseY.
+	//
+	// @sig     mouseX() -> float
+	// @returns the cursor x position in pixels
+	// @errors  none
+	// @example no-run circle(mouseX(), mouseY(), 10.0)
+	// @since   0.1.0
+	// @see     mouseY, mouseDown
 	Builtins["mouseX"] = &Builtin{Fn: func(args []Object) Object {
 		return &Float{Value: gfx.mouseX}
 	}}
 
+	// mouseY — the mouse cursor's current y position in pixels.
+	//
+	// Measured from the top edge of the window (y points down). Pair with mouseX.
+	//
+	// @sig     mouseY() -> float
+	// @returns the cursor y position in pixels
+	// @errors  none
+	// @example no-run circle(mouseX(), mouseY(), 10.0)
+	// @since   0.1.0
+	// @see     mouseX, mouseDown
 	Builtins["mouseY"] = &Builtin{Fn: func(args []Object) Object {
 		return &Float{Value: gfx.mouseY}
 	}}
 
+	// mouseDown — whether the left mouse button is currently held.
+	//
+	// Level-triggered (true every frame the button is down). Use mouseClicked for
+	// a one-shot click edge.
+	//
+	// @sig     mouseDown() -> bool
+	// @returns true while the left button is held, false otherwise
+	// @errors  none
+	// @example no-run if mouseDown() { paint(mouseX(), mouseY()) }
+	// @since   0.1.0
+	// @see     mouseClicked, mouseX, mouseY
 	Builtins["mouseDown"] = &Builtin{Fn: func(args []Object) Object {
 		if gfx.mouseDown {
 			return TRUE
@@ -1652,6 +2170,17 @@ func init() {
 		return FALSE
 	}}
 
+	// mouseClicked — whether the left button was clicked this frame (edge-triggered).
+	//
+	// True only on the frame the left button goes down — use mouseDown for the
+	// held state.
+	//
+	// @sig     mouseClicked() -> bool
+	// @returns true on the frame the left button went down, false otherwise
+	// @errors  none
+	// @example no-run if mouseClicked() { select() }
+	// @since   0.1.0
+	// @see     mouseDown, mouseRightClicked
 	Builtins["mouseClicked"] = &Builtin{Fn: func(args []Object) Object {
 		if gfx.mouseJustClicked {
 			return TRUE
@@ -1659,6 +2188,17 @@ func init() {
 		return FALSE
 	}}
 
+	// mouseRightClicked — whether the right button was clicked this frame.
+	//
+	// Edge-triggered: true only on the frame the right button goes down. The
+	// right-button counterpart to mouseClicked.
+	//
+	// @sig     mouseRightClicked() -> bool
+	// @returns true on the frame the right button went down, false otherwise
+	// @errors  none
+	// @example no-run if mouseRightClicked() { showMenu() }
+	// @since   0.1.0
+	// @see     mouseClicked, mouseRightDown
 	Builtins["mouseRightClicked"] = &Builtin{Fn: func(args []Object) Object {
 		if gfx.mouseRightClicked {
 			return TRUE
@@ -1666,6 +2206,17 @@ func init() {
 		return FALSE
 	}}
 
+	// mouseRightDown — whether the right mouse button is currently held.
+	//
+	// Level-triggered (true every frame it's held). The right-button counterpart
+	// to mouseDown.
+	//
+	// @sig     mouseRightDown() -> bool
+	// @returns true while the right button is held, false otherwise
+	// @errors  none
+	// @example no-run if mouseRightDown() { pan() }
+	// @since   0.1.0
+	// @see     mouseDown, mouseRightClicked
 	Builtins["mouseRightDown"] = &Builtin{Fn: func(args []Object) Object {
 		if gfx.mouseRightDown {
 			return TRUE
@@ -1673,18 +2224,52 @@ func init() {
 		return FALSE
 	}}
 
+	// mouseScrollY — the vertical scroll-wheel delta for this frame.
+	//
+	// Accumulated wheel/trackpad movement since the last frame; positive is one
+	// direction, negative the other, 0 when idle.
+	//
+	// @sig     mouseScrollY() -> float
+	// @returns this frame's vertical scroll delta (0.0 when not scrolling)
+	// @errors  none
+	// @example no-run zoom = zoom + mouseScrollY() * 0.1
+	// @since   0.1.0
+	// @see     mouseScrollX, mouseX, mouseY
 	Builtins["mouseScrollY"] = &Builtin{Fn: func(args []Object) Object {
 		return &Float{Value: gfx.uiScrollDelta}
 	}}
 
+	// mouseScrollX — the horizontal scroll-wheel delta for this frame.
+	//
+	// The horizontal counterpart to mouseScrollY (trackpad sideways scroll, tilt
+	// wheels). 0 when idle.
+	//
+	// @sig     mouseScrollX() -> float
+	// @returns this frame's horizontal scroll delta (0.0 when not scrolling)
+	// @errors  none
+	// @example no-run offset = offset + mouseScrollX()
+	// @since   0.1.0
+	// @see     mouseScrollY
 	Builtins["mouseScrollX"] = &Builtin{Fn: func(args []Object) Object {
 		return &Float{Value: gfx.uiScrollX}
 	}}
 
-	// pushClip(x, y, w, h) — enable OpenGL scissor rect (clips drawing to this region)
-	// pushClip(x, y, w, h) — push a clipping rectangle onto the scissor stack.
-	// If a clip is already active the new rect is intersected with it, so nested
-	// clips always stay within their parent. Pair every pushClip with a popClip.
+	// pushClip — restrict drawing to a rectangle, pushing it onto the clip stack.
+	//
+	// Subsequent draws are clipped to (x, y, w, h). If a clip is already active the
+	// new rect is intersected with it, so nested clips stay within their parent.
+	// Always pair with a popClip.
+	//
+	// @sig     pushClip(x: number, y: number, w: number, h: number) -> null
+	// @param   x  left edge in pixels
+	// @param   y  top edge in pixels
+	// @param   w  width in pixels
+	// @param   h  height in pixels
+	// @returns null
+	// @errors  TypeError unless given 4 numeric arguments
+	// @example no-run pushClip(0.0, 0.0, 200.0, 200.0)
+	// @since   0.1.0
+	// @see     popClip
 	Builtins["pushClip"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 {
 			return typeError("pushClip expects 4 arguments: x, y, w, h", ast.Pos{})
@@ -1714,7 +2299,17 @@ func init() {
 		return NULL
 	}}
 
-	// popClip() — pop the top clip rect and restore the one below it (or disable clipping).
+	// popClip — remove the top clip rectangle, restoring the one beneath it.
+	//
+	// Undoes the most recent pushClip; when the stack empties, clipping is turned
+	// off entirely. Safe to call on an empty stack (no-op).
+	//
+	// @sig     popClip() -> null
+	// @returns null
+	// @errors  none
+	// @example no-run popClip()
+	// @since   0.1.0
+	// @see     pushClip
 	Builtins["popClip"] = &Builtin{Fn: func(args []Object) Object {
 		if len(gfx.clipStack) > 0 {
 			gfx.clipStack = gfx.clipStack[:len(gfx.clipStack)-1]
@@ -1727,26 +2322,73 @@ func init() {
 		return NULL
 	}}
 
+	// winWidth — the current window width in pixels.
+	//
+	// @sig     winWidth() -> int
+	// @returns the window width in pixels
+	// @errors  none
+	// @example no-run cx = winWidth() / 2
+	// @since   0.1.0
+	// @see     winHeight, window
 	Builtins["winWidth"] = &Builtin{Fn: func(args []Object) Object {
 		return &Integer{Value: gfx.winW}
 	}}
 
+	// winHeight — the current window height in pixels.
+	//
+	// @sig     winHeight() -> int
+	// @returns the window height in pixels
+	// @errors  none
+	// @example no-run cy = winHeight() / 2
+	// @since   0.1.0
+	// @see     winWidth, window
 	Builtins["winHeight"] = &Builtin{Fn: func(args []Object) Object {
 		return &Integer{Value: gfx.winH}
 	}}
 
+	// fontCharWidth — the width of one character in the built-in bitmap font.
+	//
+	// In pixels at scale 1. Pair with fontCharHeight to lay out text drawn with
+	// text() on a fixed grid.
+	//
+	// @sig     fontCharWidth() -> int
+	// @returns the built-in font's character cell width in pixels
+	// @errors  none
+	// @example no-run w = fontCharWidth()
+	// @since   0.1.0
+	// @see     fontCharHeight, text
 	Builtins["fontCharWidth"] = &Builtin{Fn: func(args []Object) Object {
 		return &Integer{Value: gfx.fontCellW / gfx.fontRenderScale}
 	}}
 
+	// fontCharHeight — the height of one character in the built-in bitmap font.
+	//
+	// In pixels at scale 1. Pair with fontCharWidth for fixed-grid text layout.
+	//
+	// @sig     fontCharHeight() -> int
+	// @returns the built-in font's character cell height in pixels
+	// @errors  none
+	// @example no-run h = fontCharHeight()
+	// @since   0.1.0
+	// @see     fontCharWidth, text
 	Builtins["fontCharHeight"] = &Builtin{Fn: func(args []Object) Object {
 		return &Integer{Value: gfx.fontCellH / gfx.fontRenderScale}
 	}}
 
-	// loadFont(path) or loadFont(path, ptSize) → Font
-	// Loads a TrueType or OpenType font from disk and builds a proportional SDF atlas.
-	// ptSize defaults to 16. Call before or inside window() — GPU upload is deferred
-	// to the first textFont() call.
+	// loadFont — load a TrueType/OpenType font and build a proportional atlas.
+	//
+	// Returns a font handle for textFont / textWidth. ptSize sets the rasterised
+	// size (default 16); GPU upload is deferred to the first textFont call, so this
+	// is safe to call before or inside window().
+	//
+	// @sig     loadFont(path: string, [ptSize: number]) -> Font
+	// @param   path    path to a .ttf or .otf font file
+	// @param   ptSize  point size to rasterise at (default 16)
+	// @returns a font handle
+	// @errors  TypeError if path isn't a string or ptSize isn't numeric; RuntimeError if the file can't be read or the atlas can't be built
+	// @example no-run font = loadFont("Outfit.ttf", 32)
+	// @since   0.1.0
+	// @see     textFont, textWidth, text
 	Builtins["loadFont"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 1 || len(args) > 2 {
 			return runtimeError("loadFont expects 1-2 arguments: path [, ptSize]", ast.Pos{})
@@ -1773,9 +2415,23 @@ func init() {
 		return fnt
 	}}
 
-	// textFont(font, str, x, y) or textFont(font, str, x, y, scale) → null
-	// Draws a string using a font returned by loadFont(). Respects fill colour.
-	// scale defaults to 1. Defers GPU upload on first call.
+	// textFont — draw a string using a font loaded with loadFont, at (x, y).
+	//
+	// Uses the proportional glyph atlas in the current fill colour; (x, y) is the
+	// top-left. An optional scale multiplies the loaded point size. Use textWidth
+	// to measure for centring or right-alignment.
+	//
+	// @sig     textFont(font: Font, str: string, x: number, y: number, [scale: number]) -> null
+	// @param   font   a font from loadFont
+	// @param   str    the text to draw
+	// @param   x      left position in pixels
+	// @param   y      top position in pixels
+	// @param   scale  size multiplier (default 1.0)
+	// @returns null
+	// @errors  TypeError if font isn't a Font, str isn't a string, or x/y/scale aren't numeric; RuntimeError unless given 4 or 5 arguments
+	// @example no-run textFont(font, "hello", 20.0, 20.0)
+	// @since   0.1.0
+	// @see     loadFont, textWidth, text
 	Builtins["textFont"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 4 || len(args) > 5 {
 			return runtimeError("textFont expects 4-5 arguments: font, str, x, y [, scale]", ast.Pos{})
@@ -1840,12 +2496,12 @@ func init() {
 			}
 			qw := g.advance * scale
 			verts = append(verts,
-				penX, y,          g.u0, 0,
-				penX+qw, y,       g.u1, 0,
+				penX, y, g.u0, 0,
+				penX+qw, y, g.u1, 0,
 				penX+qw, y+lineH, g.u1, 1,
-				penX, y,          g.u0, 0,
+				penX, y, g.u0, 0,
 				penX+qw, y+lineH, g.u1, 1,
-				penX, y+lineH,    g.u0, 1,
+				penX, y+lineH, g.u0, 1,
 			)
 			penX += qw
 		}
@@ -1859,9 +2515,21 @@ func init() {
 		return NULL
 	}}
 
-	// textWidth(font, str) or textWidth(font, str, scale) → float
-	// Returns the pixel width of str rendered with font at the given scale (default 1).
-	// Use this to right-align or center text before calling textFont().
+	// textWidth — measure how wide a string is in a given font.
+	//
+	// Returns the pixel width str would occupy when drawn with textFont at the
+	// given scale (default 1) — the basis for centring or right-aligning text
+	// before drawing it.
+	//
+	// @sig     textWidth(font: Font, str: string, [scale: number]) -> float
+	// @param   font   a font from loadFont
+	// @param   str    the text to measure
+	// @param   scale  size multiplier (default 1.0)
+	// @returns the rendered width in pixels
+	// @errors  TypeError if font isn't a Font, str isn't a string, or scale isn't numeric; RuntimeError unless given 2 or 3 arguments
+	// @example no-run x = (winWidth() - textWidth(font, label)) / 2.0
+	// @since   0.1.0
+	// @see     textFont, loadFont
 	Builtins["textWidth"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 2 || len(args) > 3 {
 			return runtimeError("textWidth expects 2-3 arguments: font, str [, scale]", ast.Pos{})
@@ -1892,21 +2560,18 @@ func init() {
 		return &Float{Value: w * scale}
 	}}
 
-	Builtins["mouseX"] = &Builtin{Fn: func(args []Object) Object {
-		return &Float{Value: gfx.mouseX}
-	}}
-
-	Builtins["mouseY"] = &Builtin{Fn: func(args []Object) Object {
-		return &Float{Value: gfx.mouseY}
-	}}
-
-	Builtins["mouseClicked"] = &Builtin{Fn: func(args []Object) Object {
-		return &Boolean{Value: gfx.mouseJustClicked}
-	}}
-
-	// droppedFiles() → array of strings
-	// Returns all file paths dropped onto the window since the last call, then
-	// clears the buffer. Returns an empty array if nothing was dropped.
+	// droppedFiles — the file paths dropped onto the window since the last call.
+	//
+	// Drag-and-drop support: returns the paths dropped onto the window and clears
+	// the buffer, so each drop is reported once. Empty array when nothing was
+	// dropped. Poll it once per frame.
+	//
+	// @sig     droppedFiles() -> array
+	// @returns an array of dropped file-path strings (empty if none)
+	// @errors  none
+	// @example no-run for path in droppedFiles() { open(path) }
+	// @since   0.1.0
+	// @see     loadImage, window
 	Builtins["droppedFiles"] = &Builtin{Fn: func(args []Object) Object {
 		paths := gfx.droppedFiles
 		gfx.droppedFiles = nil
@@ -2106,29 +2771,39 @@ func allNumeric(args []Object) bool {
 // pixels; 8 at renderScale=4 gives 2 display-pixel margin on each side.
 func computeGlyphSDF(src *image.RGBA, displayW, displayH, scale int) []byte {
 	const searchR = 8
-	hrW  := src.Bounds().Dx()
-	hrH  := src.Bounds().Dy()
-	pix  := src.Pix
-	sdf  := make([]byte, displayW*displayH*4)
+	hrW := src.Bounds().Dx()
+	hrH := src.Bounds().Dy()
+	pix := src.Pix
+	sdf := make([]byte, displayW*displayH*4)
 
 	for dy := 0; dy < displayH; dy++ {
 		for dx := 0; dx < displayW; dx++ {
 			hcx := dx*scale + scale/2
 			hcy := dy*scale + scale/2
-			if hcx >= hrW { hcx = hrW - 1 }
-			if hcy >= hrH { hcy = hrH - 1 }
+			if hcx >= hrW {
+				hcx = hrW - 1
+			}
+			if hcy >= hrH {
+				hcy = hrH - 1
+			}
 
-			inside    := pix[(hcy*hrW+hcx)*4+3] > 127
+			inside := pix[(hcy*hrW+hcx)*4+3] > 127
 			minDistSq := searchR*searchR + 1
 
 			for sy := -searchR; sy <= searchR; sy++ {
 				ny := hcy + sy
-				if ny < 0 || ny >= hrH { continue }
+				if ny < 0 || ny >= hrH {
+					continue
+				}
 				for sx := -searchR; sx <= searchR; sx++ {
 					dSq := sx*sx + sy*sy
-					if dSq >= minDistSq { continue }
+					if dSq >= minDistSq {
+						continue
+					}
 					nx := hcx + sx
-					if nx < 0 || nx >= hrW { continue }
+					if nx < 0 || nx >= hrW {
+						continue
+					}
 					if (pix[(ny*hrW+nx)*4+3] > 127) != inside {
 						minDistSq = dSq
 					}
@@ -2142,10 +2817,14 @@ func computeGlyphSDF(src *image.RGBA, displayW, displayH, scale int) []byte {
 			} else {
 				v = 0.5 - (d/float32(searchR))*0.5
 			}
-			if v > 1.0 { v = 1.0 }
-			if v < 0.0 { v = 0.0 }
+			if v > 1.0 {
+				v = 1.0
+			}
+			if v < 0.0 {
+				v = 0.0
+			}
 
-			b   := byte(v * 255.0)
+			b := byte(v * 255.0)
 			idx := (dy*displayW + dx) * 4
 			sdf[idx], sdf[idx+1], sdf[idx+2], sdf[idx+3] = b, b, b, 255
 		}
@@ -2154,17 +2833,17 @@ func computeGlyphSDF(src *image.RGBA, displayW, displayH, scale int) []byte {
 }
 
 func buildFontAtlas() uint32 {
-	const chars       = 96
-	const ptSize      = 16
+	const chars = 96
+	const ptSize = 16
 	// renderScale = SDF supersample; oversample stores the atlas at 3× the
 	// logical cell resolution for crisper text (storeScale=2). Logical cell
 	// size (gfx.fontCellW/H) stays in renderScale units, so on-screen size is
 	// unchanged; the per-cell UVs in text() are index fractions (idx/chars)
 	// and need no change.
 	const renderScale = 6
-	const oversample  = 3
-	const storeScale  = renderScale / oversample
-	const dpi         = 96 * renderScale
+	const oversample = 3
+	const storeScale = renderScale / oversample
+	const dpi = 96 * renderScale
 
 	f, err := opentype.Parse(gomono.TTF)
 	if err != nil {
@@ -2181,14 +2860,14 @@ func buildFontAtlas() uint32 {
 	defer face.Close()
 
 	metrics := face.Metrics()
-	ascent  := metrics.Ascent.Ceil()
-	cellH   := metrics.Height.Ceil()
+	ascent := metrics.Ascent.Ceil()
+	cellH := metrics.Height.Ceil()
 
 	adv, ok := face.GlyphAdvance('M')
 	if !ok {
 		panic("buildFontAtlas: could not measure glyph advance")
 	}
-	cellW  := adv.Ceil()
+	cellW := adv.Ceil()
 	atlasW := chars * cellW
 
 	// Rasterise all glyphs into the high-resolution image.
@@ -2205,13 +2884,13 @@ func buildFontAtlas() uint32 {
 
 	// Compute display-resolution SDF from the high-res rasterisation.
 	displayW := atlasW / storeScale
-	displayH := cellH  / storeScale
-	sdfData  := computeGlyphSDF(dst, displayW, displayH, storeScale)
+	displayH := cellH / storeScale
+	sdfData := computeGlyphSDF(dst, displayW, displayH, storeScale)
 
 	// Store logical cell dimensions (renderScale units); the atlas itself is
 	// denser (storeScale) but text() sizes glyphs from these logical values.
-	gfx.fontCellW       = cellW / renderScale
-	gfx.fontCellH       = cellH / renderScale
+	gfx.fontCellW = cellW / renderScale
+	gfx.fontCellH = cellH / renderScale
 	gfx.fontRenderScale = 1
 
 	var tex uint32
@@ -2256,14 +2935,17 @@ func compileShaderProgram(vertSrc, fragSrc string) (uint32, error) {
 	return prog, nil
 }
 
-
 // unicodeAtlasSet is the codepoint set included in every proportional font atlas.
 // Covers ASCII printable, Latin-1 Supplement (accented chars, common symbols),
 // and key Unicode: dashes, smart quotes, ellipsis, euro, trademark, arrows, bullets.
 func unicodeAtlasSet() []rune {
 	var r []rune
-	for ch := rune(32); ch <= 126; ch++ { r = append(r, ch) }   // ASCII printable
-	for ch := rune(160); ch <= 255; ch++ { r = append(r, ch) }  // Latin-1 Supplement
+	for ch := rune(32); ch <= 126; ch++ {
+		r = append(r, ch)
+	} // ASCII printable
+	for ch := rune(160); ch <= 255; ch++ {
+		r = append(r, ch)
+	} // Latin-1 Supplement
 	r = append(r,
 		'–', // – en dash
 		'—', // — em dash
@@ -2296,8 +2978,8 @@ func buildProportionalFontAtlas(ttfData []byte, ptSize float64) (*Font, error) {
 	// same storeScale=2 the SDF code is tuned for. Logical metrics use
 	// renderScale, so on-screen size/layout is unchanged.
 	const renderScale = 6
-	const dpi        = 96 * renderScale
-	const pad        = 2 // high-res px gap between glyphs to prevent SDF bleeding
+	const dpi = 96 * renderScale
+	const pad = 2 // high-res px gap between glyphs to prevent SDF bleeding
 
 	f, err := opentype.Parse(ttfData)
 	if err != nil {
@@ -2313,15 +2995,15 @@ func buildProportionalFontAtlas(ttfData []byte, ptSize float64) (*Font, error) {
 	}
 	defer face.Close()
 
-	metrics  := face.Metrics()
+	metrics := face.Metrics()
 	hrAscent := metrics.Ascent.Ceil()
-	hrLineH  := metrics.Height.Ceil()
+	hrLineH := metrics.Height.Ceil()
 
 	// Measure each requested codepoint; skip those the face doesn't carry.
 	type glyphSlot struct {
-		r       rune
-		hrAdv   int // advance + pad in high-res pixels
-		hrXOff  int // x offset in high-res atlas
+		r      rune
+		hrAdv  int // advance + pad in high-res pixels
+		hrXOff int // x offset in high-res atlas
 	}
 	var slots []glyphSlot
 	totalHrW := 0
@@ -2360,8 +3042,8 @@ func buildProportionalFontAtlas(ttfData []byte, ptSize float64) (*Font, error) {
 		storeScale = renderScale / oversample
 	}
 	displayW := totalHrW / storeScale
-	displayH := hrLineH  / storeScale
-	sdfData  := computeGlyphSDF(dst, displayW, displayH, storeScale)
+	displayH := hrLineH / storeScale
+	sdfData := computeGlyphSDF(dst, displayW, displayH, storeScale)
 
 	fnt := &Font{
 		LineH:    float32(hrLineH) / float32(renderScale), // logical line height

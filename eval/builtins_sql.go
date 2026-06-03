@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"       // registers "pgx" driver
-	_ "github.com/microsoft/go-mssqldb"       // registers "mssql" and "sqlserver" drivers
+	_ "github.com/jackc/pgx/v5/stdlib"  // registers "pgx" driver
+	_ "github.com/microsoft/go-mssqldb" // registers "mssql" and "sqlserver" drivers
 )
 
 // sqlError builds a user-visible (non-propagating) error tuple: (null, error).
@@ -168,24 +168,24 @@ func sqlRowsToArray(rows *sql.Rows) (Object, error) {
 }
 
 func init() {
-	// dbOpen(driver, dsn) → (conn, err)
+	// dbOpen — open a database connection pool and verify it with a ping.
 	//
-	// Opens a database connection pool and verifies connectivity with a ping.
-	// The pool is safe for concurrent use — share one conn across goroutines.
+	// The entry point to the database API. Returns a pooled connection that's safe
+	// to share across async tasks — open it once and reuse it. Supported drivers:
+	// "mssql" (Microsoft SQL Server; also accepts "sqlserver") and "postgres"
+	// (PostgreSQL via pgx). The dsn is the driver's native connection string, e.g.
+	// "server=host;database=mydb;user id=sa;password=Pass1!" for mssql or
+	// "postgres://user:pass@host:5432/mydb" for postgres. Always pass query
+	// parameters to dbQuery/dbExec as an array — never interpolate values into SQL.
 	//
-	// Supported drivers:
-	//   "mssql"      — Microsoft SQL Server (also accepts "sqlserver")
-	//   "postgres"   — PostgreSQL via pgx
-	//
-	// Connection strings:
-	//   MS SQL:   "server=host;database=mydb;user id=sa;password=Pass1!"
-	//             "sqlserver://sa:Pass1!@host:1433?database=mydb"
-	//   Postgres: "host=host user=user password=pass dbname=mydb sslmode=disable"
-	//             "postgres://user:pass@host:5432/mydb"
-	//
-	// Example:
-	//   conn, err = dbOpen("mssql", "server=myserver;database=Sales;user id=sa;password=Pass1!")
-	//   if err != null { println(err.message)  return }
+	// @sig     dbOpen(driver: string, dsn: string) -> (connection, error)
+	// @param   driver  "mssql"/"sqlserver" or "postgres"
+	// @param   dsn     the driver's connection string
+	// @returns a (connection, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError if driver or dsn isn't a string; returns DB_OPEN_ERROR / DB_CONNECT_ERROR in the tuple's second slot
+	// @example no-run conn, err = dbOpen("postgres", "postgres://user:pass@host:5432/mydb")
+	// @since   0.1.0
+	// @see     dbOpenWithPool, dbQuery, dbExec, dbClose
 	Builtins["dbOpen"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("dbOpen expects 2 arguments (driver, dsn)", ast.Pos{})
@@ -210,9 +210,18 @@ func init() {
 		return sqlOk(&DBConn{DB: db, Driver: driverArg.Value})
 	}}
 
-	// dbClose(conn) → null
+	// dbClose — close a database connection pool.
 	//
-	// Closes the connection pool. Best effort — call when done.
+	// Releases all pooled connections. Best-effort; call it when you're done with
+	// the connection so the database doesn't keep idle sessions open.
+	//
+	// @sig     dbClose(conn: connection) -> null
+	// @param   conn  the connection to close
+	// @returns null
+	// @errors  TypeError if the argument isn't a db connection
+	// @example no-run dbClose(conn)
+	// @since   0.1.0
+	// @see     dbOpen, dbPing
 	Builtins["dbClose"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("dbClose expects 1 argument (conn)", ast.Pos{})
@@ -225,9 +234,19 @@ func init() {
 		return NULL
 	}}
 
-	// dbPing(conn) → (null, err)
+	// dbPing — check that a database connection is still alive.
 	//
-	// Verifies the connection is still alive. Useful for health checks.
+	// Round-trips to the server to confirm the connection works — the basis of a
+	// health check. Follows the two-path pattern: (null, null) when healthy,
+	// (null, error) when the ping fails.
+	//
+	// @sig     dbPing(conn: connection) -> (null, error)
+	// @param   conn  the connection to test
+	// @returns (null, null) if alive, or (null, error) if the ping fails
+	// @errors  TypeError if the argument isn't a db connection; returns DB_PING_ERROR in the tuple's second slot
+	// @example no-run _, err = dbPing(conn)
+	// @since   0.1.0
+	// @see     dbOpen, dbClose
 	Builtins["dbPing"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("dbPing expects 1 argument (conn)", ast.Pos{})
@@ -242,19 +261,22 @@ func init() {
 		return sqlOk(NULL)
 	}}
 
-	// dbQuery(conn, sql, ?args) → (rows, err)
+	// dbQuery — run a SELECT and return every row as an array of hashes.
 	//
-	// Executes a SELECT and returns all rows as an array of hashes.
-	// Column names become hash keys. SQL NULLs become kLex null.
-	// Pass parameters as an array — never interpolate values into the SQL string.
-	// Works on both connections and transactions.
+	// Each row is a hash keyed by column name; SQL NULLs become kLex null. Pass
+	// query parameters as an array (the `?` placeholders) — never interpolate
+	// values into the SQL string, both to avoid injection and to let the driver
+	// type them correctly. Works on a connection or a transaction.
 	//
-	// Example:
-	//   rows, err = dbQuery(conn, "SELECT id, name FROM users WHERE active = ?", [true])
-	//   if err != null { println(err.message)  return }
-	//   for row in rows {
-	//       println("{row["id"]}  {row["name"]}")
-	//   }
+	// @sig     dbQuery(conn: connection|transaction, sql: string, [args: array]) -> (array, error)
+	// @param   conn  a connection or transaction
+	// @param   sql   the SELECT statement, with ? placeholders for parameters
+	// @param   args  an array of parameter values, one per placeholder (optional)
+	// @returns an (array-of-row-hashes, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on bad argument types; returns DB_QUERY_ERROR / DB_SCAN_ERROR in the tuple's second slot
+	// @example no-run rows, err = dbQuery(conn, "SELECT id, name FROM users WHERE active = ?", [true])
+	// @since   0.1.0
+	// @see     dbQueryOne, dbQueryStream, dbExec
 	Builtins["dbQuery"] = &Builtin{Fn: func(args []Object) Object {
 		// OFI #19b (2026-05-23): upper-bound the arity. sqlBuildArgs
 		// only ever reads args[2] — anything past it was silently
@@ -290,17 +312,22 @@ func init() {
 		return sqlOk(result)
 	}}
 
-	// dbQueryOne(conn, sql, ?args) → (row, err)
+	// dbQueryOne — run a SELECT and return just the first row, or null.
 	//
-	// Executes a SELECT and returns the first row as a hash, or null if no rows.
-	// Use when you expect exactly one result (e.g. lookup by primary key).
-	// Works on both connections and transactions.
+	// Like dbQuery but returns a single row hash instead of an array — for lookups
+	// you expect to match one record (e.g. by primary key). Returns null (with a
+	// null error) when no row matches, so check for that before indexing the hash.
+	// Works on a connection or a transaction.
 	//
-	// Example:
-	//   row, err = dbQueryOne(conn, "SELECT * FROM users WHERE id = ?", [42])
-	//   if err != null { println(err.message)  return }
-	//   if row == null { println("not found")  return }
-	//   println(row["name"])
+	// @sig     dbQueryOne(conn: connection|transaction, sql: string, [args: array]) -> (hash, error)
+	// @param   conn  a connection or transaction
+	// @param   sql   the SELECT statement, with ? placeholders for parameters
+	// @param   args  an array of parameter values, one per placeholder (optional)
+	// @returns a (row-hash, null) tuple, (null, null) if no rows matched, or (null, error) on failure
+	// @errors  TypeError on bad argument types; returns DB_QUERY_ERROR / DB_SCAN_ERROR in the tuple's second slot
+	// @example no-run row, err = dbQueryOne(conn, "SELECT * FROM users WHERE id = ?", [42])
+	// @since   0.1.0
+	// @see     dbQuery, dbExec
 	Builtins["dbQueryOne"] = &Builtin{Fn: func(args []Object) Object {
 		// OFI #19b: see dbQuery for the rationale.
 		if len(args) < 2 || len(args) > 3 {
@@ -349,17 +376,23 @@ func init() {
 		return sqlOk(h)
 	}}
 
-	// dbExec(conn, sql, ?args) → (rowsAffected, err)
+	// dbExec — run an INSERT, UPDATE, DELETE, or DDL statement.
 	//
-	// Executes an INSERT, UPDATE, DELETE, or DDL statement.
-	// Returns the number of rows affected as an integer (-1 if unavailable).
-	// Pass parameters as an array — never interpolate values into the SQL string.
-	// Works on both connections and transactions.
+	// For statements that change data rather than return rows. Returns the number
+	// of rows affected (-1 if the driver can't report it). Pass parameters as an
+	// array — never interpolate values into the SQL string. Works on a connection
+	// or a transaction. If you need the rows a write produces (RETURNING/OUTPUT),
+	// use dbExecReturning instead.
 	//
-	// Example:
-	//   n, err = dbExec(conn, "UPDATE accounts SET balance = ? WHERE id = ?", [1500.0, 42])
-	//   if err != null { println(err.message)  return }
-	//   println("{n} row(s) updated")
+	// @sig     dbExec(conn: connection|transaction, sql: string, [args: array]) -> (int, error)
+	// @param   conn  a connection or transaction
+	// @param   sql   the statement, with ? placeholders for parameters
+	// @param   args  an array of parameter values, one per placeholder (optional)
+	// @returns a (rowsAffected, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on bad argument types; returns DB_EXEC_ERROR in the tuple's second slot
+	// @example no-run n, err = dbExec(conn, "UPDATE accounts SET balance = ? WHERE id = ?", [1500.0, 42])
+	// @since   0.1.0
+	// @see     dbExecReturning, dbQuery, dbBulkInsert
 	Builtins["dbExec"] = &Builtin{Fn: func(args []Object) Object {
 		// OFI #19b: see dbQuery for the rationale.
 		if len(args) < 2 || len(args) > 3 {
@@ -390,20 +423,23 @@ func init() {
 		return sqlOk(&Integer{Value: int(affected)})
 	}}
 
-	// dbOpenWithPool(driver, dsn, options) → (conn, err)
+	// dbOpenWithPool — open a database connection with explicit pool tuning.
 	//
-	// Like dbOpen but with explicit connection pool configuration.
-	// Options is a hash with any of these keys (all optional):
-	//   maxIdle:     max idle connections kept in pool (default 2)
-	//   maxOpen:     max open connections (0 = unlimited, default 0)
-	//   idleTimeout: seconds before an idle connection is closed (default unlimited)
-	//   lifetime:    max seconds a connection may be reused (default unlimited)
+	// Like dbOpen, but the optional options hash configures the connection pool:
+	// "maxIdle" (idle connections kept, default 2), "maxOpen" (max open, 0 =
+	// unlimited), "idleTimeout" (seconds before an idle connection is closed),
+	// "lifetime" (max seconds a connection may be reused). Use it to size the pool
+	// for a busy service or to bound connection lifetimes behind a load balancer.
 	//
-	// Example:
-	//   conn, err = dbOpenWithPool("mssql", "server=myserver;...", {
-	//       maxIdle: 5, maxOpen: 20, idleTimeout: 300, lifetime: 3600
-	//   })
-	//   if err != null { println(err.message)  return }
+	// @sig     dbOpenWithPool(driver: string, dsn: string, [options: hash]) -> (connection, error)
+	// @param   driver   "mssql"/"sqlserver" or "postgres"
+	// @param   dsn      the driver's connection string
+	// @param   options  pool settings: maxIdle / maxOpen / idleTimeout / lifetime (optional)
+	// @returns a (connection, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on bad argument types; returns DB_OPEN_ERROR / DB_CONNECT_ERROR in the tuple's second slot
+	// @example no-run conn, err = dbOpenWithPool("mssql", dsn, {"maxIdle": 5, "maxOpen": 20})
+	// @since   0.1.0
+	// @see     dbOpen, dbSetTimeout, dbClose
 	Builtins["dbOpenWithPool"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 2 || len(args) > 3 {
 			return runtimeError("dbOpenWithPool expects 2 or 3 arguments (driver, dsn, ?options)", ast.Pos{})
@@ -455,31 +491,26 @@ func init() {
 		return sqlOk(&DBConn{DB: db, Driver: driverArg.Value})
 	}}
 
-	// dbBulkInsert(conn, table, columns, rows) → (n, err)
+	// dbBulkInsert — insert many rows in batched multi-row statements, fast.
 	//
-	// Inserts multiple rows in a single SQL statement for maximum throughput.
-	// One round trip per batch — far faster than calling dbExec in a loop.
+	// Builds multi-row INSERTs so the whole load is a handful of round trips, far
+	// faster than dbExec in a loop. `columns` is an array of column names; `rows`
+	// is an array of arrays, each a row's values in column order. Auto-batches to
+	// stay within driver parameter limits (MSSQL ~2000, PostgreSQL ~60000 params).
+	// Returns the total rows affected. WARNING: the table and column names are
+	// interpolated straight into the SQL — never pass user-controlled input there
+	// (the row values are safely parameterised; the identifiers are not).
 	//
-	//   table   — table name string (must be trusted — not parameterisable in SQL)
-	//   columns — array of column name strings
-	//   rows    — array of arrays, each sub-array is one row's values
-	//
-	// Auto-batches to stay within driver parameter limits:
-	//   MSSQL/SQL Server — 2000 params per batch
-	//   PostgreSQL        — 60000 params per batch
-	//
-	// Returns the total number of rows affected across all batches.
-	//
-	// WARNING: table and column names are interpolated directly into the SQL string.
-	// Never pass user-controlled input as table or column names.
-	//
-	// Example:
-	//   n, err = dbBulkInsert(conn, "users", ["id", "name", "age"], [
-	//       [1, "Alice", 28],
-	//       [2, "Bob",   35],
-	//   ])
-	//   if err != null { println(err.message)  return }
-	//   println("{n} rows inserted")
+	// @sig     dbBulkInsert(conn: connection|transaction, table: string, columns: array, rows: array) -> (int, error)
+	// @param   conn     a connection or transaction
+	// @param   table    the target table name (must be trusted)
+	// @param   columns  an array of column-name strings (must be trusted, non-empty)
+	// @param   rows     an array of row arrays, each holding one value per column
+	// @returns a (rowsInserted, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on bad argument types; RuntimeError if columns is empty; returns DB_EXEC_ERROR in the tuple's second slot
+	// @example no-run n, err = dbBulkInsert(conn, "users", ["id", "name"], [[1, "Alice"], [2, "Bob"]])
+	// @since   0.1.0
+	// @see     dbExec, dbExecReturning
 	Builtins["dbBulkInsert"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 {
 			return runtimeError("dbBulkInsert expects 4 arguments (conn, table, columns, rows)", ast.Pos{})
@@ -579,20 +610,23 @@ func init() {
 		return sqlOk(&Integer{Value: totalAffected})
 	}}
 
-	// dbQueryStream(conn, sql, ?args) → (channel, err)
+	// dbQueryStream — run a SELECT and stream rows one at a time over a channel.
 	//
-	// Executes a SELECT and returns a channel that yields rows one at a time.
-	// Each value sent on the channel is a hash (same format as dbQuery).
-	// Suitable for large result sets where loading all rows into memory is undesirable.
-	// Works on both connections and transactions.
-	// Break out of the for-in loop to cancel the stream early.
+	// The streaming counterpart to dbQuery: returns a channel that yields each row
+	// (a hash, same shape as dbQuery) as it arrives, so you can process a huge
+	// result set without holding it all in memory. Drain it with for-in; `break`
+	// cancels the stream early and releases the underlying cursor. Works on a
+	// connection or a transaction.
 	//
-	// Example:
-	//   stream, err = dbQueryStream(conn, "SELECT id, name FROM big_table", [])
-	//   if err != null { println(err.message)  return }
-	//   for row in stream {
-	//       println("{row["id"]}  {row["name"]}")
-	//   }
+	// @sig     dbQueryStream(conn: connection|transaction, sql: string, [args: array]) -> (channel, error)
+	// @param   conn  a connection or transaction
+	// @param   sql   the SELECT statement, with ? placeholders for parameters
+	// @param   args  an array of parameter values, one per placeholder (optional)
+	// @returns a (channel-of-row-hashes, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on bad argument types; returns DB_QUERY_ERROR in the tuple's second slot
+	// @example no-run for row in first(dbQueryStream(conn, "SELECT id FROM big_table", [])) { print(row["id"]) }
+	// @since   0.1.0
+	// @see     dbQuery, dbQueryOne
 	Builtins["dbQueryStream"] = &Builtin{Fn: func(args []Object) Object {
 		// OFI #19b: see dbQuery for the rationale.
 		if len(args) < 2 || len(args) > 3 {
@@ -651,18 +685,22 @@ func init() {
 		return sqlOk(ch)
 	}}
 
-	// dbSetTimeout(conn, ms) → null
+	// dbSetTimeout — set a per-operation timeout on a connection or transaction.
 	//
-	// Sets a per-operation timeout on a connection or transaction.
-	// All subsequent dbQuery, dbQueryOne, dbExec, dbBulkInsert calls on this
-	// conn/tx will fail with DB_TIMEOUT_ERROR if they exceed ms milliseconds.
-	// Pass 0 to remove the timeout and revert to no deadline.
-	// dbBegin propagates the conn's timeout to the new transaction automatically.
+	// After this, every dbQuery / dbQueryOne / dbExec / dbBulkInsert on the same
+	// conn or tx fails with DB_TIMEOUT_ERROR if it runs longer than `ms`
+	// milliseconds — a guard against a runaway query hanging your program. Pass 0
+	// to remove the limit. dbBegin copies the connection's timeout onto the new
+	// transaction automatically.
 	//
-	// Example:
-	//   dbSetTimeout(conn, 5000)   // 5 second limit per query
-	//   rows, err = dbQuery(conn, "SELECT * FROM large_table", [])
-	//   // → DB_TIMEOUT_ERROR if the query takes more than 5s
+	// @sig     dbSetTimeout(conn: connection|transaction, ms: int) -> null
+	// @param   conn  the connection or transaction to configure
+	// @param   ms    the per-operation timeout in milliseconds (0 to disable)
+	// @returns null
+	// @errors  TypeError if ms isn't an integer or conn isn't a connection/transaction
+	// @example no-run dbSetTimeout(conn, 5000)
+	// @since   0.1.0
+	// @see     dbOpenWithPool, dbQuery, dbExec
 	Builtins["dbSetTimeout"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("dbSetTimeout expects 2 arguments (conn, ms)", ast.Pos{})
@@ -682,22 +720,22 @@ func init() {
 		return NULL
 	}}
 
-	// dbExecReturning(conn, sql, ?args) → (rows, err)
+	// dbExecReturning — run a write that returns rows (RETURNING / OUTPUT).
 	//
-	// Executes a DML statement that returns rows — for INSERT/UPDATE/DELETE
-	// with RETURNING (PostgreSQL) or OUTPUT (SQL Server) clauses.
-	// Returns an array of hashes, same format as dbQuery.
-	// Works on both connections and transactions.
+	// For an INSERT/UPDATE/DELETE that also produces rows — PostgreSQL's RETURNING
+	// or SQL Server's OUTPUT clause — typically to read back generated IDs. Returns
+	// an array of row hashes, the same shape as dbQuery. Use plain dbExec when you
+	// only need the affected-row count. Works on a connection or a transaction.
 	//
-	// Example (PostgreSQL):
-	//   rows, err = dbExecReturning(conn, "INSERT INTO users (name) VALUES (?) RETURNING id, name", ["Alice"])
-	//   if err != null { println(err.message)  return }
-	//   id = rows[0]["id"]
-	//
-	// Example (SQL Server):
-	//   rows, err = dbExecReturning(conn, "INSERT INTO users (name) OUTPUT INSERTED.id, INSERTED.name VALUES (?)", ["Alice"])
-	//   if err != null { println(err.message)  return }
-	//   id = rows[0]["id"]
+	// @sig     dbExecReturning(conn: connection|transaction, sql: string, [args: array]) -> (array, error)
+	// @param   conn  a connection or transaction
+	// @param   sql   the DML statement with a RETURNING/OUTPUT clause and ? placeholders
+	// @param   args  an array of parameter values, one per placeholder (optional)
+	// @returns an (array-of-row-hashes, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on bad argument types; returns DB_EXEC_ERROR / DB_SCAN_ERROR in the tuple's second slot
+	// @example no-run rows, err = dbExecReturning(conn, "INSERT INTO users (name) VALUES (?) RETURNING id", ["Alice"])
+	// @since   0.1.0
+	// @see     dbExec, dbQuery
 	Builtins["dbExecReturning"] = &Builtin{Fn: func(args []Object) Object {
 		// OFI #19b: see dbQuery for the rationale.
 		if len(args) < 2 || len(args) > 3 {
@@ -729,18 +767,20 @@ func init() {
 		return sqlOk(result)
 	}}
 
-	// dbBegin(conn) → (tx, err)
+	// dbBegin — start a database transaction.
 	//
-	// Starts a database transaction. Use dbCommit or dbRollback to finish it.
-	// Pass the returned tx to dbQuery, dbExec, dbCommit, and dbRollback.
+	// Returns a transaction handle you pass to dbQuery / dbExec instead of the
+	// connection, so the statements run atomically — finish with dbCommit to apply
+	// them or dbRollback to discard them. The transaction inherits the connection's
+	// timeout (see dbSetTimeout).
 	//
-	// Example:
-	//   tx, err = dbBegin(conn)
-	//   if err != null { return }
-	//   _, err = dbExec(tx, "INSERT INTO log VALUES (?, ?)", [42, "updated"])
-	//   _, err = dbExec(tx, "UPDATE accounts SET balance = ? WHERE id = ?", [1500, 42])
-	//   if err != null { dbRollback(tx)  return }
-	//   dbCommit(tx)
+	// @sig     dbBegin(conn: connection) -> (transaction, error)
+	// @param   conn  the connection to begin a transaction on
+	// @returns a (transaction, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError if the argument isn't a db connection; returns DB_BEGIN_ERROR in the tuple's second slot
+	// @example no-run tx, err = dbBegin(conn)
+	// @since   0.1.0
+	// @see     dbCommit, dbRollback, dbExec
 	Builtins["dbBegin"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("dbBegin expects 1 argument (conn)", ast.Pos{})
@@ -758,9 +798,19 @@ func init() {
 		return sqlOk(&DBTx{Tx: tx, Driver: conn.Driver, Timeout: conn.Timeout})
 	}}
 
-	// dbCommit(tx) → (null, err)
+	// dbCommit — commit a transaction, making its changes permanent.
 	//
-	// Commits a transaction started with dbBegin.
+	// Applies everything done on the transaction since dbBegin. After commit the
+	// transaction handle is spent — don't reuse it. Two-path return: (null, null)
+	// on success, (null, error) if the commit fails.
+	//
+	// @sig     dbCommit(tx: transaction) -> (null, error)
+	// @param   tx  the transaction to commit
+	// @returns (null, null) on success, or (null, error) on failure
+	// @errors  TypeError if the argument isn't a db transaction; returns DB_COMMIT_ERROR in the tuple's second slot
+	// @example no-run _, err = dbCommit(tx)
+	// @since   0.1.0
+	// @see     dbBegin, dbRollback
 	Builtins["dbCommit"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("dbCommit expects 1 argument (tx)", ast.Pos{})
@@ -775,10 +825,20 @@ func init() {
 		return sqlOk(NULL)
 	}}
 
-	// dbRollback(tx) → (null, err)
+	// dbRollback — discard a transaction's changes.
 	//
-	// Rolls back a transaction started with dbBegin.
-	// Safe to call even if the transaction has already been committed or rolled back.
+	// Undoes everything done since dbBegin — the escape hatch when an error mid-
+	// transaction means the whole unit of work should not apply. Safe to call even
+	// if the transaction was already committed or rolled back, so it's the natural
+	// thing to call on any error path. Returns null.
+	//
+	// @sig     dbRollback(tx: transaction) -> null
+	// @param   tx  the transaction to roll back
+	// @returns null
+	// @errors  TypeError if the argument isn't a db transaction
+	// @example no-run dbRollback(tx)
+	// @since   0.1.0
+	// @see     dbBegin, dbCommit
 	Builtins["dbRollback"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("dbRollback expects 1 argument (tx)", ast.Pos{})

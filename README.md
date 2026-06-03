@@ -37,7 +37,7 @@ A full parallel security scanner built entirely in FROG. Scans codebases and git
 ./klex examples/SecretHunter/secretHunterUI.lex
 ```
 
-40 parallel workers. Native OpenGL GUI at 60fps during scan. Built in ~900 lines of FROG.
+40 parallel workers. Native OpenGL GUI at 60fps during scan. Built in ~1700 lines of FROG.
 
 > A scripted scanner with a native GUI and parallel async channels — in an interpreted language.
 

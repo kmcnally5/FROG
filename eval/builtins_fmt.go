@@ -7,22 +7,21 @@ import (
 )
 
 func init() {
-	// format(fmtStr, arg...) — printf-style string formatting.
+	// format — printf-style string formatting.
 	//
-	// Format verbs:
-	//   %d         integer decimal
-	//   %f %e %g   float (decimal / scientific / shortest); accepts INTEGER too
-	//   %s         string (strict — use %v for any type)
-	//   %t         boolean
-	//   %v         any value (calls Inspect())
-	//   %x %X      integer hex (lower / upper)
-	//   %o         integer octal
-	//   %b         integer binary
-	//   %%         literal percent sign
+	// Verbs: %d (integer), %f/%e/%g (float — decimal/scientific/shortest, ints
+	// accepted), %s (string), %t (bool), %v (any value via its display form),
+	// %x/%X (hex), %o (octal), %b (binary), %% (a literal percent). Width,
+	// precision, and flags (-+0 space) follow standard printf.
 	//
-	// Width, precision, and flags (-+0 space) follow standard printf conventions.
-	// Too few or too many arguments is a RuntimeError.
-	// Wrong type for a verb is a RuntimeError.
+	// @sig     format(fmtStr: string, args...: any) -> string
+	// @param   fmtStr  the format string containing % verbs
+	// @param   args    one value per verb, in order
+	// @returns the formatted string
+	// @errors  TypeError if fmtStr isn't a string; RuntimeError on wrong argument count or a type that doesn't match its verb
+	// @example format("%s = %d", "x", 42)   → x = 42
+	// @since   0.1.0
+	// @see     str, println
 	Builtins["format"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 1 {
 			return runtimeError("format expects at least 1 argument", ast.Pos{})

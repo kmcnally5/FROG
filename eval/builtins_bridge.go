@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"bufio"
 	"sort"
 	"strings"
 	"sync"
@@ -615,15 +615,15 @@ func readTimeoutKey(h *Hash, key string) time.Duration {
 //
 // Shutdown paths it has to cover:
 //   - Consumer break       → streamCh.done closes; we still need to send
-//                             {"cancel": N} to the bridge so it stops yielding.
+//     {"cancel": N} to the bridge so it stops yielding.
 //   - Idle timeout fires   → no item received for idle duration. Inject a
-//                             BRIDGE_TIMEOUT error before close so the consumer
-//                             distinguishes timeout from clean end.
+//     BRIDGE_TIMEOUT error before close so the consumer
+//     distinguishes timeout from clean end.
 //   - Total timeout fires  → same as idle but with a different message.
 //   - Natural end          → dispatchBridgeLine removed the stream from
-//                             b.streams and closed streamCh.done; we see the
-//                             close, find !stillLive, exit without sending
-//                             a stale cancel.
+//     b.streams and closed streamCh.done; we see the
+//     close, find !stillLive, exit without sending
+//     a stale cancel.
 //
 // resetCh is signalled by dispatchBridgeLine on every stream item; we drain
 // it and reset the idle timer. Nil when idle timeout is 0 (no idle watch).
@@ -754,7 +754,7 @@ func fireStreamTimeout(b *Bridge, id int, streamCh *Channel, code, msg string) {
 func dispatchBridgeLine(b *Bridge, resp *bridgeResponse) {
 	msg := resp.msg
 
-	_, hasID    := msg["id"]
+	_, hasID := msg["id"]
 	notifData, hasNotif := msg["notif"]
 
 	if hasNotif && !hasID {
@@ -928,10 +928,10 @@ var (
 // sentinel file. Caches its result in dest under the supplied sync.Once.
 //
 // Search order (first match wins) mirrors kLex's overall path resolution:
-//   1. $KLEX_PATH/stdlib/<lang>    (KLEX_PATH = directory containing stdlib/)
-//   2. $CWD/stdlib/<lang>          (running from a project checkout)
-//   3. <exe-dir>/stdlib/<lang>     (binary install)
-//   4. <exe-parent>/stdlib/<lang>  (bin/klex-style install)
+//  1. $KLEX_PATH/stdlib/<lang>    (KLEX_PATH = directory containing stdlib/)
+//  2. $CWD/stdlib/<lang>          (running from a project checkout)
+//  3. <exe-dir>/stdlib/<lang>     (binary install)
+//  4. <exe-parent>/stdlib/<lang>  (bin/klex-style install)
 func klexHelperPath(once *sync.Once, dest *string, lang, sentinel string) string {
 	once.Do(func() {
 		candidates := []string{}
@@ -1303,41 +1303,31 @@ func spawnBridge(cmdName string, cmdArgs []string, opts bridgeOpts) (*Bridge, Ob
 
 func init() {
 
-	// ── bridgeOpen(transport: hash) → (bridge, err) ──────────────────────────
+	// bridgeOpen — open a native bridge to run code in another language/process.
 	//
-	// Transport-polymorphic bridge constructor. Dispatches on transport.kind:
-	//   "subprocess" — spawn a subprocess and speak the kLex bridge protocol
-	//                  over stdin/stdout (the only kind implemented today)
-	//   "worker"     — Web Worker (browser only; Phase 3 — not yet implemented)
+	// A bridge is the door out of kLex to a native helper (Python, Node, a C
+	// tool…) that speaks the line-delimited-JSON kLex bridge protocol over
+	// stdin/stdout. Call its exposed functions with bridgeCall. The constructor
+	// is transport-polymorphic, dispatching on transport.kind:
+	//   "subprocess" — spawn a subprocess (the only kind implemented today)
+	//   "worker"     — Web Worker (browser; not yet implemented)
 	//   "remote"     — TCP/QUIC remote bridge (future)
 	//
-	// Named `bridgeOpen` (not `bridge`) to match the bridgeXxx family
-	// (bridgeClose / bridgeCall / bridgeStream / …) and to avoid shadowing
-	// the natural variable name. `let bridge, err = bridgeOpen(...)` is the
-	// idiomatic call shape.
+	// Subprocess transport hash keys: "kind" ("subprocess", required), "cmd"
+	// (executable, required), "args" (argv tail), "timeout_seconds" (default
+	// per-call timeout), "max_response_mb" (wire-frame cap, 1..256), "stderr_log"
+	// (mirror the bridge's stderr to this path). Key validation is STRICT — any
+	// unlisted key fails loud with BRIDGE_TRANSPORT_MISCONFIGURED naming it, so a
+	// typo like "tiemout_seconds" errors rather than silently doing nothing. See
+	// docs/BRIDGE_API_DESIGN.MD for the design rationale.
 	//
-	// Subprocess transport hash schema:
-	//   kind:             "subprocess"  (required)
-	//   cmd:              string         (required — executable name or path)
-	//   args:             [string, ...]  (optional — argv tail)
-	//   timeout_seconds:  number         (optional — default per-call timeout)
-	//   max_response_mb:  int            (optional — wire-frame cap, 1..256)
-	//   stderr_log:       string         (optional — mirror bridge stderr here)
-	//
-	// Per FROG decision #5, key validation is STRICT — any key not listed
-	// above yields BRIDGE_TRANSPORT_MISCONFIGURED naming the bad key, so
-	// typos like "tiemout_seconds" fail loud instead of silently disabling
-	// the option.
-	//
-	// Example (kLex hash literals require quoted string keys):
-	//   let bridge, err = bridgeOpen({
-	//       "kind": "subprocess",
-	//       "cmd": "python3",
-	//       "args": ["yara_bridge.py"],
-	//       "timeout_seconds": 30
-	//   })
-	//
-	// See docs/BRIDGE_API_DESIGN.MD for the full design rationale.
+	// @sig     bridgeOpen(transport: hash) -> (Bridge, error)
+	// @param   transport  a hash describing the transport (see above)
+	// @returns a (bridge, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError if transport isn't a hash; returns BRIDGE_TRANSPORT_MISCONFIGURED / spawn errors in the tuple's second slot
+	// @example no-run bridge, err = bridgeOpen({"kind": "subprocess", "cmd": "python3", "args": ["yara_bridge.py"]})
+	// @since   0.1.0
+	// @see     bridgeCall, bridgeClose, bridgeStream, bridgePool
 	Builtins["bridgeOpen"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bridgeOpen expects 1 argument (transport hash)", ast.Pos{})
@@ -1349,10 +1339,25 @@ func init() {
 		return spawnBridgeFromTransport(transport)
 	}}
 
-	// ── bridgeCall(bridge, fn, args, timeoutSec?) → (result, err) ────────────
+	// bridgeCall — call a function exposed by a native bridge and get its result.
 	//
-	// Concurrent-call safe: multiple async tasks may call the same bridge
-	// simultaneously. Writes are serialised (writeMu) but waits are per-call.
+	// Sends fn(args) across the bridge and blocks until the reply arrives or the
+	// timeout fires. args is an array of kLex values, marshalled to JSON per the
+	// handler's schema (fetched and cached on first use, so argument-count/type
+	// mismatches fail before hitting the wire). Concurrent-call safe: many async
+	// tasks may call the same bridge at once — writes are serialised, waits are
+	// per-call. An optional timeoutSec overrides the bridge's default for this call.
+	//
+	// @sig     bridgeCall(bridge: Bridge, fn: string, args: array, [timeoutSec: number]) -> (any, error)
+	// @param   bridge      a bridge from bridgeOpen
+	// @param   fn          the name of the remote function to invoke
+	// @param   args        an array of arguments to pass
+	// @param   timeoutSec  per-call timeout override in seconds (optional)
+	// @returns a (result, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on wrong argument types; returns timeout / schema / remote errors in the tuple's second slot
+	// @example no-run result, err = bridgeCall(bridge, "scan", [path])
+	// @since   0.1.0
+	// @see     bridgeOpen, bridgeStream, bridgeSchema, bridgeClose
 	Builtins["bridgeCall"] = &Builtin{Fn: func(args []Object) (result Object) {
 		if len(args) != 3 && len(args) != 4 {
 			return runtimeError("bridgeCall expects 3 or 4 arguments (bridge, fn, args, timeoutSec?)", ast.Pos{})
@@ -1578,7 +1583,20 @@ func init() {
 		return &Tuple{Elements: []Object{callResult, NULL}}
 	}}
 
-	// ── bridgeClose(bridge) → null ────────────────────────────────────────────
+	// bridgeClose — shut down a bridge and reap its subprocess.
+	//
+	// Closes the bridge's stdin so a well-behaved helper sees EOF and exits, then
+	// waits up to 2s for a clean exit before force-killing the process group. Any
+	// in-flight bridgeCalls are unblocked with BRIDGE_CLOSED. Idempotent — closing
+	// an already-closed bridge is a no-op. Always close bridges you open.
+	//
+	// @sig     bridgeClose(bridge: Bridge) -> null
+	// @param   bridge  the bridge to close
+	// @returns null
+	// @errors  TypeError if the argument isn't a bridge
+	// @example no-run bridgeClose(bridge)
+	// @since   0.1.0
+	// @see     bridgeOpen, bridgeCall
 	Builtins["bridgeClose"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bridgeClose expects 1 argument (bridge)", ast.Pos{})
@@ -1626,25 +1644,22 @@ func init() {
 		return NULL
 	}}
 
-	// ── bridgeNotifications(bridge) → channel ────────────────────────────────
+	// bridgeNotifications — the channel of out-of-band notifications from a bridge.
 	//
-	// Returns the notification channel for this bridge. The channel receives
-	// every {"notif": ...} message the bridge subprocess emits. The channel is
-	// closed when the bridge closes (clean EOF for for-in loops).
+	// Returns a channel that receives every {"notif": ...} message the helper
+	// emits — the way a long-running call reports progress without blocking the
+	// reply. Drain it from an async task with recv or for-in; it closes cleanly
+	// when the bridge closes. Notifications emitted before the first call to this
+	// builtin are buffered (256 items, drop-newest), so call it before kicking off
+	// the long operation.
 	//
-	// Call this before starting the long operation; notifications emitted
-	// before the first call are buffered (256 items, drop-newest).
-	//
-	// Example:
-	//   notifCh = bridgeNotifications(bridge)
-	//   async(fn() {
-	//       msg, ok = recv(notifCh)
-	//       while ok {
-	//           println(msg["done"])
-	//           msg, ok = recv(notifCh)
-	//       }
-	//   })
-	//   result, err = bridgeCall(bridge, "long_job", [arg])
+	// @sig     bridgeNotifications(bridge: Bridge) -> channel
+	// @param   bridge  the bridge to observe
+	// @returns the bridge's notification channel
+	// @errors  TypeError if the argument isn't a bridge
+	// @example no-run notifCh = bridgeNotifications(bridge)
+	// @since   0.1.0
+	// @see     bridgeCall, bridgeStream
 	Builtins["bridgeNotifications"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bridgeNotifications expects 1 argument (bridge)", ast.Pos{})
@@ -1663,7 +1678,20 @@ func init() {
 		return b.notifCh
 	}}
 
-	// ── bridgeStderr(bridge) → array of strings ───────────────────────────────
+	// bridgeStderr — the captured stderr lines from a bridge subprocess.
+	//
+	// Returns a snapshot of the helper's recent stderr output as an array of
+	// lines (a bounded tail buffer, so it won't grow without limit). The first
+	// place to look when a bridge misbehaves — tracebacks and warnings the helper
+	// printed land here. Empty array if nothing has been captured.
+	//
+	// @sig     bridgeStderr(bridge: Bridge) -> array
+	// @param   bridge  the bridge to inspect
+	// @returns an array of stderr line strings (empty if none)
+	// @errors  TypeError if the argument isn't a bridge
+	// @example no-run bridgeStderr(bridge)
+	// @since   0.1.0
+	// @see     bridgeInfo, bridgeMetrics
 	Builtins["bridgeStderr"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bridgeStderr expects 1 argument (bridge)", ast.Pos{})
@@ -1687,16 +1715,23 @@ func init() {
 		return &Array{Elements: out}
 	}}
 
-	// ── bridgeSchema(bridge, fn?) → hash | null ───────────────────────────────
+	// bridgeSchema — introspect the function schemas a bridge declares.
 	//
-	// Returns the schema map declared by the bridge (via __schema__) for
-	// introspection. With one argument, returns a hash of every handler keyed
-	// by name. With two arguments, returns the single handler's schema or
-	// null if it isn't declared. Returns null overall when the bridge
-	// doesn't expose schemas.
+	// Returns the schema the helper advertised via __schema__. With one argument,
+	// a hash of every handler keyed by name; with two, just the named handler's
+	// schema (or null if it isn't declared). Returns null overall if the bridge
+	// exposes no schemas. Each schema hash is shaped { "args": [[name, type], …],
+	// "returns": type }. bridgeCall uses these to validate arguments before they
+	// hit the wire.
 	//
-	// Each schema hash is shaped:
-	//   { "args": [[name, type], ...], "returns": type }
+	// @sig     bridgeSchema(bridge: Bridge, [fn: string]) -> hash
+	// @param   bridge  the bridge to introspect
+	// @param   fn      a single handler name to fetch (optional; omit for all)
+	// @returns a hash of schemas (or one schema), or null if unavailable
+	// @errors  TypeError if bridge isn't a bridge or fn isn't a string
+	// @example no-run bridgeSchema(bridge, "scan")
+	// @since   0.1.0
+	// @see     bridgeCall, bridgeInfo
 	Builtins["bridgeSchema"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 && len(args) != 2 {
 			return runtimeError("bridgeSchema expects 1 or 2 arguments (bridge, fn?)", ast.Pos{})
@@ -1722,22 +1757,22 @@ func init() {
 		return fnSchemaToHash(fn)
 	}}
 
-	// ── bridgeInfo(bridge) → hash ────────────────────────────────────────────
+	// bridgeInfo — the protocol metadata negotiated with a bridge at startup.
 	//
-	// Returns the protocol metadata negotiated during the __hello__ handshake:
-	// protocol version, the set of capabilities both sides agreed on, and
-	// optional helper identity fields. A bridge that didn't reply to __hello__
-	// is reported as protocol 0 with an empty capabilities array — backward
-	// compatible by construction.
+	// Returns what the __hello__ handshake agreed on: the protocol version, the
+	// capabilities both sides share (sorted, so the array is stable across runs),
+	// and helper identity fields. A helper that never answered __hello__ reports
+	// as protocol 0 with empty capabilities — backward-compatible by construction.
+	// The returned hash has keys "protocol", "capabilities", "helper", "language",
+	// "language_version".
 	//
-	// Shape:
-	//   {
-	//     "protocol":         1,
-	//     "capabilities":     ["schema", "binary"],
-	//     "helper":           "klex_bridge.py/0.7.0",
-	//     "language":         "python",
-	//     "language_version": "3.12.4"
-	//   }
+	// @sig     bridgeInfo(bridge: Bridge) -> hash
+	// @param   bridge  the bridge to inspect
+	// @returns a hash of negotiated protocol metadata
+	// @errors  TypeError if the argument isn't a bridge
+	// @example no-run bridgeInfo(bridge)
+	// @since   0.1.0
+	// @see     bridgeSchema, bridgeMetrics, bridgeStderr
 	Builtins["bridgeInfo"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bridgeInfo expects 1 argument (bridge)", ast.Pos{})
@@ -1783,31 +1818,22 @@ func init() {
 		return h
 	}}
 
-	// ── bridgeMetrics(bridge) → hash ─────────────────────────────────────────
+	// bridgeMetrics — a snapshot of a bridge's observability counters and latencies.
 	//
-	// Snapshot the bridge's observability counters and per-function latency
-	// percentiles. Cheap to call (one mutex acquisition + one sort per
-	// function on the latency samples) so a dashboard polling every second
-	// adds no measurable overhead.
+	// Returns call counters (total / in-flight / failed), stream count, bytes
+	// sent and received, an errors-by-code breakdown, and per-function latency
+	// percentiles (p50/p95/p99 in ms, from a 256-sample circular buffer of recent
+	// calls). Cheap enough to poll once a second for a live dashboard. Top-level
+	// keys: "calls_total", "calls_inflight", "calls_failed", "streams_total",
+	// "bytes_sent", "bytes_received", "errors_by_code", "per_function".
 	//
-	// Shape:
-	//   {
-	//     "calls_total":     N,
-	//     "calls_inflight":  M,
-	//     "calls_failed":    K,
-	//     "streams_total":   S,
-	//     "bytes_sent":      bytesOut,
-	//     "bytes_received":  bytesIn,
-	//     "errors_by_code":  {"BRIDGE_TIMEOUT": 4, ...},
-	//     "per_function":    {
-	//        "add":   {"count": 230, "errors": 2, "p50_ms": 12.0, "p95_ms": 84.0, "p99_ms": 230.0},
-	//        ...
-	//     }
-	//   }
-	//
-	// Percentiles are computed from a 256-sample circular buffer of recent
-	// call latencies (in milliseconds). With fewer than 256 calls, the
-	// percentiles use what's available.
+	// @sig     bridgeMetrics(bridge: Bridge) -> hash
+	// @param   bridge  the bridge to measure
+	// @returns a hash of counters and per-function latency percentiles
+	// @errors  TypeError if the argument isn't a bridge
+	// @example no-run bridgeMetrics(bridge)
+	// @since   0.1.0
+	// @see     bridgeInfo, bridgeStderr, bridgePoolHealth
 	Builtins["bridgeMetrics"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bridgeMetrics expects 1 argument (bridge)", ast.Pos{})
@@ -1907,27 +1933,27 @@ func init() {
 		return out
 	}}
 
-	// ── bridgeStream(bridge, fn, args) → (channel, err) ─────────────────────
+	// bridgeStream — call a streaming bridge handler, getting a channel of items.
 	//
-	// Calls a STREAMING handler on the bridge subprocess. Returns immediately
-	// with a kLex channel; the bridge produces items in the background and
-	// the reader goroutine delivers each to the channel.
+	// The streaming counterpart to bridgeCall: returns immediately with a channel
+	// while the helper produces items in the background. Drain it with
+	// `for item in ch { ... }`; the channel closes on clean end-of-stream. A
+	// mid-stream failure arrives as the final item — an Error value you can detect
+	// with type(item) == "ERROR". Breaking out of the loop stops delivery (further
+	// items are dropped). The bridge handler must be registered as streaming
+	// (@stream_handler / stream=True); calling a non-streaming handler this way
+	// returns BRIDGE_ERROR. An optional 4th arg sets a timeout.
 	//
-	// Consumers drain via `for item in ch { ... }`. The channel closes on
-	// clean end-of-stream. Mid-stream errors are delivered as the final
-	// item — an *Error value the consumer can detect with `type(item) ==
-	// "ERROR"`. Breaking out of the for-in loop cancels delivery (further
-	// items are dropped) but does not currently signal the bridge to stop
-	// producing — that's a Phase 3.5 follow-up.
-	//
-	// The handler on the bridge side must be registered with @stream_handler
-	// (or register(..., stream=True)). Calling a non-streaming handler via
-	// bridgeStream returns a BRIDGE_ERROR with a clear message.
-	//
-	// Errors returned in the second tuple element (before any items arrive):
-	//   BRIDGE_CLOSED   — bridge already closed or stdin write failed
-	//   BRIDGE_TAINTED  — bridge is unusable after a prior fatal error
-	//   BRIDGE_ERROR    — marshal failed
+	// @sig     bridgeStream(bridge: Bridge, fn: string, args: array, [timeout: number]) -> (channel, error)
+	// @param   bridge   a bridge from bridgeOpen
+	// @param   fn       the streaming handler name to invoke
+	// @param   args     an array of arguments to pass
+	// @param   timeout  per-call timeout override in seconds (optional)
+	// @returns a (channel, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError on wrong argument types; returns BRIDGE_CLOSED / BRIDGE_TAINTED / BRIDGE_ERROR in the tuple's second slot before any items arrive
+	// @example no-run for item in first(bridgeStream(bridge, "tail", [path])) { print(item) }
+	// @since   0.1.0
+	// @see     bridgeCall, bridgeOpen, bridgePoolStream
 	Builtins["bridgeStream"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 3 || len(args) > 4 {
 			return runtimeError("bridgeStream expects 3 or 4 arguments (bridge, fn, args, timeout?)", ast.Pos{})

@@ -7,10 +7,19 @@ import (
 )
 
 func init() {
-	// sort returns a new array sorted in ascending order.
-	// Works for arrays of integers, floats, or strings (not mixed element types).
-	// Uses a stable sort — equal elements keep their original relative order.
-	// Usage: sort([3, 1, 4, 1, 5]) → [1, 1, 3, 4, 5]
+	// sort — a new array sorted in ascending order (stable).
+	//
+	// Works on arrays of integers, floats, or strings (numbers may mix with each
+	// other; strings can't mix with numbers). Stable: equal elements keep their
+	// relative order. The input is not modified.
+	//
+	// @sig     sort(arr: array) -> array
+	// @param   arr  an array of all-numeric or all-string elements
+	// @returns a new array sorted ascending
+	// @errors  TypeError if elements aren't mutually comparable (e.g. a string mixed with numbers)
+	// @example sort([3, 1, 4, 1, 5])   → [1, 1, 3, 4, 5]
+	// @since   0.1.0
+	// @see     sortBy
 	Builtins["sort"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("sort expects 1 argument", ast.Pos{})
@@ -64,10 +73,19 @@ func init() {
 		return &Array{Elements: out}
 	}}
 
-	// sortBy returns a new array sorted using a comparator function.
-	// compareFn(a, b) must return true when a should appear before b.
-	// Uses a stable sort — equal elements keep their original relative order.
-	// Usage: sortBy(people, fn(a, b) { return a["age"] < b["age"] })
+	// sortBy — a new array sorted by a comparator function (stable).
+	//
+	// compareFn(a, b) returns true when a should come before b. Stable: equal
+	// elements keep their relative order. The input is not modified.
+	//
+	// @sig     sortBy(arr: array, compareFn: function) -> array
+	// @param   arr        the array to sort
+	// @param   compareFn  fn(a, b) returning true when a should precede b
+	// @returns a new array ordered by compareFn
+	// @errors  TypeError if arr isn't an array or compareFn returns a non-bool; any error compareFn raises propagates
+	// @example sortBy([3, 1, 2], fn(a, b) { a < b })   → [1, 2, 3]
+	// @since   0.1.0
+	// @see     sort
 	Builtins["sortBy"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("sortBy expects 2 arguments", ast.Pos{})

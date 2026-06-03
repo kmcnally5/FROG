@@ -6,10 +6,16 @@ import (
 )
 
 func init() {
-	// bitAnd(a, b) → integer
-	// Bitwise AND of two integers. Both operands must be integer.
-	// bitAnd(0b1100, 0b1010) → 8  (0b1000)
-	// bitAnd(0xFF, 0x0F)     → 15 (0x0F)
+	// bitAnd — bitwise AND of two integers.
+	//
+	// @sig     bitAnd(a: int, b: int) -> int
+	// @param   a  first integer
+	// @param   b  second integer
+	// @returns a & b
+	// @errors  TypeError if either argument is not an integer
+	// @example bitAnd(12, 10)   → 8
+	// @since   0.1.0
+	// @see     bitOr, bitXor, bitNot
 	Builtins["bitAnd"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("bitAnd expects 2 arguments", ast.Pos{})
@@ -23,9 +29,16 @@ func init() {
 		return &Integer{Value: a.Value & b.Value}
 	}}
 
-	// bitOr(a, b) → integer
-	// Bitwise OR of two integers. Both operands must be integer.
-	// bitOr(0b1100, 0b0011) → 15 (0b1111)
+	// bitOr — bitwise OR of two integers.
+	//
+	// @sig     bitOr(a: int, b: int) -> int
+	// @param   a  first integer
+	// @param   b  second integer
+	// @returns a | b
+	// @errors  TypeError if either argument is not an integer
+	// @example bitOr(12, 3)   → 15
+	// @since   0.1.0
+	// @see     bitAnd, bitXor, bitNot
 	Builtins["bitOr"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("bitOr expects 2 arguments", ast.Pos{})
@@ -39,9 +52,16 @@ func init() {
 		return &Integer{Value: a.Value | b.Value}
 	}}
 
-	// bitXor(a, b) → integer
-	// Bitwise XOR of two integers. Both operands must be integer.
-	// bitXor(0b1100, 0b1010) → 6  (0b0110)
+	// bitXor — bitwise XOR of two integers.
+	//
+	// @sig     bitXor(a: int, b: int) -> int
+	// @param   a  first integer
+	// @param   b  second integer
+	// @returns a ^ b
+	// @errors  TypeError if either argument is not an integer
+	// @example bitXor(12, 10)   → 6
+	// @since   0.1.0
+	// @see     bitAnd, bitOr, bitNot
 	Builtins["bitXor"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("bitXor expects 2 arguments", ast.Pos{})
@@ -55,10 +75,16 @@ func init() {
 		return &Integer{Value: a.Value ^ b.Value}
 	}}
 
-	// bitNot(x) → integer
-	// Bitwise NOT (ones' complement) of an integer.
-	// bitNot(0)  → -1
-	// bitNot(-1) → 0
+	// bitNot — bitwise NOT (ones' complement) of an integer.
+	//
+	// @sig     bitNot(x: int) -> int
+	// @param   x  the integer to invert
+	// @returns ^x — every bit flipped, i.e. -(x + 1)
+	// @errors  TypeError if x is not an integer
+	// @example bitNot(0)    → -1
+	// @example bitNot(-1)   → 0
+	// @since   0.1.0
+	// @see     bitAnd, bitOr, bitXor
 	Builtins["bitNot"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("bitNot expects 1 argument", ast.Pos{})
@@ -71,11 +97,19 @@ func init() {
 		return &Integer{Value: ^a.Value}
 	}}
 
-	// bitShiftLeft(x, n) → integer
-	// Shift x left by n bits. Equivalent to x * 2^n for non-negative x.
-	// n must be a non-negative integer.
-	// bitShiftLeft(1, 4)  → 16
-	// bitShiftLeft(3, 8)  → 768
+	// bitShiftLeft — shift x left by n bits.
+	//
+	// Equivalent to x * 2^n for non-negative x.
+	//
+	// @sig     bitShiftLeft(x: int, n: int) -> int
+	// @param   x  the integer to shift
+	// @param   n  the number of bits to shift by (non-negative)
+	// @returns x << n
+	// @errors  TypeError if either argument is not an integer; RuntimeError if n is negative
+	// @example bitShiftLeft(1, 4)   → 16
+	// @example bitShiftLeft(3, 8)   → 768
+	// @since   0.1.0
+	// @see     bitShiftRight
 	Builtins["bitShiftLeft"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("bitShiftLeft expects 2 arguments", ast.Pos{})
@@ -92,12 +126,20 @@ func init() {
 		return &Integer{Value: a.Value << uint(n.Value)}
 	}}
 
-	// bitShiftRight(x, n) → integer
-	// Arithmetic right shift of x by n bits. Sign bit is preserved.
-	// Equivalent to x / 2^n for non-negative x.
-	// n must be a non-negative integer.
-	// bitShiftRight(16, 4) → 1
-	// bitShiftRight(256, 3) → 32
+	// bitShiftRight — arithmetic right shift of x by n bits (sign-preserving).
+	//
+	// Equivalent to x / 2^n for non-negative x; the sign bit is preserved for
+	// negative x.
+	//
+	// @sig     bitShiftRight(x: int, n: int) -> int
+	// @param   x  the integer to shift
+	// @param   n  the number of bits to shift by (non-negative)
+	// @returns x >> n
+	// @errors  TypeError if either argument is not an integer; RuntimeError if n is negative
+	// @example bitShiftRight(16, 4)    → 1
+	// @example bitShiftRight(256, 3)   → 32
+	// @since   0.1.0
+	// @see     bitShiftLeft
 	Builtins["bitShiftRight"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("bitShiftRight expects 2 arguments", ast.Pos{})

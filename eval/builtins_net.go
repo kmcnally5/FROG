@@ -9,10 +9,21 @@ import (
 )
 
 func init() {
-	// tcpDial opens a TCP connection to host:port.
-	// Returns (conn, null) on success, (null, error) on failure.
-	// Usage: conn, err = tcpDial("example.com", 80)
-
+	// tcpDial — open a TCP connection to host:port.
+	//
+	// The client side of the networking API. Follows the standard two-path
+	// pattern: on success the first tuple element is a connection and the second
+	// is null; on failure the first is null and the second is an error. Read and
+	// write with netRead/netWrite, then netClose.
+	//
+	// @sig     tcpDial(host: string, port: int) -> (connection, error)
+	// @param   host  the hostname or IP to connect to
+	// @param   port  the TCP port
+	// @returns a (connection, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError if host isn't a string or port isn't an integer; returns a connection error in the tuple's second slot if the dial fails
+	// @example no-run conn, err = tcpDial("example.com", 80)
+	// @since   0.1.0
+	// @see     tcpListen, netRead, netWrite, netClose
 	Builtins["tcpDial"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("tcpDial expects 2 arguments (host, port)", ast.Pos{})
@@ -33,10 +44,22 @@ func init() {
 		return &Tuple{Elements: []Object{&NetConn{Conn: conn}, NULL}}
 	}}
 
-	// tcpListen starts a TCP server on host:port and returns a Channel of NetConn.
-	// Each accepted connection is sent as a NetConn value.
-	// Cancelling the channel (break in a for-in loop) stops the server.
-	// Usage: for conn in tcpListen("0.0.0.0", 8080) { async(fn() { handle(conn) }) }
+	// tcpListen — start a TCP server, yielding accepted connections on a channel.
+	//
+	// The server side. Returns a channel that delivers one connection per client;
+	// iterate it with for-in to accept, and `break` out of the loop (which cancels
+	// the channel) to stop the server and release the port. Spawn an async task per
+	// connection to handle many clients concurrently. Unlike the dial/read/write
+	// builtins it returns the channel directly, not a tuple.
+	//
+	// @sig     tcpListen(host: string, port: int) -> channel
+	// @param   host  the interface to bind (e.g. "0.0.0.0" for all)
+	// @param   port  the TCP port to listen on
+	// @returns a channel of incoming connections
+	// @errors  TypeError if host isn't a string or port isn't an integer; RuntimeError if the port can't be bound
+	// @example no-run for conn in tcpListen("0.0.0.0", 8080) { async(fn() { handle(conn) }) }
+	// @since   0.1.0
+	// @see     tcpDial, netRead, netWrite, netClose
 	Builtins["tcpListen"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("tcpListen expects 2 arguments (host, port)", ast.Pos{})
@@ -86,9 +109,20 @@ func init() {
 		return ch
 	}}
 
-	// netRead reads up to maxBytes from conn.
-	// Returns (string, null) on success or EOF, (null, error) on failure.
-	// Usage: data, err = netRead(conn, 4096)
+	// netRead — read up to maxBytes from a connection.
+	//
+	// Returns whatever bytes are available, up to maxBytes — a single read isn't
+	// guaranteed to fill the buffer, so loop until you have a full message. EOF is
+	// not an error: at end of stream you get an empty string and a null error.
+	//
+	// @sig     netRead(conn: connection, maxBytes: int) -> (string, error)
+	// @param   conn      a connection from tcpDial or tcpListen
+	// @param   maxBytes  the maximum number of bytes to read (must be positive)
+	// @returns a (data, null) tuple on success (data is "" at EOF), or (null, error) on failure
+	// @errors  TypeError if conn isn't a connection or maxBytes isn't an integer; RuntimeError if maxBytes <= 0; returns a read error in the tuple's second slot
+	// @example no-run data, err = netRead(conn, 4096)
+	// @since   0.1.0
+	// @see     netWrite, tcpDial, netClose
 	Builtins["netRead"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("netRead expects 2 arguments (conn, maxBytes)", ast.Pos{})
@@ -112,9 +146,20 @@ func init() {
 		return &Tuple{Elements: []Object{&String{Value: string(buf[:n])}, NULL}}
 	}}
 
-	// netWrite sends data to conn.
-	// Returns (null, null) on success, (null, error) on failure.
-	// Usage: _, err = netWrite(conn, "hello\n")
+	// netWrite — send data over a connection.
+	//
+	// Writes the whole string before returning. On success both tuple elements
+	// are null (there's no useful value to return); on failure the second element
+	// is the error.
+	//
+	// @sig     netWrite(conn: connection, data: string) -> (null, error)
+	// @param   conn  a connection from tcpDial or tcpListen
+	// @param   data  the string to send
+	// @returns (null, null) on success, or (null, error) on failure
+	// @errors  TypeError if conn isn't a connection or data isn't a string; returns a write error in the tuple's second slot
+	// @example no-run _, err = netWrite(conn, "hello\n")
+	// @since   0.1.0
+	// @see     netRead, tcpDial, netClose
 	Builtins["netWrite"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("netWrite expects 2 arguments (conn, data)", ast.Pos{})
@@ -134,8 +179,18 @@ func init() {
 		return &Tuple{Elements: []Object{NULL, NULL}}
 	}}
 
-	// netClose closes a NetConn.
-	// Usage: netClose(conn)
+	// netClose — close a connection and release its resources.
+	//
+	// Idempotent: closing an already-closed connection is a no-op. Always close
+	// connections you open so file descriptors aren't leaked.
+	//
+	// @sig     netClose(conn: connection) -> null
+	// @param   conn  the connection to close
+	// @returns null
+	// @errors  TypeError if conn isn't a connection
+	// @example no-run netClose(conn)
+	// @since   0.1.0
+	// @see     tcpDial, netRead, netWrite
 	Builtins["netClose"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("netClose expects 1 argument", ast.Pos{})
@@ -151,9 +206,19 @@ func init() {
 		return NULL
 	}}
 
-	// dnsLookup resolves a hostname to an array of IP address strings.
-	// Returns (addresses, null) on success, (null, error) on failure.
-	// Usage: addrs, err = dnsLookup("example.com")
+	// dnsLookup — resolve a hostname to its IP addresses.
+	//
+	// Returns every address the resolver finds (both IPv4 and IPv6) as an array
+	// of strings. Follows the two-path pattern: (addresses, null) on success or
+	// (null, error) on failure.
+	//
+	// @sig     dnsLookup(hostname: string) -> (array, error)
+	// @param   hostname  the name to resolve
+	// @returns an (addresses, null) tuple on success, or (null, error) on failure
+	// @errors  TypeError if hostname isn't a string; returns a resolver error in the tuple's second slot if lookup fails
+	// @example no-run addrs, err = dnsLookup("example.com")
+	// @since   0.1.0
+	// @see     tcpDial, tcpListen
 	Builtins["dnsLookup"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("dnsLookup expects 1 argument", ast.Pos{})

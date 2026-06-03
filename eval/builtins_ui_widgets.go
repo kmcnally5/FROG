@@ -262,7 +262,20 @@ func arrayToPalette(a *Array) (uiPalette, bool) {
 // ─── init: register Phase 1a builtins ────────────────────────────────────────
 
 func init() {
-	// makeTheme() → array of 14 [r,g,b,a] arrays
+	// makeTheme — get the default UI palette as a 14-slot array to customise.
+	//
+	// Returns the 14 [r, g, b, a] colour slots the widgets read, so you can tweak
+	// individual slots and apply them with uiTheme. Slot order: 0 widgetBg,
+	// 1 widgetBgHover, 2 widgetBgActive, 3 widgetText, 4 labelText, 5 dimText,
+	// 6 accent, 7 accentBg, 8 track, 9 trackFill, 10 handle, 11 inputBg,
+	// 12 inputFocusBg, 13 shadow.
+	//
+	// @sig     makeTheme() -> array
+	// @returns a 14-element array of [r, g, b, a] colour arrays (0.0–1.0)
+	// @errors  RuntimeError if called with any arguments
+	// @example no-run t = makeTheme()
+	// @since   0.1.0
+	// @see     uiTheme, setTheme
 	Builtins["makeTheme"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 0 {
 			return typeError("makeTheme expects no arguments", ast.Pos{})
@@ -270,10 +283,19 @@ func init() {
 		return paletteToArray(defaultUIPalette())
 	}}
 
-	// pushDisabled(true|false) — push a disabled-state frame. All
-	// interactive widgets drawn between pushDisabled(true) and
-	// popDisabled() render at half opacity and ignore hover/click.
-	// Stack-based so nested forms can selectively re-enable sections.
+	// pushDisabled — push a disabled state so following widgets are greyed out.
+	//
+	// While the top of the stack is true, interactive widgets drawn after it
+	// render at half opacity and ignore hover/click. The stack lets nested forms
+	// re-enable sections (push false inside). Always pair with popDisabled.
+	//
+	// @sig     pushDisabled(disabled: bool) -> null
+	// @param   disabled  true to disable following widgets, false to re-enable
+	// @returns null
+	// @errors  TypeError unless given a single boolean argument
+	// @example no-run pushDisabled(true)
+	// @since   0.1.0
+	// @see     popDisabled
 	Builtins["pushDisabled"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return typeError("pushDisabled expects 1 argument: bool", ast.Pos{})
@@ -285,6 +307,17 @@ func init() {
 		uiCore.disabledStack = append(uiCore.disabledStack, b.Value)
 		return NULL
 	}}
+	// popDisabled — pop the most recent pushDisabled state.
+	//
+	// Restores the disabled state to what it was before the matching pushDisabled.
+	// Safe to call on an empty stack (no-op).
+	//
+	// @sig     popDisabled() -> null
+	// @returns null
+	// @errors  none
+	// @example no-run popDisabled()
+	// @since   0.1.0
+	// @see     pushDisabled
 	Builtins["popDisabled"] = &Builtin{Fn: func(args []Object) Object {
 		if n := len(uiCore.disabledStack); n > 0 {
 			uiCore.disabledStack = uiCore.disabledStack[:n-1]
@@ -292,13 +325,21 @@ func init() {
 		return NULL
 	}}
 
-	// setTheme(name) — install a preset theme. Valid names:
-	//   "nebula"        — deep violet + ice cyan (the original look)
-	//   "light"         — clean light theme, blue accent
-	//   "dark"          — modern dark theme, blue accent
-	//   "highContrast"  — accessibility — pure black/white + yellow accent
-	// Sets both colour palette AND style tokens (radii, spacing, font
-	// base). Use uiTheme(palette) for fine-grained colour overrides.
+	// setTheme — install a named preset theme (colours + style tokens).
+	//
+	// Sets both the colour palette and the style tokens (radii, spacing, font
+	// base) in one call. Presets: "nebula" (deep violet + ice cyan, the original
+	// look), "light" (clean light, blue accent), "dark" (modern dark, blue
+	// accent), "highContrast" (black/white + yellow, for accessibility). Use
+	// uiTheme for fine-grained colour overrides on top.
+	//
+	// @sig     setTheme(name: string) -> null
+	// @param   name  "nebula", "light", "dark", or "highContrast"
+	// @returns null
+	// @errors  TypeError if name isn't a string; RuntimeError if the preset name is unknown
+	// @example no-run setTheme("dark")
+	// @since   0.1.0
+	// @see     uiTheme, makeTheme
 	Builtins["setTheme"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return typeError("setTheme expects 1 argument: name (string)", ast.Pos{})
@@ -316,7 +357,19 @@ func init() {
 		return NULL
 	}}
 
-	// uiTheme(palette) — apply a 14-slot palette to uiCore.theme
+	// uiTheme — apply a 14-slot colour palette to the widgets.
+	//
+	// Takes a palette from makeTheme (optionally with slots tweaked) and makes it
+	// the active widget colour scheme. For a complete preset including style
+	// tokens, use setTheme instead.
+	//
+	// @sig     uiTheme(palette: array) -> null
+	// @param   palette  a 14-element array of [r, g, b, a] arrays, as from makeTheme
+	// @returns null
+	// @errors  TypeError unless given a 14-element array of 4-number colour arrays
+	// @example no-run uiTheme(t)
+	// @since   0.1.0
+	// @see     makeTheme, setTheme
 	Builtins["uiTheme"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return typeError("uiTheme expects 1 argument: palette array from makeTheme()", ast.Pos{})
@@ -333,17 +386,44 @@ func init() {
 		return NULL
 	}}
 
-	// uiNextFieldID() → string  — id the next textInput would receive
+	// uiNextFieldID — the ID the next textInput/textArea will be assigned.
+	//
+	// Call it immediately before a text field to capture that field's ID, then
+	// pass the ID to uiSetFocus to implement Tab navigation between fields.
+	//
+	// @sig     uiNextFieldID() -> string
+	// @returns the ID the next text field will receive this frame
+	// @errors  none
+	// @example no-run id = uiNextFieldID()
+	// @since   0.1.0
+	// @see     uiGetFocus, uiSetFocus, textInput
 	Builtins["uiNextFieldID"] = &Builtin{Fn: func(args []Object) Object {
 		return &String{Value: fmt.Sprintf("txt_%d", uiCore.nextID)}
 	}}
 
-	// uiGetFocus() → string
+	// uiGetFocus — the ID of the currently focused widget, or "" if none.
+	//
+	// @sig     uiGetFocus() -> string
+	// @returns the focused widget's ID, or "" when nothing is focused
+	// @errors  none
+	// @example no-run focused = uiGetFocus()
+	// @since   0.1.0
+	// @see     uiSetFocus, uiNextFieldID
 	Builtins["uiGetFocus"] = &Builtin{Fn: func(args []Object) Object {
 		return &String{Value: uiCore.activeID}
 	}}
 
-	// uiSetFocus(id) — write activeID directly
+	// uiSetFocus — move keyboard focus to the widget with the given ID.
+	//
+	// Combine with uiNextFieldID to drive Tab navigation between text fields.
+	//
+	// @sig     uiSetFocus(id: string) -> null
+	// @param   id  the widget ID to focus (from uiNextFieldID)
+	// @returns null
+	// @errors  TypeError unless given a single string argument
+	// @example no-run uiSetFocus(id)
+	// @since   0.1.0
+	// @see     uiGetFocus, uiNextFieldID
 	Builtins["uiSetFocus"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return typeError("uiSetFocus expects 1 argument: id (string)", ast.Pos{})
@@ -356,10 +436,20 @@ func init() {
 		return NULL
 	}}
 
-	// uiSetFont(font) / uiResetFont() — pick the proportional font.
-	// On WASM the renderer ignores activeFont (Canvas2D always uses
-	// CSS font directly) so this is a no-op visual change there until
-	// font support is wired into the renderer interface.
+	// uiSetFont — use a loaded font for all subsequent widget text.
+	//
+	// Pass a font from loadFont; button labels, tabs, list rows etc. then render
+	// with it. Call once per frame (or once before window). Revert with
+	// uiResetFont. (On the browser/WASM backend the renderer always uses its CSS
+	// font, so this is currently a no-op there.)
+	//
+	// @sig     uiSetFont(font: Font) -> null
+	// @param   font  a font handle from loadFont
+	// @returns null
+	// @errors  TypeError unless given a single Font argument
+	// @example no-run uiSetFont(font)
+	// @since   0.1.0
+	// @see     uiResetFont, loadFont
 	Builtins["uiSetFont"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return typeError("uiSetFont expects 1 argument: font (from loadFont)", ast.Pos{})
@@ -371,13 +461,39 @@ func init() {
 		uiCore.activeFont = f
 		return NULL
 	}}
+	// uiResetFont — revert widget text to the built-in monospace font.
+	//
+	// Undoes uiSetFont, so following widgets use the embedded default font again.
+	//
+	// @sig     uiResetFont() -> null
+	// @returns null
+	// @errors  none
+	// @example no-run uiResetFont()
+	// @since   0.1.0
+	// @see     uiSetFont
 	Builtins["uiResetFont"] = &Builtin{Fn: func(args []Object) Object {
 		uiCore.activeFont = nil
 		return NULL
 	}}
 
 	// ── Layout cursors ───────────────────────────────────────────────
-	// Row cursor — advance left-to-right.
+
+	// uiBeginRow — start a left-to-right layout row at (x, y).
+	//
+	// Sets up a cursor: widgets read uiRowX/uiRowY/uiRowH for their position and
+	// height, and uiRowAdvance steps the cursor right by a width plus `gap`. Lets
+	// you lay out a toolbar without hand-computing x offsets.
+	//
+	// @sig     uiBeginRow(x: number, y: number, h: number, gap: number) -> null
+	// @param   x    starting x in pixels
+	// @param   y    row y in pixels
+	// @param   h    row height in pixels
+	// @param   gap  pixels inserted between items by uiRowAdvance
+	// @returns null
+	// @errors  TypeError unless given 4 numeric arguments
+	// @example no-run uiBeginRow(10.0, 10.0, 30.0, 8.0)
+	// @since   0.1.0
+	// @see     uiRowX, uiRowAdvance, uiBeginCol
 	Builtins["uiBeginRow"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 {
 			return typeError("uiBeginRow expects 4 arguments: x, y, h, gap", ast.Pos{})
@@ -396,9 +512,44 @@ func init() {
 		uiCore.rowGap = vals[3]
 		return NULL
 	}}
+	// uiRowX — the current x of the active row cursor (see uiBeginRow).
+	//
+	// @sig     uiRowX() -> int
+	// @returns the row cursor's current x in pixels
+	// @errors  none
+	// @example no-run button("ok", uiRowX(), uiRowY(), 60, uiRowH())
+	// @since   0.1.0
+	// @see     uiBeginRow, uiRowAdvance
 	Builtins["uiRowX"] = &Builtin{Fn: func(args []Object) Object { return &Integer{Value: int(uiCore.rowCurX)} }}
+	// uiRowY — the y of the active row (see uiBeginRow).
+	//
+	// @sig     uiRowY() -> int
+	// @returns the row's y in pixels
+	// @errors  none
+	// @example no-run y = uiRowY()
+	// @since   0.1.0
+	// @see     uiBeginRow, uiRowX
 	Builtins["uiRowY"] = &Builtin{Fn: func(args []Object) Object { return &Integer{Value: int(uiCore.rowY)} }}
+	// uiRowH — the height of the active row (see uiBeginRow).
+	//
+	// @sig     uiRowH() -> int
+	// @returns the row's height in pixels
+	// @errors  none
+	// @example no-run h = uiRowH()
+	// @since   0.1.0
+	// @see     uiBeginRow, uiRowX
 	Builtins["uiRowH"] = &Builtin{Fn: func(args []Object) Object { return &Integer{Value: int(uiCore.rowH)} }}
+	// uiRowAdvance — move the row cursor right by width plus the row gap.
+	//
+	// Call after placing an item to position the next one in the row.
+	//
+	// @sig     uiRowAdvance(width: number) -> null
+	// @param   width  the width of the item just placed, in pixels
+	// @returns null
+	// @errors  TypeError unless given a single numeric argument
+	// @example no-run uiRowAdvance(60.0)
+	// @since   0.1.0
+	// @see     uiBeginRow, uiRowX
 	Builtins["uiRowAdvance"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return typeError("uiRowAdvance expects 1 argument: width", ast.Pos{})
@@ -416,7 +567,22 @@ func init() {
 		return NULL
 	}}
 
-	// Column cursor — advance top-to-bottom.
+	// uiBeginCol — start a top-to-bottom layout column at (x, y).
+	//
+	// The vertical counterpart to uiBeginRow: widgets read uiColX/uiColY/uiColW,
+	// and uiColAdvance steps the cursor down by a height plus `gap`. Lets you
+	// stack a form without hand-computing y offsets.
+	//
+	// @sig     uiBeginCol(x: number, y: number, w: number, gap: number) -> null
+	// @param   x    column x in pixels
+	// @param   y    starting y in pixels
+	// @param   w    column width in pixels
+	// @param   gap  pixels inserted between items by uiColAdvance
+	// @returns null
+	// @errors  TypeError unless given 4 numeric arguments
+	// @example no-run uiBeginCol(10.0, 10.0, 200.0, 8.0)
+	// @since   0.1.0
+	// @see     uiColX, uiColAdvance, uiBeginRow
 	Builtins["uiBeginCol"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 {
 			return typeError("uiBeginCol expects 4 arguments: x, y, w, gap", ast.Pos{})
@@ -433,9 +599,44 @@ func init() {
 		uiCore.colGap = vals[3]
 		return NULL
 	}}
+	// uiColX — the x of the active column (see uiBeginCol).
+	//
+	// @sig     uiColX() -> int
+	// @returns the column's x in pixels
+	// @errors  none
+	// @example no-run x = uiColX()
+	// @since   0.1.0
+	// @see     uiBeginCol, uiColAdvance
 	Builtins["uiColX"] = &Builtin{Fn: func(args []Object) Object { return &Integer{Value: int(uiCore.colX)} }}
+	// uiColY — the current y of the active column cursor (see uiBeginCol).
+	//
+	// @sig     uiColY() -> int
+	// @returns the column cursor's current y in pixels
+	// @errors  none
+	// @example no-run label("name", uiColX(), uiColY())
+	// @since   0.1.0
+	// @see     uiBeginCol, uiColAdvance
 	Builtins["uiColY"] = &Builtin{Fn: func(args []Object) Object { return &Integer{Value: int(uiCore.colCurY)} }}
+	// uiColW — the width of the active column (see uiBeginCol).
+	//
+	// @sig     uiColW() -> int
+	// @returns the column's width in pixels
+	// @errors  none
+	// @example no-run w = uiColW()
+	// @since   0.1.0
+	// @see     uiBeginCol, uiColX
 	Builtins["uiColW"] = &Builtin{Fn: func(args []Object) Object { return &Integer{Value: int(uiCore.colW)} }}
+	// uiColAdvance — move the column cursor down by height plus the column gap.
+	//
+	// Call after placing an item to position the next one below it.
+	//
+	// @sig     uiColAdvance(height: number) -> null
+	// @param   height  the height of the item just placed, in pixels
+	// @returns null
+	// @errors  TypeError unless given a single numeric argument
+	// @example no-run uiColAdvance(30.0)
+	// @since   0.1.0
+	// @see     uiBeginCol, uiColY
 	Builtins["uiColAdvance"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return typeError("uiColAdvance expects 1 argument: height", ast.Pos{})
@@ -453,7 +654,24 @@ func init() {
 		return NULL
 	}}
 
-	// ── button(label, x, y, w, h, [size]) → bool ─────────────────────
+	// button — draw a clickable button, returning true the frame it's clicked.
+	//
+	// An immediate-mode widget: call it every frame inside the draw loop and act
+	// on the returned bool. The box auto-grows to fit the label, and hover/press
+	// visuals follow the active theme. The optional size scales the label text.
+	//
+	// @sig     button(label: string, x: int, y: int, w: int, h: int, [size: number]) -> bool
+	// @param   label  the button caption
+	// @param   x      left position in pixels
+	// @param   y      top position in pixels
+	// @param   w      minimum width in pixels (grows to fit the label)
+	// @param   h      height in pixels
+	// @param   size   label text scale (default 0.5)
+	// @returns true only on the frame the button is clicked, false otherwise
+	// @errors  TypeError if label isn't a string, x/y/w/h aren't integers, or size isn't numeric; RuntimeError unless given 5 or 6 arguments
+	// @example no-run if button("Save", 20, 20, 80, 30) { save() }
+	// @since   0.1.0
+	// @see     label, checkbox, toggle
 	Builtins["button"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 5 || len(args) > 6 {
 			return typeError("button expects 5-6 arguments: label, x, y, w, h, [size]", ast.Pos{})
@@ -545,7 +763,21 @@ func init() {
 		return &Boolean{Value: clicked}
 	}}
 
-	// ── label(text, x, y, [size]) → null ─────────────────────────────
+	// label — draw a line of static text at (x, y).
+	//
+	// Non-interactive caption text in the theme's label colour. The optional size
+	// scales the text.
+	//
+	// @sig     label(text: string, x: int, y: int, [size: number]) -> null
+	// @param   text  the text to draw
+	// @param   x     left position in pixels
+	// @param   y     top position in pixels
+	// @param   size  text scale (default 0.5)
+	// @returns null
+	// @errors  TypeError if text isn't a string, x/y aren't integers, or size isn't numeric; RuntimeError unless given 3 or 4 arguments
+	// @example no-run label("Settings", 20, 20)
+	// @since   0.1.0
+	// @see     button, text
 	Builtins["label"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 3 || len(args) > 4 {
 			return typeError("label expects 3-4 arguments: text, x, y, [size]", ast.Pos{})
@@ -566,7 +798,23 @@ func init() {
 		return NULL
 	}}
 
-	// ── checkbox(label, x, y, checked, [size]) → bool ────────────────
+	// checkbox — draw a labelled checkbox, returning its new checked state.
+	//
+	// Immediate-mode: pass the current checked state in and store the value it
+	// returns — it flips on the frame the box is clicked, otherwise returns the
+	// state unchanged.
+	//
+	// @sig     checkbox(label: string, x: int, y: int, checked: bool, [size: number]) -> bool
+	// @param   label    the text beside the box
+	// @param   x        left position in pixels
+	// @param   y        top position in pixels
+	// @param   checked  the current checked state
+	// @param   size     label text scale (default 0.5)
+	// @returns the checked state after this frame (toggled if clicked)
+	// @errors  TypeError on wrong argument types; RuntimeError unless given 4 or 5 arguments
+	// @example no-run showGrid = checkbox("Show grid", 20, 60, showGrid)
+	// @since   0.1.0
+	// @see     toggle, radio, button
 	Builtins["checkbox"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 4 || len(args) > 5 {
 			return typeError("checkbox expects 4-5 arguments: label, x, y, checked, [size]", ast.Pos{})
@@ -630,7 +878,26 @@ func init() {
 		return &Boolean{Value: checked}
 	}}
 
-	// ── slider(label, x, y, w, value, min, max, [size]) → float ──────
+	// slider — draw a draggable slider, returning its current value.
+	//
+	// Immediate-mode: pass the current value and store what it returns — while the
+	// handle is dragged the value tracks the mouse between min and max. The label
+	// is drawn above the track.
+	//
+	// @sig     slider(label: string, x: int, y: int, w: int, value: number, min: number, max: number, [size: number]) -> float
+	// @param   label  caption drawn above the track ("" for none)
+	// @param   x      left position in pixels
+	// @param   y      top position in pixels (label sits here, track below)
+	// @param   w      track width in pixels
+	// @param   value  the current value
+	// @param   min    minimum value (left end)
+	// @param   max    maximum value (right end; must be > min)
+	// @param   size   label text scale (default 0.5)
+	// @returns the value after this frame (follows the handle while dragged)
+	// @errors  TypeError on wrong argument types; RuntimeError if max <= min or given the wrong argument count
+	// @example no-run volume = slider("Volume", 20, 60, 200, volume, 0.0, 1.0)
+	// @since   0.1.0
+	// @see     numericStepper, progressBar
 	Builtins["slider"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 7 || len(args) > 8 {
 			return typeError("slider expects 7-8 arguments: label, x, y, w, value, min, max, [size]", ast.Pos{})
@@ -721,7 +988,25 @@ func init() {
 		return &Float{Value: value}
 	}}
 
-	// ── progressBar(x, y, w, h, value, min, max) → null ──────────────
+	// progressBar — draw a horizontal progress bar (display-only).
+	//
+	// Fills the track from the left in the accent colour by where `value` sits
+	// between min and max (clamped to that range). Non-interactive — for an
+	// adjustable control use slider.
+	//
+	// @sig     progressBar(x: int, y: int, w: int, h: int, value: number, min: number, max: number) -> null
+	// @param   x      left position in pixels
+	// @param   y      top position in pixels
+	// @param   w      width in pixels
+	// @param   h      height in pixels
+	// @param   value  the current value
+	// @param   min    value mapped to an empty bar
+	// @param   max    value mapped to a full bar (must be > min)
+	// @returns null
+	// @errors  TypeError on wrong argument types; RuntimeError if max <= min or not given 7 arguments
+	// @example no-run progressBar(20, 120, 200, 8, done, 0.0, total)
+	// @since   0.1.0
+	// @see     slider, spinner
 	Builtins["progressBar"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 7 {
 			return typeError("progressBar expects 7 arguments: x, y, w, h, value, min, max", ast.Pos{})
@@ -762,7 +1047,23 @@ func init() {
 		return NULL
 	}}
 
-	// ── toggle(label, x, y, on, [size]) → bool ───────────────────────
+	// toggle — draw an on/off switch (pill), returning its new state.
+	//
+	// Like checkbox but rendered as a sliding pill switch. Immediate-mode: pass
+	// the current state and store the returned value — it flips on the frame it's
+	// clicked.
+	//
+	// @sig     toggle(label: string, x: int, y: int, on: bool, [size: number]) -> bool
+	// @param   label  the text beside the switch
+	// @param   x      left position in pixels
+	// @param   y      top position in pixels
+	// @param   on     the current on/off state
+	// @param   size   label text scale (default 0.5)
+	// @returns the state after this frame (flipped if clicked)
+	// @errors  TypeError on wrong argument types; RuntimeError unless given 4 or 5 arguments
+	// @example no-run darkMode = toggle("Dark mode", 20, 90, darkMode)
+	// @since   0.1.0
+	// @see     checkbox, radio
 	Builtins["toggle"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 4 || len(args) > 5 {
 			return typeError("toggle expects 4-5 arguments: label, x, y, on, [size]", ast.Pos{})
@@ -832,9 +1133,26 @@ func init() {
 		return &Boolean{Value: on}
 	}}
 
-	// ── radio(label, x, y, value, groupValue, [size]) → string ───────
-	// Returns `value` if this radio was clicked, else `groupValue`.
-	// Usage: chain `g = radio(...,g)` per option in the group.
+	// radio — draw one option of a radio group, returning the group's selection.
+	//
+	// Each option's `value` is its identity; `groupValue` is the currently
+	// selected one. Returns `value` if this option was clicked, otherwise
+	// `groupValue` unchanged — so chain one variable through every option:
+	// g = radio("A", …, "a", g); g = radio("B", …, "b", g). The option whose
+	// value equals groupValue draws as selected.
+	//
+	// @sig     radio(label: string, x: int, y: int, value: string, groupValue: string, [size: number]) -> string
+	// @param   label       the text beside this option
+	// @param   x           left position in pixels
+	// @param   y           top position in pixels
+	// @param   value       this option's identifier
+	// @param   groupValue  the group's currently selected value
+	// @param   size        label text scale (default 0.5)
+	// @returns this option's value if it was clicked, otherwise groupValue
+	// @errors  TypeError if label/value/groupValue aren't strings or x/y aren't integers; RuntimeError unless given 5 or 6 arguments
+	// @example no-run shape = radio("Circle", 20, 60, "circle", shape)
+	// @since   0.1.0
+	// @see     checkbox, toggle, dropdown
 	Builtins["radio"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 5 || len(args) > 6 {
 			return typeError("radio expects 5-6 arguments: label, x, y, value, groupValue, [size]", ast.Pos{})
@@ -899,7 +1217,24 @@ func init() {
 	// Phase 1b — composites + charts
 	// ════════════════════════════════════════════════════════════════
 
-	// ── tabs(x, y, w, items, activeIdx, [size]) → int ────────────────
+	// tabs — draw a row of tabs, returning the selected index.
+	//
+	// Immediate-mode: pass the current active index and store the returned one —
+	// it changes to a tab's index on the frame that tab is clicked. Tabs auto-size
+	// to their labels, distributing slack or shrinking to fit the width.
+	//
+	// @sig     tabs(x: int, y: int, w: int, items: array, activeIdx: int, [size: number]) -> int
+	// @param   x          left position in pixels
+	// @param   y          top position in pixels
+	// @param   w          total width in pixels for the tab strip
+	// @param   items      array of tab label strings
+	// @param   activeIdx  the currently selected tab index
+	// @param   size       label text scale (default 0.5)
+	// @returns the selected tab index after this frame
+	// @errors  TypeError if x/y/w aren't integers, items isn't an array, or activeIdx isn't an integer; RuntimeError unless given 5 or 6 arguments
+	// @example no-run tab = tabs(0, 0, 400, ["Files", "Edit", "View"], tab)
+	// @since   0.1.0
+	// @see     accordion, dropdown
 	Builtins["tabs"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 5 || len(args) > 6 {
 			return typeError("tabs expects 5-6 arguments: x, y, w, items, activeIdx, [size]", ast.Pos{})
@@ -1005,7 +1340,26 @@ func init() {
 		return &Integer{Value: activeIdx}
 	}}
 
-	// ── numericStepper(label, x, y, w, value, min, max, [size]) → int
+	// numericStepper — draw a −/value/+ integer stepper, returning the new value.
+	//
+	// Immediate-mode: pass the current integer and store what it returns — the −
+	// and + buttons step it by 1, clamped to [min, max]. For a continuous range
+	// use slider instead.
+	//
+	// @sig     numericStepper(label: string, x: int, y: int, w: int, value: int, min: int, max: int, [size: number]) -> int
+	// @param   label  caption drawn above the control ("" for none)
+	// @param   x      left position in pixels
+	// @param   y      top position in pixels
+	// @param   w      total width in pixels
+	// @param   value  the current integer value
+	// @param   min    minimum value (− stops here)
+	// @param   max    maximum value (+ stops here)
+	// @param   size   text scale (default 0.5)
+	// @returns the value after this frame (±1 if a button was clicked)
+	// @errors  TypeError on wrong argument types; RuntimeError unless given 7 or 8 arguments
+	// @example no-run count = numericStepper("Count", 20, 60, 120, count, 0, 10)
+	// @since   0.1.0
+	// @see     slider, textInput
 	Builtins["numericStepper"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 7 || len(args) > 8 {
 			return typeError("numericStepper expects 7-8 arguments: label, x, y, w, value, min, max, [size]", ast.Pos{})
@@ -1103,7 +1457,24 @@ func init() {
 		return &Integer{Value: value}
 	}}
 
-	// ── accordion(x, y, w, sections, openIdx, [size]) → int ──────────
+	// accordion — draw collapsible sections, returning the open one's index.
+	//
+	// Immediate-mode: pass the currently open section index and store what it
+	// returns — clicking a header opens that section (and, by convention, clicking
+	// the open one collapses it, giving -1). Only one section is open at a time.
+	//
+	// @sig     accordion(x: int, y: int, w: int, sections: array, openIdx: int, [size: number]) -> int
+	// @param   x         left position in pixels
+	// @param   y         top position in pixels
+	// @param   w         width in pixels
+	// @param   sections  array of section header strings
+	// @param   openIdx   index of the currently open section (-1 for none)
+	// @param   size      text scale (default 0.5)
+	// @returns the open section index after this frame
+	// @errors  TypeError if x/y/w aren't integers or sections isn't an array; RuntimeError unless given 5 or 6 arguments
+	// @example no-run open = accordion(20, 20, 240, ["General", "Advanced"], open)
+	// @since   0.1.0
+	// @see     tabs, treeView
 	Builtins["accordion"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 5 || len(args) > 6 {
 			return typeError("accordion expects 5-6 arguments: x, y, w, sections, openIdx, [size]", ast.Pos{})
@@ -1186,10 +1557,22 @@ func init() {
 		return &Integer{Value: openIdx}
 	}}
 
-	// ── modal(title, message, buttons) → string ──────────────────────
-	// Full-screen dimmed overlay with a centred dialog. Returns the
-	// label of the clicked button, "" otherwise. Call AFTER all other
-	// widgets so it renders on top.
+	// modal — draw a centred dialog over a dimmed screen, returning a clicked button.
+	//
+	// A full-screen dim plus a centred dialog with a title, message, and a row of
+	// buttons. Returns the clicked button's label, or "" if none was clicked this
+	// frame — drive your own "is the dialog open" flag with that. Call it AFTER all
+	// other widgets so it renders on top.
+	//
+	// @sig     modal(title: string, message: string, buttons: array) -> string
+	// @param   title    the dialog title-bar text
+	// @param   message  the body text (single line; pre-format your own wrapping)
+	// @param   buttons  array of button label strings, right-aligned
+	// @returns the clicked button's label, or "" if none was clicked
+	// @errors  TypeError if title/message aren't strings or buttons isn't an array; RuntimeError unless given 3 arguments
+	// @example no-run if modal("Quit?", "Discard changes?", ["Cancel", "Quit"]) == "Quit" { exit() }
+	// @since   0.1.0
+	// @see     toast, tooltip, button
 	Builtins["modal"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return typeError("modal expects 3 arguments: title, message, buttons", ast.Pos{})
@@ -1298,7 +1681,27 @@ func init() {
 		return &String{Value: result}
 	}}
 
-	// ── splitter(pos, x, y, length, orient, min, max, [thickness]) → int
+	// splitter — draw a draggable pane divider, returning its position.
+	//
+	// Immediate-mode: pass the current divider position and store what it returns
+	// — while dragged it follows the mouse along its axis, clamped to [min, max].
+	// orient "v" makes a vertical divider you drag horizontally (pos is an x); "h"
+	// makes a horizontal one you drag vertically (pos is a y).
+	//
+	// @sig     splitter(pos: int, x: int, y: int, length: int, orient: string, min: int, max: int, [thickness: int]) -> int
+	// @param   pos        the divider's current position along its drag axis (px)
+	// @param   x          the divider's x (its fixed coordinate when horizontal)
+	// @param   y          the divider's y (its fixed coordinate when vertical)
+	// @param   length     how long the divider is, in pixels
+	// @param   orient     "v" (vertical bar, drags in x) or "h" (horizontal bar, drags in y)
+	// @param   min        minimum position (px)
+	// @param   max        maximum position (px)
+	// @param   thickness  bar thickness in pixels (default 6)
+	// @returns the divider position after this frame
+	// @errors  TypeError on wrong argument types or an orient other than "v"/"h"; RuntimeError unless given 7 or 8 arguments
+	// @example no-run splitX = splitter(splitX, 0, 0, 400, "v", 100, 600)
+	// @since   0.1.0
+	// @see     scrollArea, table
 	Builtins["splitter"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 7 || len(args) > 8 {
 			return typeError("splitter expects 7-8 arguments: pos, x, y, length, orient, min, max, [thickness]", ast.Pos{})
@@ -1392,10 +1795,24 @@ func init() {
 		return &Integer{Value: pos}
 	}}
 
-	// ── image(img, x, y, w, h, [mode]) → null ────────────────────────
-	// Display a loadImage() result inside the UI. Mode is reserved for
-	// future "fit"/"fill"/"stretch" — Phase 1b honours "stretch" (the
-	// renderer's default) regardless of the argument.
+	// image — draw a loaded image inside the UI at (x, y) scaled to w×h.
+	//
+	// The UI-layer wrapper around a loadImage result (the drawImage equivalent for
+	// widget layouts). The image is stretched to the given rectangle. The optional
+	// mode is reserved for future "fit"/"fill" behaviours and currently ignored.
+	//
+	// @sig     image(img: image, x: int, y: int, w: int, h: int, [mode: string]) -> null
+	// @param   img   an image from loadImage
+	// @param   x     left position in pixels
+	// @param   y     top position in pixels
+	// @param   w     draw width in pixels
+	// @param   h     draw height in pixels
+	// @param   mode  reserved for future scaling modes (currently ignored)
+	// @returns null
+	// @errors  TypeError if img isn't an image or x/y/w/h aren't integers; RuntimeError unless given 5 or 6 arguments
+	// @example no-run image(logo, 20, 20, 64, 64)
+	// @since   0.1.0
+	// @see     loadImage, drawImage
 	Builtins["image"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 5 || len(args) > 6 {
 			return typeError("image expects 5-6 arguments: img, x, y, w, h, [mode]", ast.Pos{})
@@ -1449,7 +1866,22 @@ func init() {
 		return lo, hi
 	}
 
-	// sparkline(data, x, y, w, h) — minimal line, no axes / bg.
+	// sparkline — draw a tiny inline line chart: just the line, no axes or background.
+	//
+	// Auto-scales to the data's range, drawn in the accent colour. Ideal for
+	// compact dashboard tiles. Needs at least 2 points (fewer draws nothing).
+	//
+	// @sig     sparkline(data: array, x: int, y: int, w: int, h: int) -> null
+	// @param   data  array of numbers to plot
+	// @param   x     left position in pixels
+	// @param   y     top position in pixels
+	// @param   w     width in pixels
+	// @param   h     height in pixels
+	// @returns null
+	// @errors  TypeError if data isn't an array or x/y/w/h aren't integers; RuntimeError unless given 5 arguments
+	// @example no-run sparkline(history, 10, 10, 120, 32)
+	// @since   0.1.0
+	// @see     lineChart, barChart
 	Builtins["sparkline"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 5 {
 			return typeError("sparkline expects 5 arguments: data, x, y, w, h", ast.Pos{})
@@ -1480,7 +1912,25 @@ func init() {
 		return NULL
 	}}
 
-	// lineChart(data, x, y, w, h, [min, max]) — bg + axes + filled area + line.
+	// lineChart — draw a line chart with background, axes, and a filled area.
+	//
+	// Plots data across the rectangle in the current fill colour (line + 25%-alpha
+	// area), with a dot per point and an accent border. If min/max are omitted the
+	// y-range is derived from the data; pass them to pin the scale.
+	//
+	// @sig     lineChart(data: array, x: int, y: int, w: int, h: int, [min: number], [max: number]) -> null
+	// @param   data  array of numbers to plot
+	// @param   x     left position in pixels
+	// @param   y     top position in pixels
+	// @param   w     width in pixels
+	// @param   h     height in pixels
+	// @param   min   value mapped to the bottom (default: data minimum)
+	// @param   max   value mapped to the top (default: data maximum)
+	// @returns null
+	// @errors  TypeError if data isn't an array, x/y/w/h aren't integers, or min/max aren't numbers; RuntimeError unless given 5 or 7 arguments
+	// @example no-run lineChart(durations, 10, 10, 400, 150)
+	// @since   0.1.0
+	// @see     barChart, sparkline, pieChart
 	Builtins["lineChart"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 5 && len(args) != 7 {
 			return typeError("lineChart expects 5 or 7 arguments: data, x, y, w, h, [min, max]", ast.Pos{})
@@ -1554,7 +2004,24 @@ func init() {
 		return NULL
 	}}
 
-	// barChart(data, x, y, w, h, [min, max]) — bars with track column behind.
+	// barChart — draw a vertical bar chart with a track column behind each bar.
+	//
+	// Bars use the current fill colour, each with a 15% gap. The baseline anchors
+	// at 0 unless you pass min; if max is omitted it's derived from the data.
+	//
+	// @sig     barChart(data: array, x: int, y: int, w: int, h: int, [min: number], [max: number]) -> null
+	// @param   data  array of numbers, one bar each
+	// @param   x     left position in pixels
+	// @param   y     top position in pixels
+	// @param   w     width in pixels
+	// @param   h     height in pixels
+	// @param   min   value mapped to a zero-height bar (default 0)
+	// @param   max   value mapped to a full-height bar (default: data maximum)
+	// @returns null
+	// @errors  TypeError if data isn't an array, x/y/w/h aren't integers, or min/max aren't numbers; RuntimeError unless given 5 or 7 arguments
+	// @example no-run barChart(counts, 10, 170, 400, 120)
+	// @since   0.1.0
+	// @see     lineChart, pieChart, sparkline
 	Builtins["barChart"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 5 && len(args) != 7 {
 			return typeError("barChart expects 5 or 7 arguments: data, x, y, w, h, [min, max]", ast.Pos{})
@@ -1619,7 +2086,24 @@ func init() {
 		return NULL
 	}}
 
-	// pieChart(data, colors, cx, cy, radius, [innerRadius])
+	// pieChart — draw a pie (or donut) chart centred at (cx, cy).
+	//
+	// Each data value is one slice, coloured by the matching [r, g, b, a] entry in
+	// colors. Slices start at 12 o'clock and sweep clockwise; zero values are
+	// skipped. A positive innerRadius draws a donut instead of a full pie.
+	//
+	// @sig     pieChart(data: array, colors: array, cx: int, cy: int, radius: int, [innerRadius: int]) -> null
+	// @param   data         array of slice values
+	// @param   colors       array of [r, g, b, a] colours, one per slice
+	// @param   cx           centre x in pixels
+	// @param   cy           centre y in pixels
+	// @param   radius       outer radius in pixels
+	// @param   innerRadius  inner radius for a donut (default 0 = full pie)
+	// @returns null
+	// @errors  TypeError if data/colors aren't arrays or cx/cy/radius aren't integers; RuntimeError unless given 5 or 6 arguments
+	// @example no-run pieChart(counts, colours, 400, 300, 80)
+	// @since   0.1.0
+	// @see     barChart, lineChart
 	Builtins["pieChart"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 5 && len(args) != 6 {
 			return typeError("pieChart expects 5 or 6 arguments: data, colors, cx, cy, radius, [innerRadius]", ast.Pos{})
@@ -1729,10 +2213,24 @@ func init() {
 		return scrollOff
 	}
 
-	// ── scrollArea(x, y, w, h, contentH) → float ─────────────────────
-	// Returns the current scroll offset in pixels. Caller draws content
-	// translated by -scrollOff; pushClip/popClip the (x,y,w,h) viewport
-	// while drawing scrolled content.
+	// scrollArea — draw a scrollbar for a viewport, returning the scroll offset.
+	//
+	// Manages a vertical scrollbar over the (x, y, w, h) viewport for content
+	// `contentH` pixels tall, handling wheel and thumb drag. Returns the current
+	// scroll offset in pixels: clip to the viewport with pushClip/popClip and draw
+	// your content translated by -offset.
+	//
+	// @sig     scrollArea(x: number, y: number, w: number, h: number, contentH: number) -> float
+	// @param   x         viewport left in pixels
+	// @param   y         viewport top in pixels
+	// @param   w         viewport width in pixels
+	// @param   h         viewport height in pixels
+	// @param   contentH  total content height in pixels
+	// @returns the current scroll offset in pixels
+	// @errors  TypeError unless given 5 numeric arguments
+	// @example no-run off = scrollArea(0, 0, 300, 400, contentHeight)
+	// @since   0.1.0
+	// @see     list, table, splitter
 	Builtins["scrollArea"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 5 {
 			return typeError("scrollArea expects 5 arguments: x, y, w, h, contentH", ast.Pos{})
@@ -1801,7 +2299,26 @@ func init() {
 		return &Float{Value: float64(scrollOff)}
 	}}
 
-	// ── list(label, items, x, y, w, h, [size]) → selected item ───────
+	// list — draw a scrollable single-select list, returning the selected item.
+	//
+	// Shows items in a scrollable box with mouse wheel and keyboard navigation
+	// (Up/Down to move, Enter to confirm); click to select. Selection and scroll
+	// are tracked internally per list. Returns the currently selected element, or
+	// null when the list is empty.
+	//
+	// @sig     list(label: string, items: array, x: int, y: int, w: int, h: int, [size: number]) -> any
+	// @param   label  caption drawn above the box ("" for none)
+	// @param   items  array of items to show (strings, or any value via its display form)
+	// @param   x      left position in pixels
+	// @param   y      top position in pixels
+	// @param   w      width in pixels
+	// @param   h      height in pixels
+	// @param   size   text scale (default 0.5)
+	// @returns the selected item, or null if the list is empty
+	// @errors  TypeError if label isn't a string, items isn't an array, or x/y/w/h aren't integers; RuntimeError unless given 6 or 7 arguments
+	// @example no-run choice = list("Files", names, 20, 40, 200, 160)
+	// @since   0.1.0
+	// @see     listMulti, dropdown, scrollArea
 	Builtins["list"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 6 || len(args) > 7 {
 			return typeError("list expects 6-7 arguments: label, items, x, y, w, h, [size]", ast.Pos{})
@@ -1977,7 +2494,26 @@ func init() {
 		return NULL
 	}}
 
-	// ── listMulti(label, items, selected, x, y, w, h, [size]) → bool[]
+	// listMulti — draw a scrollable multi-select list, returning the selection array.
+	//
+	// Like list but each row has a checkbox. Pass a parallel bool array marking
+	// which items are selected, and store the array it returns — clicking a row
+	// toggles its flag.
+	//
+	// @sig     listMulti(label: string, items: array, selected: array, x: int, y: int, w: int, h: int, [size: number]) -> array
+	// @param   label     caption above the box ("" for none)
+	// @param   items     array of items to show
+	// @param   selected  parallel array of bools marking selected items
+	// @param   x         left position in pixels
+	// @param   y         top position in pixels
+	// @param   w         width in pixels
+	// @param   h         height in pixels
+	// @param   size      text scale (default 0.5)
+	// @returns the updated array of selection bools (one per item)
+	// @errors  TypeError if label isn't a string, items/selected aren't arrays, or x/y/w/h aren't integers; RuntimeError unless given 7 or 8 arguments
+	// @example no-run picks = listMulti("Tags", tags, picks, 20, 40, 200, 160)
+	// @since   0.1.0
+	// @see     list, checkbox
 	Builtins["listMulti"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 7 || len(args) > 8 {
 			return typeError("listMulti expects 7-8 arguments: label, items, selected, x, y, w, h, [size]", ast.Pos{})
@@ -2160,7 +2696,27 @@ func init() {
 		return &Array{Elements: out}
 	}}
 
-	// ── treeView(x, y, w, h, labels, levels, expanded, [size]) → [selectedIdx, expanded[]]
+	// treeView — draw a collapsible tree, returning the selection and expand state.
+	//
+	// The tree is a flat list: labels[i] at indent levels[i], with expanded[i] a
+	// bool for whether that node is open. Clicking a row's twisty toggles its
+	// expanded flag; clicking the label selects it. Returns a two-element
+	// [selectedIdx, expanded] tuple — feed `expanded` back in next frame.
+	//
+	// @sig     treeView(x: int, y: int, w: int, h: int, labels: array, levels: array, expanded: array, [size: number]) -> tuple
+	// @param   x         left position in pixels
+	// @param   y         top position in pixels
+	// @param   w         width in pixels
+	// @param   h         height in pixels
+	// @param   labels    array of node label strings
+	// @param   levels    parallel array of integer indent levels
+	// @param   expanded  parallel array of bools for each node's open state
+	// @param   size      text scale (default 0.5)
+	// @returns a [selectedIndex, expanded] tuple — pass expanded back next frame
+	// @errors  TypeError if x/y/w/h aren't integers or labels/levels/expanded aren't arrays; RuntimeError unless given 7 or 8 arguments
+	// @example no-run sel, expanded = treeView(20, 20, 240, 300, labels, levels, expanded)
+	// @since   0.1.0
+	// @see     accordion, list
 	Builtins["treeView"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 7 || len(args) > 8 {
 			return typeError("treeView expects 7-8 arguments: x, y, w, h, labels, levels, expanded, [size]", ast.Pos{})
@@ -2359,9 +2915,24 @@ func init() {
 	// Phase 3 — popup machinery (dropdown / tooltip / toast)
 	// ════════════════════════════════════════════════════════════════
 
-	// ── dropdown(label, items, x, y, w, [size]) → string ─────────────
-	// Header shows the selected item; click to open a popup menu
-	// drawn last in uiEnd() so it sits on top of every other widget.
+	// dropdown — draw a dropdown select, returning the chosen item.
+	//
+	// The header shows the current selection (passed as `label`); clicking opens a
+	// popup menu, which is drawn last so it overlays everything. Returns the chosen
+	// item's text when a new one is picked, otherwise the current label.
+	//
+	// @sig     dropdown(label: string, items: array, x: int, y: int, w: int, [size: number]) -> string
+	// @param   label  the currently selected text (shown in the header)
+	// @param   items  array of selectable item strings
+	// @param   x      left position in pixels
+	// @param   y      top position in pixels
+	// @param   w      width in pixels
+	// @param   size   text scale (default 0.5)
+	// @returns the selected item's text (the new pick, or the unchanged label)
+	// @errors  TypeError if label isn't a string or items isn't an array; RuntimeError unless given 5 or 6 arguments
+	// @example no-run mode = dropdown(mode, ["Fast", "Pretty"], 20, 20, 140)
+	// @since   0.1.0
+	// @see     list, radio, contextMenu
 	Builtins["dropdown"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 5 || len(args) > 6 {
 			return typeError("dropdown expects 5-6 arguments: label, items, x, y, w, [size]", ast.Pos{})
@@ -2521,9 +3092,18 @@ func init() {
 		return &String{Value: ""}
 	}}
 
-	// ── tooltip(text) → null ─────────────────────────────────────────
-	// Attach hover text to the widget drawn immediately before this
-	// call. Appears after the cursor rests on that widget for 0.5s.
+	// tooltip — attach hover text to the widget drawn just before this call.
+	//
+	// Call immediately after a widget; the tooltip appears once the cursor has
+	// rested on that widget for ~0.5s. The popup itself is drawn on top in uiEnd.
+	//
+	// @sig     tooltip(text: string) -> null
+	// @param   text  the tooltip text for the preceding widget
+	// @returns null
+	// @errors  TypeError unless given a single string argument
+	// @example no-run button("Save", 20, 20, 80, 30)  tooltip("Write to disk (Ctrl+S)")
+	// @since   0.1.0
+	// @see     modal, toast
 	Builtins["tooltip"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return typeError("tooltip expects 1 argument: text", ast.Pos{})
@@ -2555,10 +3135,24 @@ func init() {
 		return NULL
 	}}
 
-	// ── contextMenu(x, y, items, visible, [size]) → int ──────────────
-	// Returns selected item index, -1 if nothing clicked, -2 on
-	// outside-click (dismiss). Caller drives the `visible` arg from
-	// state they own (typically set on right-click).
+	// contextMenu — draw a right-click popup menu, returning the chosen index.
+	//
+	// You own the `visible` flag (typically set true on a right-click and stored
+	// with the menu position). Returns the clicked item index, -1 if nothing was
+	// clicked, or -2 on an outside click — treat -2 as "dismiss" and set visible
+	// false. When visible is false it draws nothing and returns -1.
+	//
+	// @sig     contextMenu(x: int, y: int, items: array, visible: bool, [size: number]) -> int
+	// @param   x        menu left position in pixels
+	// @param   y        menu top position in pixels
+	// @param   items    array of menu item strings
+	// @param   visible  whether the menu is currently shown
+	// @param   size     text scale (default 0.5)
+	// @returns the clicked item index, -1 if none, or -2 on an outside (dismiss) click
+	// @errors  TypeError if x/y aren't integers, items isn't an array, or visible isn't a bool; RuntimeError unless given 4 or 5 arguments
+	// @example no-run pick = contextMenu(menuX, menuY, ["Cut", "Copy", "Paste"], menuOpen)
+	// @since   0.1.0
+	// @see     dropdown, modal
 	Builtins["contextMenu"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 4 || len(args) > 5 {
 			return typeError("contextMenu expects 4-5 arguments: x, y, items, visible, [size]", ast.Pos{})
@@ -2649,8 +3243,18 @@ func init() {
 		return &Integer{Value: result}
 	}}
 
-	// ── getTypedChars() → string ─────────────────────────────────────
-	// Returns the printable characters typed this frame (Unicode-safe).
+	// getTypedChars — the printable characters typed this frame.
+	//
+	// Returns the text entered since the last frame (Unicode-safe), or "" if
+	// nothing was typed. The building block for custom text entry; the built-in
+	// textInput/textArea widgets consume this for you.
+	//
+	// @sig     getTypedChars() -> string
+	// @returns the characters typed this frame ("" if none)
+	// @errors  RuntimeError if called with any arguments
+	// @example no-run buffer = buffer + getTypedChars()
+	// @since   0.1.0
+	// @see     textInput, textArea, keyPressed
 	Builtins["getTypedChars"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 0 {
 			return typeError("getTypedChars expects no arguments", ast.Pos{})
@@ -2658,11 +3262,19 @@ func init() {
 		return &String{Value: uiInput().typedChars}
 	}}
 
-	// ── lineHeight([scale]) → int ────────────────────────────────────
-	// Pixel height of one line of widget text at `scale` (default 0.5).
-	// Lets kLex scripts compute vertically-centred text manually —
-	// e.g. `label(s, x, y + (h - lineHeight()) / 2)` to drop a label
-	// dead-centre inside an h-tall box.
+	// lineHeight — the pixel height of one line of widget text at a given scale.
+	//
+	// Lets you vertically centre text by hand, e.g.
+	// label(s, x, y + (h - lineHeight()) / 2) drops a label dead-centre in an
+	// h-tall box. Scale defaults to 0.5 (the widget default).
+	//
+	// @sig     lineHeight([scale: number]) -> int
+	// @param   scale  text scale to measure at (default 0.5)
+	// @returns one line's height in pixels at that scale
+	// @errors  TypeError if scale isn't numeric; RuntimeError if given more than 1 argument
+	// @example no-run h = lineHeight()
+	// @since   0.1.0
+	// @see     label, text, fontCharHeight
 	Builtins["lineHeight"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) > 1 {
 			return typeError("lineHeight expects 0 or 1 arguments: [scale]", ast.Pos{})
@@ -2681,8 +3293,25 @@ func init() {
 		return &Integer{Value: int(activeRenderer.lineHeight(scale) + 0.5)}
 	}}
 
-	// ── colorPicker(x, y, w, r, g, b, a) → [r, g, b, a] ──────────────
-	// Four RGBA drag sliders with a live preview swatch. Values are 0..1.
+	// colorPicker — draw four RGBA sliders with a preview, returning the colour.
+	//
+	// Immediate-mode: pass the current r, g, b, a (each 0.0–1.0) and store the
+	// returned [r, g, b, a] array — dragging a channel slider updates that
+	// component. A live swatch shows the result.
+	//
+	// @sig     colorPicker(x: int, y: int, w: int, r: number, g: number, b: number, a: number) -> array
+	// @param   x  left position in pixels
+	// @param   y  top position in pixels
+	// @param   w  slider width in pixels
+	// @param   r  current red (0.0–1.0)
+	// @param   g  current green (0.0–1.0)
+	// @param   b  current blue (0.0–1.0)
+	// @param   a  current alpha (0.0–1.0)
+	// @returns the [r, g, b, a] colour after this frame
+	// @errors  TypeError if x/y/w aren't integers or r/g/b/a aren't numbers; RuntimeError unless given 7 arguments
+	// @example no-run col = colorPicker(20, 40, 200, col[0], col[1], col[2], col[3])
+	// @since   0.1.0
+	// @see     slider, makeTheme
 	Builtins["colorPicker"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 7 {
 			return typeError("colorPicker expects 7 arguments: x, y, w, r, g, b, a", ast.Pos{})
@@ -2777,8 +3406,22 @@ func init() {
 		return result
 	}}
 
-	// ── toast(message, [style], [duration]) → null ───────────────────
-	// Queue an ephemeral notification. Rendered bottom-right by uiEnd.
+	// toast — queue an ephemeral notification, shown bottom-right.
+	//
+	// Fire-and-forget: call it once (e.g. on a click) and the message animates in
+	// bottom-right, then fades after `duration` seconds — uiEnd renders the active
+	// toasts. style ("info", "success", "warn", "error") tints it. Don't call it
+	// every frame, or you'll queue a new toast each frame.
+	//
+	// @sig     toast(message: string, [style: string], [duration: number]) -> null
+	// @param   message   the notification text
+	// @param   style     "info" (default), "success", "warn", or "error"
+	// @param   duration  seconds before it fades (default 3.0)
+	// @returns null
+	// @errors  TypeError if message/style aren't strings or duration isn't a number; RuntimeError unless given 1 to 3 arguments
+	// @example no-run if button("Save", 20, 20, 80, 30) { toast("Saved", "success") }
+	// @since   0.1.0
+	// @see     modal, tooltip
 	Builtins["toast"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 1 || len(args) > 3 {
 			return typeError("toast expects 1-3 arguments: message, [style], [duration]", ast.Pos{})
@@ -2938,7 +3581,26 @@ func init() {
 	// runeCount returns the number of Unicode codepoints in s.
 	runeCount := func(s string) int { return len([]rune(s)) }
 
-	// ── textInput(label, currentText, x, y, w, h, [size]) → string ───
+	// textInput — draw a single-line editable text field, returning its contents.
+	//
+	// Immediate-mode: pass the current string and store what it returns. Handles
+	// focus on click, caret, typing, backspace/delete, arrow/Home/End navigation,
+	// shift-selection, word-jump, undo/redo and horizontal scroll. The label is
+	// drawn above the field.
+	//
+	// @sig     textInput(label: string, currentText: string, x: int, y: int, w: int, h: int, [size: number]) -> string
+	// @param   label        caption above the field ("" for none)
+	// @param   currentText  the field's current text
+	// @param   x            left position in pixels
+	// @param   y            top position in pixels
+	// @param   w            width in pixels
+	// @param   h            height in pixels
+	// @param   size         text scale (default 0.5)
+	// @returns the field's text after this frame's edits
+	// @errors  TypeError if label/currentText aren't strings or x/y/w/h aren't integers; RuntimeError unless given 6 or 7 arguments
+	// @example no-run name = textInput("Name", name, 20, 40, 200, 28)
+	// @since   0.1.0
+	// @see     textArea, uiNextFieldID, getTypedChars
 	Builtins["textInput"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 6 || len(args) > 7 {
 			return typeError("textInput expects 6-7 arguments: label, currentText, x, y, w, h, [size]", ast.Pos{})
@@ -3332,15 +3994,28 @@ func init() {
 		return &String{Value: newText}
 	}}
 
-	// ── textArea(label, text, x, y, w, h, [size], [syntax]) → string ──────────
-	// Multi-line text editor. Lines split on '\n'; Enter inserts a
-	// newline. Vertical scroll via wheel; cursor follows on edit.
-	// Horizontal scroll is intentionally NOT supported — wide lines
-	// are clipped on the right. Selection works across line boundaries.
-	// The two optional trailing args are order-independent: a number sets
-	// the font scale; the string "klex" enables kLex syntax highlighting
-	// (keyword/string/comment/number/operator/builtin colours derived from
-	// the theme background luminance).
+	// textArea — draw a multi-line editable text box, returning its contents.
+	//
+	// The multi-line counterpart to textInput: Enter inserts a newline, the wheel
+	// scrolls vertically, and selection spans lines. Wide lines are clipped on the
+	// right (no horizontal scroll). The two optional trailing args are
+	// order-independent — a number sets the text scale, and the string "klex"
+	// turns on kLex syntax highlighting.
+	//
+	// @sig     textArea(label: string, text: string, x: int, y: int, w: int, h: int, [size: number], [syntax: string]) -> string
+	// @param   label   caption above the box ("" for none)
+	// @param   text    the box's current text
+	// @param   x       left position in pixels
+	// @param   y       top position in pixels
+	// @param   w       width in pixels
+	// @param   h       height in pixels
+	// @param   size    text scale (default 0.5)
+	// @param   syntax  "klex" to enable kLex syntax highlighting
+	// @returns the box's text after this frame's edits
+	// @errors  TypeError if label/text aren't strings, x/y/w/h aren't integers, or the optional args aren't a number/string; RuntimeError unless given 6 to 8 arguments
+	// @example no-run code = textArea("Source", code, 20, 40, 400, 300, "klex")
+	// @since   0.1.0
+	// @see     textInput, getTypedChars
 	Builtins["textArea"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 6 || len(args) > 8 {
 			return typeError("textArea expects 6-8 arguments: label, text, x, y, w, h, [size], [syntax]", ast.Pos{})
@@ -3928,7 +4603,25 @@ func init() {
 		return &String{Value: newText}
 	}}
 
-	// ── table(headers, rows, x, y, w, h, [size]) → selectedRow ───────
+	// table — draw a scrollable data grid, returning the selected row index.
+	//
+	// `headers` is an array of column titles; `rows` is an array of rows, each an
+	// array of cell values. Supports click-to-select, scrolling, and click-to-sort
+	// by column. Returns the selected row index (-1 if none).
+	//
+	// @sig     table(headers: array, rows: array, x: int, y: int, w: int, h: int, [size: number]) -> int
+	// @param   headers  array of column header strings
+	// @param   rows     array of rows, each an array of cell values
+	// @param   x        left position in pixels
+	// @param   y        top position in pixels
+	// @param   w        width in pixels
+	// @param   h        height in pixels
+	// @param   size     text scale (default 0.5)
+	// @returns the selected row index, or -1 if no row is selected
+	// @errors  TypeError if headers/rows aren't arrays or x/y/w/h aren't integers; RuntimeError unless given 6 or 7 arguments
+	// @example no-run sel = table(["Name", "Size"], rows, 20, 40, 400, 300)
+	// @since   0.1.0
+	// @see     list, scrollArea, treeView
 	Builtins["table"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) < 6 || len(args) > 7 {
 			return typeError("table expects 6-7 arguments: headers, rows, x, y, w, h, [size]", ast.Pos{})

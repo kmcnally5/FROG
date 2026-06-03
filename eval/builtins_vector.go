@@ -20,21 +20,22 @@ func toFloat64Local(o Object) (float64, bool) {
 }
 
 func init() {
-	// cosineSim(a, b) → float
+	// cosineSim — cosine similarity of two equal-length numeric vectors.
 	//
-	// Compute the cosine similarity of two equal-length numeric arrays.
-	// Range: -1.0 (opposite) … 0.0 (orthogonal) … 1.0 (identical
-	// direction). The standard similarity metric for sentence/document
-	// embeddings — k-nearest-neighbour searches in stdlib/ai/vector_store.lex
-	// use this to rank results.
+	// Ranges from -1.0 (opposite) through 0.0 (orthogonal) to 1.0 (same
+	// direction). The standard similarity metric for embeddings — kNN search in
+	// stdlib/ai/vector_store.lex ranks results with it. A zero-magnitude vector
+	// returns 0.
 	//
-	// Both arrays must have the same length and contain only numbers
-	// (Integer or Float; mixed is fine). Zero-magnitude vectors return 0.
-	//
-	//   v1 = [1.0, 0.0, 0.0]
-	//   v2 = [0.0, 1.0, 0.0]
-	//   cosineSim(v1, v2)  // 0.0
-	//   cosineSim(v1, v1)  // 1.0
+	// @sig     cosineSim(a: array, b: array) -> float
+	// @param   a  a numeric vector
+	// @param   b  a numeric vector of the same length as a
+	// @returns the cosine similarity, in [-1.0, 1.0]
+	// @errors  TypeError if either isn't a numeric array; RuntimeError on a length mismatch
+	// @example cosineSim([1.0, 0.0], [0.0, 1.0])   → 0
+	// @example cosineSim([2.0, 0.0], [3.0, 0.0])   → 1
+	// @since   0.1.0
+	// @see     dotProduct, vecNorm
 	Builtins["cosineSim"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("cosineSim expects 2 arguments (vec1, vec2)", ast.Pos{})
@@ -74,12 +75,20 @@ func init() {
 		return &Float{Value: dot / (math.Sqrt(na) * math.Sqrt(nb))}
 	}}
 
-	// dotProduct(a, b) → float
+	// dotProduct — the inner product of two equal-length numeric vectors.
 	//
-	// Inner product of two equal-length numeric arrays. Faster than
-	// cosineSim (no normalisation step) — useful when your vectors are
-	// already normalised, or when you want raw similarity rather than
-	// cosine-corrected similarity.
+	// Faster than cosineSim (no normalisation step) — use it when your vectors are
+	// already normalised, or when you want raw rather than cosine-corrected
+	// similarity.
+	//
+	// @sig     dotProduct(a: array, b: array) -> float
+	// @param   a  a numeric vector
+	// @param   b  a numeric vector of the same length as a
+	// @returns the sum of a[i]*b[i] over all i
+	// @errors  TypeError if either isn't a numeric array; RuntimeError on a length mismatch
+	// @example dotProduct([1.0, 2.0, 3.0], [4.0, 5.0, 6.0])   → 32
+	// @since   0.1.0
+	// @see     cosineSim, vecNorm
 	Builtins["dotProduct"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("dotProduct expects 2 arguments (vec1, vec2)", ast.Pos{})
@@ -111,11 +120,18 @@ func init() {
 		return &Float{Value: dot}
 	}}
 
-	// vecNorm(v) → float
+	// vecNorm — the L2 (Euclidean) norm of a numeric vector.
 	//
-	// L2 (Euclidean) norm of a numeric array — the geometric length of
-	// the vector. Useful for normalising vectors (`v / vecNorm(v)`) so
-	// dotProduct becomes equivalent to cosineSim.
+	// The geometric length of the vector. Normalising by it (`v / vecNorm(v)`)
+	// makes dotProduct equivalent to cosineSim.
+	//
+	// @sig     vecNorm(v: array) -> float
+	// @param   v  a numeric vector
+	// @returns sqrt of the sum of squares of v's elements
+	// @errors  TypeError if v isn't a numeric array
+	// @example vecNorm([3.0, 4.0])   → 5
+	// @since   0.1.0
+	// @see     cosineSim, dotProduct
 	Builtins["vecNorm"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("vecNorm expects 1 argument (vec)", ast.Pos{})

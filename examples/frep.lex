@@ -253,7 +253,7 @@ fn main() {
     let i = 0
     while i < num_workers {
         let task = async(fn() {
-            let file_meta, ok = recv(file_ch)
+        let file_meta, ok = recv(file_ch)
             while ok {
                 let file_path = file_meta["path"]
                 let file_size = file_meta["size"]

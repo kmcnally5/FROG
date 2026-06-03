@@ -13,16 +13,34 @@ import (
 type vec2 struct{ x, y float32 }
 
 func init() {
-	// beginPath() → null
-	// Clear the current path and reset the pen. Must be called before building a new path.
+	// beginPath — start a new vector path, clearing any previous one.
+	//
+	// The first step of the path-drawing workflow: beginPath, then moveTo /
+	// lineTo / bezierTo / quadTo to build the shape, then fillPath or strokePath.
+	// Call from inside a window() draw function.
+	//
+	// @sig     beginPath() -> null
+	// @returns null
+	// @errors  none
+	// @example no-run beginPath()
+	// @since   0.1.0
+	// @see     moveTo, lineTo, fillPath, strokePath
 	Builtins["beginPath"] = &Builtin{Fn: func(args []Object) Object {
 		gfx.pathPts = gfx.pathPts[:0]
 		gfx.pathHasStart = false
 		return NULL
 	}}
 
-	// moveTo(x, y) → null
-	// Move the pen to (x, y) without drawing. Starts a new contour.
+	// moveTo — move the pen to (x, y) without drawing, starting a new contour.
+	//
+	// @sig     moveTo(x: number, y: number) -> null
+	// @param   x  the x coordinate
+	// @param   y  the y coordinate
+	// @returns null
+	// @errors  RuntimeError unless given exactly 2 numeric arguments
+	// @example no-run moveTo(10.0, 10.0)
+	// @since   0.1.0
+	// @see     beginPath, lineTo, closePath
 	Builtins["moveTo"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 || !allNumeric(args) {
 			return runtimeError("moveTo expects 2 numeric arguments: x, y", ast.Pos{})
@@ -36,8 +54,16 @@ func init() {
 		return NULL
 	}}
 
-	// lineTo(x, y) → null
-	// Add a straight line from the current pen to (x, y).
+	// lineTo — add a straight line from the pen to (x, y).
+	//
+	// @sig     lineTo(x: number, y: number) -> null
+	// @param   x  the x coordinate
+	// @param   y  the y coordinate
+	// @returns null
+	// @errors  RuntimeError if not given 2 numeric arguments, or if moveTo wasn't called first
+	// @example no-run lineTo(100.0, 50.0)
+	// @since   0.1.0
+	// @see     moveTo, bezierTo, quadTo
 	Builtins["lineTo"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 || !allNumeric(args) {
 			return runtimeError("lineTo expects 2 numeric arguments: x, y", ast.Pos{})
@@ -52,8 +78,23 @@ func init() {
 		return NULL
 	}}
 
-	// bezierTo(cp1x, cp1y, cp2x, cp2y, x, y) → null
-	// Add a cubic Bézier from the current pen to (x, y) via control points (cp1x,cp1y) and (cp2x,cp2y).
+	// bezierTo — add a cubic Bézier curve from the pen to (x, y).
+	//
+	// The curve bends toward the two control points (cp1, cp2) on its way to the
+	// endpoint (x, y).
+	//
+	// @sig     bezierTo(cp1x: number, cp1y: number, cp2x: number, cp2y: number, x: number, y: number) -> null
+	// @param   cp1x  first control point x
+	// @param   cp1y  first control point y
+	// @param   cp2x  second control point x
+	// @param   cp2y  second control point y
+	// @param   x     endpoint x
+	// @param   y     endpoint y
+	// @returns null
+	// @errors  RuntimeError if not given 6 numeric arguments, or if moveTo wasn't called first
+	// @example no-run bezierTo(20.0, 0.0, 40.0, 80.0, 60.0, 40.0)
+	// @since   0.1.0
+	// @see     quadTo, lineTo, moveTo
 	Builtins["bezierTo"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 6 || !allNumeric(args) {
 			return runtimeError("bezierTo expects 6 numeric arguments: cp1x, cp1y, cp2x, cp2y, x, y", ast.Pos{})
@@ -70,9 +111,21 @@ func init() {
 		return NULL
 	}}
 
-	// quadTo(cpx, cpy, x, y) → null
-	// Add a quadratic Bézier from the current pen to (x, y) via control point (cpx, cpy).
-	// Internally elevated to a cubic for uniform tessellation.
+	// quadTo — add a quadratic Bézier curve from the pen to (x, y).
+	//
+	// Bends toward a single control point (cpx, cpy) on its way to the endpoint
+	// (x, y). Internally elevated to a cubic for uniform tessellation.
+	//
+	// @sig     quadTo(cpx: number, cpy: number, x: number, y: number) -> null
+	// @param   cpx  control point x
+	// @param   cpy  control point y
+	// @param   x    endpoint x
+	// @param   y    endpoint y
+	// @returns null
+	// @errors  RuntimeError if not given 4 numeric arguments, or if moveTo wasn't called first
+	// @example no-run quadTo(50.0, 0.0, 100.0, 40.0)
+	// @since   0.1.0
+	// @see     bezierTo, lineTo, moveTo
 	Builtins["quadTo"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 4 || !allNumeric(args) {
 			return runtimeError("quadTo expects 4 numeric arguments: cpx, cpy, x, y", ast.Pos{})
@@ -91,8 +144,14 @@ func init() {
 		return NULL
 	}}
 
-	// closePath() → null
-	// Close the current contour by adding a line back to the last moveTo point.
+	// closePath — close the current contour with a line back to its start.
+	//
+	// @sig     closePath() -> null
+	// @returns null
+	// @errors  none
+	// @example no-run closePath()
+	// @since   0.1.0
+	// @see     beginPath, fillPath, strokePath
 	Builtins["closePath"] = &Builtin{Fn: func(args []Object) Object {
 		if !gfx.pathHasStart {
 			return NULL
@@ -102,9 +161,17 @@ func init() {
 		return NULL
 	}}
 
-	// fillPath() → null
-	// Fill the current path with the current fill colour.
-	// Uses GPU stencil even-odd rule — handles concave and complex shapes correctly.
+	// fillPath — fill the current path with the current fill colour.
+	//
+	// Uses a GPU even-odd stencil, so concave and self-intersecting shapes fill
+	// correctly. Set the colour with fill() first.
+	//
+	// @sig     fillPath() -> null
+	// @returns null
+	// @errors  none (a path with fewer than 3 points draws nothing)
+	// @example no-run fillPath()
+	// @since   0.1.0
+	// @see     strokePath, fill, beginPath
 	Builtins["fillPath"] = &Builtin{Fn: func(args []Object) Object {
 		if len(gfx.pathPts) >= 3 {
 			pathFill(gfx.pathPts, gfx.fillColor)
@@ -112,8 +179,16 @@ func init() {
 		return NULL
 	}}
 
-	// strokePath() → null
-	// Stroke the current path with the current stroke colour and strokeWeight.
+	// strokePath — stroke the current path outline with the current stroke colour and weight.
+	//
+	// Set them with stroke() and strokeWeight() first.
+	//
+	// @sig     strokePath() -> null
+	// @returns null
+	// @errors  none (a path with fewer than 2 points draws nothing)
+	// @example no-run strokePath()
+	// @since   0.1.0
+	// @see     fillPath, stroke, strokeWeight
 	Builtins["strokePath"] = &Builtin{Fn: func(args []Object) Object {
 		if len(gfx.pathPts) >= 2 {
 			pathStroke(gfx.pathPts, gfx.strokeColor, gfx.strokeWidth)

@@ -34,11 +34,21 @@ import (
 )
 
 func init() {
-	// runScript(src) → {output, error, isError}
-	// Evaluates src in a fresh Environment. Captures println output.
-	// Returns a hash so the caller can display both stdout and errors.
-	// Scripts that call window() are rejected with a clear message —
-	// the playground canvas belongs to the IDE itself.
+	// runScript — evaluate a kLex source string in isolation (browser playground only).
+	//
+	// WASM-only: runs `src` as a complete program in a fresh environment, capturing
+	// its printed output. Returns a hash with "output" (printed text), "error" (the
+	// message, "" on success) and "isError" (bool). Definitions don't persist
+	// between calls. Scripts that call window() are rejected — the canvas belongs to
+	// the playground IDE. Not available on desktop.
+	//
+	// @sig     runScript(src: string) -> hash
+	// @param   src  the kLex source to evaluate
+	// @returns a hash with keys "output", "error", and "isError"
+	// @errors  TypeError if src isn't a string; RuntimeError unless given 1 argument
+	// @example no-run result = runScript("println(2 + 2)")
+	// @since   0.1.0
+	// @see     openURL
 	Builtins["runScript"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("runScript expects 1 argument (src)", ast.Pos{})
@@ -92,8 +102,18 @@ func init() {
 		return makeRunResult(outBuf.String(), errStr, errStr != "")
 	}}
 
-	// openURL(url) → null
-	// Opens url in a new browser tab via window.open().
+	// openURL — open a URL in a new browser tab (browser playground only).
+	//
+	// WASM-only: calls window.open(url, "_blank"), used by the playground's
+	// documentation links. Not available on desktop.
+	//
+	// @sig     openURL(url: string) -> null
+	// @param   url  the URL to open in a new tab
+	// @returns null
+	// @errors  TypeError if url isn't a string; RuntimeError unless given 1 argument
+	// @example no-run openURL("https://github.com/kmcnally5/FROG")
+	// @since   0.1.0
+	// @see     runScript
 	Builtins["openURL"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 1 {
 			return runtimeError("openURL expects 1 argument (url)", ast.Pos{})

@@ -77,16 +77,24 @@ func parallelChunks(n int) (int, int) {
 }
 
 func init() {
-	// parallelArrayUpdate mutates each element in-place using fn(value, index).
-	// The function's return value replaces the element at that index.
-	// Uses runtime.NumCPU() goroutines; each works on a contiguous chunk.
+	// parallelArrayUpdate — update every element in place via fn(value, index), across CPU cores.
 	//
-	// Use this for dense data-parallel updates (e.g. virus map decay):
-	//   parallelArrayUpdate(cells, fn(v, i) { v * 0.5 })
+	// Each worker handles a contiguous chunk on its own goroutine
+	// (runtime.NumCPU() workers); fn's return value replaces the element at that
+	// index. Mutates and returns the same array — the in-place counterpart to
+	// parallelArrayMap, for dense data-parallel updates (e.g. decay passes). Since
+	// chunks run concurrently, fn must not depend on other elements. On error,
+	// returns the first error; other workers may already have finished their
+	// chunks.
 	//
-	// Returns the same array (mutated). On error, returns the first error
-	// encountered; other workers may have completed their chunks before the
-	// error is observed.
+	// @sig     parallelArrayUpdate(arr: array, fn: function) -> array
+	// @param   arr  the array to update in place
+	// @param   fn   callback invoked as fn(element, index); its return replaces the element
+	// @returns the same array, mutated
+	// @errors  TypeError if arr isn't an array or fn isn't callable; propagates the first error raised by fn
+	// @example parallelArrayUpdate([1, 2, 3], fn(v, i) { v * 2 }) → [2, 4, 6]
+	// @since   0.1.0
+	// @see     parallelArrayMap, parallelArrayForEach
 	Builtins["parallelArrayUpdate"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("parallelArrayUpdate expects 2 arguments (array, fn)", ast.Pos{})
@@ -148,12 +156,22 @@ func init() {
 		return arr
 	}}
 
-	// parallelArrayMap returns a new array where each element is fn(value, index)
-	// of the corresponding input element. Element order is preserved.
-	// Uses runtime.NumCPU() goroutines.
+	// parallelArrayMap — a new array of fn(value, index) for each element, across CPU cores.
 	//
-	// Use this when you need a transformed copy without mutating the input:
-	//   doubled = parallelArrayMap(nums, fn(v, i) { v * 2 })
+	// The parallel `map`: work is split into runtime.NumCPU() contiguous chunks,
+	// each transformed on its own goroutine, and results are collected by index
+	// so order is preserved. The input is left unchanged. Because chunks run
+	// concurrently, fn must be independent per element (no cross-element state).
+	// On error, returns the first error raised.
+	//
+	// @sig     parallelArrayMap(arr: array, fn: function) -> array
+	// @param   arr  the array to transform (left unchanged)
+	// @param   fn   callback invoked as fn(element, index); its return becomes the output element
+	// @returns a new array of the same length holding each fn result, in order
+	// @errors  TypeError if arr isn't an array or fn isn't callable; propagates the first error raised by fn
+	// @example parallelArrayMap([1, 2, 3], fn(v, i) { v * 2 }) → [2, 4, 6]
+	// @since   0.1.0
+	// @see     parallelArrayUpdate, parallelArrayReduce, map
 	Builtins["parallelArrayMap"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 2 {
 			return runtimeError("parallelArrayMap expects 2 arguments (array, fn)", ast.Pos{})
@@ -217,23 +235,26 @@ func init() {
 		return &Array{Elements: result}
 	}}
 
-	// parallelArrayReduce performs a parallel reduction over the array.
+	// parallelArrayReduce — fold an array to a single value across CPU cores.
 	//
-	// CONSTRAINTS (both required for correct results):
-	//   1. fn(accumulator, element) MUST be ASSOCIATIVE
-	//      (e.g. +, *, max — chunk order is not guaranteed).
-	//   2. `initial` MUST be the IDENTITY for fn
-	//      (0 for +, 1 for *, "" for string concat, [] for array concat).
+	// Each worker reduces its own chunk starting from `initial`, then the partial
+	// results are folded together serially. This only matches a serial reduce
+	// when BOTH hold: (1) fn(acc, element) is ASSOCIATIVE (e.g. +, *, max — chunk
+	// order isn't guaranteed); (2) `initial` is the IDENTITY for fn (0 for +, 1
+	// for *, "" for concat, [] for array concat). A non-identity init is folded in
+	// once per worker plus once more in the merge, so the result is wrong. When
+	// you need a non-identity seed, use stdlib parallel.lex's parallel_reduce,
+	// which takes a separate merge function and applies the seed exactly once.
 	//
-	// Why identity matters: each worker starts its own chunk from `initial`,
-	// and the final serial pass also folds `initial` in once more. If you pass
-	// a non-identity init like 100 for +, you get 100 applied (numWorkers + 1)
-	// times instead of once. The result will not equal a serial reduce.
-	//
-	// For non-identity inits, use stdlib/parallel.lex's parallel_reduce, which
-	// takes a separate mergeFn and applies init exactly once.
-	//
-	//   total = parallelArrayReduce(nums, fn(a, b) { a + b }, 0)
+	// @sig     parallelArrayReduce(arr: array, fn: function, initial: any) -> any
+	// @param   arr      the array to reduce
+	// @param   fn       associative reducer invoked as fn(accumulator, element)
+	// @param   initial  the identity value for fn (seeds every worker)
+	// @returns the reduced value; returns initial unchanged for an empty array
+	// @errors  TypeError if arr isn't an array or fn isn't callable; propagates the first error raised by fn
+	// @example parallelArrayReduce([1, 2, 3, 4], fn(a, b) { a + b }, 0) → 10
+	// @since   0.1.0
+	// @see     parallelArrayMap, reduce
 	Builtins["parallelArrayReduce"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 3 {
 			return runtimeError("parallelArrayReduce expects 3 arguments (array, fn, initial)", ast.Pos{})

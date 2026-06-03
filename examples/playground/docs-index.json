@@ -1,2835 +1,2387 @@
 [
   {
     "name": "atomicAdd",
-    "sig": "atomicAdd(arr, idx, delta)",
-    "summary": "Atomically adds delta to the value at idx and returns the result.",
+    "sig": "atomicAdd(arr: AtomicIntArray|AtomicFloatArray, idx: int, delta: number) -\u003e number",
+    "summary": "Atomically add delta to a slot and return the new value.",
     "category": "Atomic Arrays",
     "doc": "BUILTINS.MD",
-    "anchor": "atomicaddarr-idx-delta--int"
+    "anchor": "atomicaddarr-atomicintarrayatomicfloatarray-idx-int-delta-number--number"
   },
   {
     "name": "atomicCAS",
-    "sig": "atomicCAS(arr, idx, old, new)",
-    "summary": "Compare-and-swap. If the current value at idx equals old, replaces it",
+    "sig": "atomicCAS(arr: AtomicIntArray|AtomicFloatArray, idx: int, old: number, new: number) -\u003e bool",
+    "summary": "Compare-and-swap a slot, the building block for lock-free algorithms.",
     "category": "Atomic Arrays",
     "doc": "BUILTINS.MD",
-    "anchor": "atomiccasarr-idx-old-new--bool"
+    "anchor": "atomiccasarr-atomicintarrayatomicfloatarray-idx-int-old-number-new-number--bool"
   },
   {
     "name": "atomicFloatArray",
-    "sig": "atomicFloatArray(size, [initial])",
-    "summary": "Creates a fixed-size lock-free float64 array. Optional initial value",
+    "sig": "atomicFloatArray(size: int, [initial: number]) -\u003e AtomicFloatArray",
+    "summary": "Create a fixed-size lock-free float array.",
     "category": "Atomic Arrays",
     "doc": "BUILTINS.MD",
-    "anchor": "atomicfloatarraysize-initial"
+    "anchor": "atomicfloatarraysize-int-initial-number--atomicfloatarray"
   },
   {
     "name": "atomicIntArray",
-    "sig": "atomicIntArray(size, [initial])",
-    "summary": "Creates a fixed-size lock-free integer array. Optional initial value",
+    "sig": "atomicIntArray(size: int, [initial: int]) -\u003e AtomicIntArray",
+    "summary": "Create a fixed-size lock-free integer array.",
     "category": "Atomic Arrays",
     "doc": "BUILTINS.MD",
-    "anchor": "atomicintarraysize-initial"
+    "anchor": "atomicintarraysize-int-initial-int--atomicintarray"
   },
   {
     "name": "atomicLoad",
-    "sig": "atomicLoad(arr, idx)",
-    "summary": "Atomically reads and returns the value at the given index.",
+    "sig": "atomicLoad(arr: AtomicIntArray|AtomicFloatArray, idx: int) -\u003e number",
+    "summary": "Atomically read the value at an index.",
     "category": "Atomic Arrays",
     "doc": "BUILTINS.MD",
-    "anchor": "atomicloadarr-idx--int"
+    "anchor": "atomicloadarr-atomicintarrayatomicfloatarray-idx-int--number"
   },
   {
     "name": "atomicStore",
-    "sig": "atomicStore(arr, idx, value)",
-    "summary": "Atomically writes the value at the given index.",
+    "sig": "atomicStore(arr: AtomicIntArray|AtomicFloatArray, idx: int, value: number) -\u003e null",
+    "summary": "Atomically write a value at an index.",
     "category": "Atomic Arrays",
     "doc": "BUILTINS.MD",
-    "anchor": "atomicstorearr-idx-value--null"
+    "anchor": "atomicstorearr-atomicintarrayatomicfloatarray-idx-int-value-number--null"
   },
   {
     "name": "parallelArrayForEach",
-    "sig": "parallelArrayForEach(arr, fn)",
-    "summary": "Like parallelArrayMap but discards return values. Use this when the",
+    "sig": "parallelArrayForEach(arr: array, fn: function) -\u003e null",
+    "summary": "Run fn over every element across worker goroutines, discarding results.",
     "category": "Atomic Arrays",
     "doc": "BUILTINS.MD",
-    "anchor": "parallelarrayforeacharr-fn--null"
+    "anchor": "parallelarrayforeacharr-array-fn-function--null"
   },
   {
     "name": "bitAnd",
-    "sig": "bitAnd(a, b)",
-    "summary": "Bitwise AND of two integers. Both operands must be integer.",
+    "sig": "bitAnd(a: int, b: int) -\u003e int",
+    "summary": "Bitwise AND of two integers.",
     "category": "Bitwise",
     "doc": "BUILTINS.MD",
-    "anchor": "bitanda-b--int"
+    "anchor": "bitanda-int-b-int--int"
   },
   {
     "name": "bitNot",
-    "sig": "bitNot(x)",
+    "sig": "bitNot(x: int) -\u003e int",
     "summary": "Bitwise NOT (ones' complement) of an integer.",
     "category": "Bitwise",
     "doc": "BUILTINS.MD",
-    "anchor": "bitnotx--int"
+    "anchor": "bitnotx-int--int"
   },
   {
     "name": "bitOr",
-    "sig": "bitOr(a, b)",
-    "summary": "Bitwise OR of two integers. Both operands must be integer.",
+    "sig": "bitOr(a: int, b: int) -\u003e int",
+    "summary": "Bitwise OR of two integers.",
     "category": "Bitwise",
     "doc": "BUILTINS.MD",
-    "anchor": "bitora-b--int"
+    "anchor": "bitora-int-b-int--int"
   },
   {
     "name": "bitShiftLeft",
-    "sig": "bitShiftLeft(x, n)",
-    "summary": "Shift x left by n bits. Equivalent to x * 2^n for non-negative x.",
+    "sig": "bitShiftLeft(x: int, n: int) -\u003e int",
+    "summary": "Shift x left by n bits.",
     "category": "Bitwise",
     "doc": "BUILTINS.MD",
-    "anchor": "bitshiftleftx-n--int"
+    "anchor": "bitshiftleftx-int-n-int--int"
   },
   {
     "name": "bitShiftRight",
-    "sig": "bitShiftRight(x, n)",
-    "summary": "Arithmetic right shift of x by n bits. Sign bit is preserved.",
+    "sig": "bitShiftRight(x: int, n: int) -\u003e int",
+    "summary": "Arithmetic right shift of x by n bits (sign-preserving).",
     "category": "Bitwise",
     "doc": "BUILTINS.MD",
-    "anchor": "bitshiftrightx-n--int"
+    "anchor": "bitshiftrightx-int-n-int--int"
   },
   {
     "name": "bitXor",
-    "sig": "bitXor(a, b)",
-    "summary": "Bitwise XOR of two integers. Both operands must be integer.",
+    "sig": "bitXor(a: int, b: int) -\u003e int",
+    "summary": "Bitwise XOR of two integers.",
     "category": "Bitwise",
     "doc": "BUILTINS.MD",
-    "anchor": "bitxora-b--int"
+    "anchor": "bitxora-int-b-int--int"
   },
   {
     "name": "base64ToBytes",
-    "sig": "base64ToBytes(s)",
-    "summary": "── base64ToBytes(s: string) → (bytes, error) ──────────────────────\ufffd\ufffd…",
+    "sig": "base64ToBytes(s: string) -\u003e (bytes, error)",
+    "summary": "Decode standard base64, returning (value, err).",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "base64tobytess--tuple"
+    "anchor": "base64tobytess-string--bytes-error"
   },
   {
     "name": "bytes",
-    "sig": "bytes(x)",
-    "summary": "utf-8 encode the string",
+    "sig": "bytes(x: any) -\u003e bytes",
+    "summary": "Construct a bytes value from a string, array, int, or bytes.",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "bytesx--bytes"
+    "anchor": "bytesx-any--bytes"
   },
   {
     "name": "bytesConcat",
-    "sig": "bytesConcat(arr)",
-    "summary": "fine for small payloads but ~40ms per",
+    "sig": "bytesConcat(arr: array) -\u003e bytes",
+    "summary": "Merge an array of bytes values into one.",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "bytesconcatarr--bytes"
+    "anchor": "bytesconcatarr-array--bytes"
   },
   {
     "name": "bytesToBase64",
-    "sig": "bytesToBase64(b)",
-    "summary": "── bytesToBase64(b: bytes) → string ─────────────────────────\ufffd\ufffd…",
+    "sig": "bytesToBase64(b: bytes) -\u003e string",
+    "summary": "Standard base64 encode (RFC 4648, padded).",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "bytestobase64b--string"
+    "anchor": "bytestobase64b-bytes--string"
   },
   {
     "name": "bytesToFloats",
-    "sig": "bytesToFloats(b)",
-    "summary": "── bytesToFloats(bs) → array ────────────────────────────…",
+    "sig": "bytesToFloats(bs: bytes) -\u003e (array, error)",
+    "summary": "Unpack little-endian float32 bytes into a number array.",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "bytestofloatsb--tuple"
+    "anchor": "bytestofloatsbs-bytes--array-error"
   },
   {
     "name": "bytesToHex",
-    "sig": "bytesToHex(b)",
-    "summary": "── bytesToHex(b: bytes) → string ──────────────────────────\ufffd\ufffd…",
+    "sig": "bytesToHex(b: bytes) -\u003e string",
+    "summary": "Lowercase hex encode, two chars per byte, no separator.",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "bytestohexb--string"
+    "anchor": "bytestohexb-bytes--string"
   },
   {
     "name": "bytesToStr",
-    "sig": "bytesToStr(b)",
-    "summary": "err.code is \"BYTES_INVALID_UTF8\". Use",
+    "sig": "bytesToStr(b: bytes) -\u003e (string, error)",
+    "summary": "Utf-8 decode bytes into a string, returning (value, err).",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "bytestostrb--tuple"
+    "anchor": "bytestostrb-bytes--string-error"
   },
   {
     "name": "floatsToBytes",
-    "sig": "floatsToBytes(arr)",
-    "summary": "── floatsToBytes(arr) → bytes ───────────────────────────\ufffd\ufffd…",
+    "sig": "floatsToBytes(arr: array) -\u003e bytes",
+    "summary": "Pack a number array as little-endian float32 bytes.",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "floatstobytesarr--bytes"
+    "anchor": "floatstobytesarr-array--bytes"
   },
   {
     "name": "hexToBytes",
-    "sig": "hexToBytes(s)",
-    "summary": "── hexToBytes(s: string) → (bytes, error) ───────────────────────\ufffd\ufffd…",
+    "sig": "hexToBytes(s: string) -\u003e (bytes, error)",
+    "summary": "Decode a hex string (upper or lower case), returning (value, err).",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "hextobytess--tuple"
+    "anchor": "hextobytess-string--bytes-error"
   },
   {
     "name": "strToBytes",
-    "sig": "strToBytes(s)",
-    "summary": "but having it as an explicit builtin keeps",
+    "sig": "strToBytes(s: string) -\u003e bytes",
+    "summary": "Utf-8 encode a string into bytes.",
     "category": "Bytes",
     "doc": "BUILTINS.MD",
-    "anchor": "strtobytess--bytes"
+    "anchor": "strtobytess-string--bytes"
   },
   {
     "name": "atomicHashAdd",
-    "sig": "atomicHashAdd(ch, key, delta)",
-    "summary": "Same as atomicHashIncr but for floats. Stores Float values; if key",
+    "sig": "atomicHashAdd(ch: ConcurrentHash, key: string|int|bool, delta: number) -\u003e float",
+    "summary": "Atomically add a numeric delta to ch[key], returning the new float.",
     "category": "Concurrent Hash",
     "doc": "BUILTINS.MD",
-    "anchor": "atomichashaddch-key-delta"
+    "anchor": "atomichashaddch-concurrenthash-key-stringintbool-delta-number--float"
   },
   {
     "name": "atomicHashCAS",
-    "sig": "atomicHashCAS(ch, key, old, new)",
-    "summary": "Compare-and-swap the value at key. Returns true if swap succeeded",
+    "sig": "atomicHashCAS(ch: ConcurrentHash, key: string|int|bool, old: any, new: any) -\u003e bool",
+    "summary": "Compare-and-swap ch[key], the building block for lock-free updates.",
     "category": "Concurrent Hash",
     "doc": "BUILTINS.MD",
-    "anchor": "atomichashcasch-key-old-new--bool"
+    "anchor": "atomichashcasch-concurrenthash-key-stringintbool-old-any-new-any--bool"
   },
   {
     "name": "atomicHashIncr",
-    "sig": "atomicHashIncr(ch, key, delta)",
-    "summary": "Atomically increments the integer at key by delta. If the key doesn't",
+    "sig": "atomicHashIncr(ch: ConcurrentHash, key: string|int|bool, delta: int) -\u003e int",
+    "summary": "Atomically add an integer delta to ch[key], returning the new value.",
     "category": "Concurrent Hash",
     "doc": "BUILTINS.MD",
-    "anchor": "atomichashincrch-key-delta"
+    "anchor": "atomichashincrch-concurrenthash-key-stringintbool-delta-int--int"
   },
   {
     "name": "concurrentHash",
-    "sig": "concurrentHash(…)",
-    "summary": "",
+    "sig": "concurrentHash() -\u003e ConcurrentHash",
+    "summary": "Create an empty thread-safe hash map for shared state.",
     "category": "Concurrent Hash",
     "doc": "BUILTINS.MD",
-    "anchor": "concurrenthash"
+    "anchor": "concurrenthash--concurrenthash"
   },
   {
     "name": "quiesceLen",
-    "sig": "quiesceLen(ch)",
-    "summary": "e.g. for invariants, assertions, or",
+    "sig": "quiesceLen(ch: ConcurrentHash) -\u003e int",
+    "summary": "The exact entry count of a ConcurrentHash, by walking every entry.",
     "category": "Concurrent Hash",
     "doc": "BUILTINS.MD",
-    "anchor": "quiescelench--int"
+    "anchor": "quiescelench-concurrenthash--int"
   },
   {
     "name": "color_bg_black",
-    "sig": "color_bg_black(…)",
-    "summary": "",
+    "sig": "color_bg_black() -\u003e string",
+    "summary": "The ANSI escape code for a black background.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_bg_black--string"
   },
   {
     "name": "color_bg_blue",
-    "sig": "color_bg_blue(…)",
-    "summary": "",
+    "sig": "color_bg_blue() -\u003e string",
+    "summary": "The ANSI escape code for a blue background.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_bg_blue--string"
   },
   {
     "name": "color_bg_cyan",
-    "sig": "color_bg_cyan(…)",
-    "summary": "",
+    "sig": "color_bg_cyan() -\u003e string",
+    "summary": "The ANSI escape code for a cyan background.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_bg_cyan--string"
   },
   {
     "name": "color_bg_green",
-    "sig": "color_bg_green(…)",
-    "summary": "",
+    "sig": "color_bg_green() -\u003e string",
+    "summary": "The ANSI escape code for a green background.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_bg_green--string"
   },
   {
     "name": "color_bg_magenta",
-    "sig": "color_bg_magenta(…)",
-    "summary": "",
+    "sig": "color_bg_magenta() -\u003e string",
+    "summary": "The ANSI escape code for a magenta background.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_bg_magenta--string"
   },
   {
     "name": "color_bg_red",
-    "sig": "color_bg_red(…)",
-    "summary": "",
+    "sig": "color_bg_red() -\u003e string",
+    "summary": "The ANSI escape code for a red background.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_bg_red--string"
   },
   {
     "name": "color_bg_white",
-    "sig": "color_bg_white(…)",
-    "summary": "",
+    "sig": "color_bg_white() -\u003e string",
+    "summary": "The ANSI escape code for a white background.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_bg_white--string"
   },
   {
     "name": "color_bg_yellow",
-    "sig": "color_bg_yellow(…)",
-    "summary": "",
+    "sig": "color_bg_yellow() -\u003e string",
+    "summary": "The ANSI escape code for a yellow background.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_bg_yellow--string"
   },
   {
     "name": "color_black",
-    "sig": "color_black(…)",
-    "summary": "",
+    "sig": "color_black() -\u003e string",
+    "summary": "The ANSI escape code for black foreground text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_black--string"
   },
   {
     "name": "color_blue",
-    "sig": "color_blue(…)",
-    "summary": "",
+    "sig": "color_blue() -\u003e string",
+    "summary": "The ANSI escape code for blue foreground text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_blue--string"
   },
   {
     "name": "color_bold",
-    "sig": "color_bold(…)",
-    "summary": "",
+    "sig": "color_bold() -\u003e string",
+    "summary": "The ANSI escape code for bold (bright) text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_bold--string"
   },
   {
     "name": "color_cyan",
-    "sig": "color_cyan(…)",
-    "summary": "",
+    "sig": "color_cyan() -\u003e string",
+    "summary": "The ANSI escape code for cyan foreground text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_cyan--string"
   },
   {
     "name": "color_dim",
-    "sig": "color_dim(…)",
-    "summary": "",
+    "sig": "color_dim() -\u003e string",
+    "summary": "The ANSI escape code for dim (faint) text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_dim--string"
   },
   {
     "name": "color_green",
-    "sig": "color_green(…)",
-    "summary": "",
+    "sig": "color_green() -\u003e string",
+    "summary": "The ANSI escape code for green foreground text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_green--string"
   },
   {
     "name": "color_magenta",
-    "sig": "color_magenta(…)",
-    "summary": "",
+    "sig": "color_magenta() -\u003e string",
+    "summary": "The ANSI escape code for magenta foreground text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_magenta--string"
   },
   {
     "name": "color_red",
-    "sig": "color_red(…)",
-    "summary": "",
+    "sig": "color_red() -\u003e string",
+    "summary": "The ANSI escape code for red foreground text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_red--string"
   },
   {
     "name": "color_reset",
-    "sig": "color_reset(…)",
-    "summary": "",
+    "sig": "color_reset() -\u003e string",
+    "summary": "The ANSI escape code that clears all colour/style attributes.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_reset--string"
   },
   {
     "name": "color_underline",
-    "sig": "color_underline(…)",
-    "summary": "",
+    "sig": "color_underline() -\u003e string",
+    "summary": "The ANSI escape code for underlined text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_underline--string"
   },
   {
     "name": "color_white",
-    "sig": "color_white(…)",
-    "summary": "",
+    "sig": "color_white() -\u003e string",
+    "summary": "The ANSI escape code for white foreground text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_white--string"
   },
   {
     "name": "color_yellow",
-    "sig": "color_yellow(…)",
-    "summary": "",
+    "sig": "color_yellow() -\u003e string",
+    "summary": "The ANSI escape code for yellow foreground text.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
     "anchor": "color_yellow--string"
   },
   {
     "name": "colorize",
-    "sig": "colorize(arg1, arg2, ...rest)",
-    "summary": "",
+    "sig": "colorize(text: string, colorCode: string) -\u003e string",
+    "summary": "Wrap text in a colour code and a reset, ready to print.",
     "category": "Console \u0026 Output",
     "doc": "BUILTINS.MD",
-    "anchor": "colorizearg1-arg2-rest--string"
+    "anchor": "colorizetext-string-colorcode-string--string"
   },
   {
     "name": "appendFile",
-    "sig": "appendFile(path, content)",
-    "summary": "On failure returns a runtime error.",
+    "sig": "appendFile(path: string, content: string) -\u003e null",
+    "summary": "Append a string to a file, creating it if absent.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "appendfilepath-content--null"
+    "anchor": "appendfilepath-string-content-string--null"
   },
   {
     "name": "apply",
-    "sig": "apply(fn, args)",
-    "summary": "call fn with the elements of args as positional arguments.",
+    "sig": "apply(fn: function, args: array) -\u003e any",
+    "summary": "Call fn with the elements of args as its positional arguments.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "applyfn-args"
+    "anchor": "applyfn-function-args-array--any"
   },
   {
     "name": "assert",
-    "sig": "assert(condition, [message])",
-    "summary": "fails with \"assert: condition is false\"",
+    "sig": "assert(condition: bool, [message: string]) -\u003e null",
+    "summary": "Raise a RuntimeError unless condition is true.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "assertcondition-message--null"
+    "anchor": "assertcondition-bool-message-string--null"
   },
   {
     "name": "async",
-    "sig": "async(fn, ...args)",
-    "summary": "it shares a global stdin reader.",
+    "sig": "async(fn: function, args...: any) -\u003e task",
+    "summary": "Run a function in the background, returning a Task immediately.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "asyncfn-args"
+    "anchor": "asyncfn-function-args-any--task"
   },
   {
     "name": "await",
-    "sig": "await(task)",
-    "summary": "If the task's function produced an error, await propagates it.",
+    "sig": "await(task: task) -\u003e any",
+    "summary": "Block until a task finishes and return its result.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "awaittask"
+    "anchor": "awaittask-task--any"
   },
   {
     "name": "cancel",
-    "sig": "cancel(ch)",
-    "summary": "calling it twice is safe.",
+    "sig": "cancel(ch: channel) -\u003e null",
+    "summary": "Tell a channel's producer to stop; future sends return false.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "cancelch--null"
+    "anchor": "cancelch-channel--null"
   },
   {
     "name": "channel",
-    "sig": "channel(…)",
-    "summary": "unbuffered: send blocks until a receiver is ready.",
+    "sig": "channel([capacity: int]) -\u003e channel",
+    "summary": "Create a channel for passing values between async tasks.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "channel--channel"
+    "anchor": "channelcapacity-int--channel"
   },
   {
     "name": "close",
-    "sig": "close(ch)",
-    "summary": "Receivers will drain any buffered values then get (null, false) from recv.",
+    "sig": "close(ch: channel) -\u003e null",
+    "summary": "Signal that no more values will be sent on a channel.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "closech"
+    "anchor": "closech-channel--null"
   },
   {
     "name": "concat",
-    "sig": "concat(a, b)",
-    "summary": "each call copies the growing accumulator. If you're",
+    "sig": "concat(arr1: array, arr2: array) -\u003e array",
+    "summary": "Merge two arrays into one new array.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "concata-b--array"
+    "anchor": "concatarr1-array-arr2-array--array"
   },
   {
     "name": "concatAll",
-    "sig": "concatAll(arrs)",
-    "summary": "single-allocation flatten of an array of",
+    "sig": "concatAll(arrs: array) -\u003e array",
+    "summary": "Flatten an array of arrays into one, in a single allocation.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "concatallarrs--array"
+    "anchor": "concatallarrs-array--array"
   },
   {
     "name": "delete",
-    "sig": "delete(hash, key)",
-    "summary": "",
+    "sig": "delete(h: hash, key: any) -\u003e null",
+    "summary": "Remove a key from a hash IN PLACE (mutates the hash).",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "deletehash-key--null"
+    "anchor": "deleteh-hash-key-any--null"
   },
   {
     "name": "endsWith",
-    "sig": "endsWith(str, suffix)",
-    "summary": "",
+    "sig": "endsWith(str: string, suffix: string) -\u003e bool",
+    "summary": "Whether str ends with the given suffix.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "endswithstr-suffix--bool"
+    "anchor": "endswithstr-string-suffix-string--bool"
   },
   {
     "name": "env",
-    "sig": "env(name)",
-    "summary": "",
+    "sig": "env(name: string) -\u003e string",
+    "summary": "The value of an environment variable, or null if unset.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "envname--null"
+    "anchor": "envname-string--string"
   },
   {
     "name": "error",
-    "sig": "error(code, message)",
-    "summary": "it stays in the environment",
+    "sig": "error(code: string, message: string) -\u003e error",
+    "summary": "Build a first-class Error value with a code and message.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "errorcode-message--error"
+    "anchor": "errorcode-string-message-string--error"
   },
   {
     "name": "exec",
-    "sig": "exec(cmd, args)",
-    "summary": "use safe(exec, cmd, args) to handle failures without crashing.",
+    "sig": "exec(cmd: string, args: array) -\u003e string",
+    "summary": "Run an external command and return its stdout.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "execcmd-args--string"
+    "anchor": "execcmd-string-args-array--string"
   },
   {
     "name": "filter",
-    "sig": "filter(arr, fn)",
-    "summary": "the function returns true. Example: filter([1,2,3,4], fn(x) { x \u003e 2 }) → [3, 4]",
+    "sig": "filter(arr: array, fn: function) -\u003e array",
+    "summary": "A new array of the elements for which fn returns true.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "filterarr-fn--array"
+    "anchor": "filterarr-array-fn-function--array"
   },
   {
     "name": "float",
-    "sig": "float(val)",
-    "summary": "",
+    "sig": "float(x: any) -\u003e float",
+    "summary": "Convert an integer, float, or numeric string to a float.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "floatval--float"
+    "anchor": "floatx-any--float"
   },
   {
     "name": "hasKey",
-    "sig": "hasKey(hash, key)",
-    "summary": "avoids the null-check pattern of h[\"name\"] == null.",
+    "sig": "hasKey(h: hash, key: any) -\u003e bool",
+    "summary": "Whether a hash contains the given key.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "haskeyhash-key--bool"
+    "anchor": "haskeyh-hash-key-any--bool"
   },
   {
     "name": "indexOf",
-    "sig": "indexOf(str, substr)",
-    "summary": "Operates on Unicode code points, consistent with string indexing.",
+    "sig": "indexOf(str: string, substr: string) -\u003e int",
+    "summary": "The rune index of the first occurrence of substr, or -1.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "indexofstr-substr--int"
+    "anchor": "indexofstr-string-substr-string--int"
   },
   {
     "name": "input",
-    "sig": "input(…)",
-    "summary": "The trailing newline is stripped. Returns the line as a string.",
+    "sig": "input([prompt: string]) -\u003e string",
+    "summary": "Print an optional prompt and read one line from stdin.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "input--string"
+    "anchor": "inputprompt-string--string"
   },
   {
     "name": "int",
-    "sig": "int(val)",
-    "summary": "",
+    "sig": "int(x: any) -\u003e int",
+    "summary": "Convert a float, string, or int to an integer.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "intval--int"
+    "anchor": "intx-any--int"
   },
   {
     "name": "isError",
-    "sig": "isError(val)",
-    "summary": "evaluator. Use this inside stream pipeline stages to detect errors returned",
+    "sig": "isError(value: any) -\u003e bool",
+    "summary": "Whether a value is an Error.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "iserrorval--bool"
+    "anchor": "iserrorvalue-any--bool"
   },
   {
     "name": "join",
-    "sig": "join(arr, sep)",
-    "summary": "mixing types is a TypeError.",
+    "sig": "join(arr: array, sep: string) -\u003e string",
+    "summary": "Concatenate an array of strings into one, separated by sep.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "joinarr-sep--string"
+    "anchor": "joinarr-array-sep-string--string"
   },
   {
     "name": "keys",
-    "sig": "keys(hash)",
-    "summary": "Note: Go maps have no guaranteed order, so the key order is non-deterministic.",
+    "sig": "keys(h: hash) -\u003e array",
+    "summary": "An array of all keys in a hash.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "keyshash--array"
+    "anchor": "keysh-hash--array"
   },
   {
     "name": "len",
-    "sig": "len(val)",
-    "summary": "Return the length of an array, string, or hash.",
+    "sig": "len(value: any) -\u003e int",
+    "summary": "The number of elements in an array, hash, string, or bytes value.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "lenval--int"
+    "anchor": "lenvalue-any--int"
   },
   {
     "name": "lower",
-    "sig": "lower(str)",
-    "summary": "",
+    "sig": "lower(s: string) -\u003e string",
+    "summary": "A copy of a string with all letters lowercased.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "lowerstr--string"
+    "anchor": "lowers-string--string"
   },
   {
     "name": "makeArray",
-    "sig": "makeArray(n, [default])",
-    "summary": "push is O(n) per call (O(n²) total),",
+    "sig": "makeArray(n: int, [default: any]) -\u003e array",
+    "summary": "Allocate an array of n elements, each set to default.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "makearrayn-default--array"
+    "anchor": "makearrayn-int-default-any--array"
   },
   {
     "name": "map",
-    "sig": "map(arr, fn)",
-    "summary": "Apply a function to each element.",
+    "sig": "map(arr: array, fn: function) -\u003e array",
+    "summary": "Apply a function to every element, returning a new array.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "maparr-fn--array"
+    "anchor": "maparr-array-fn-function--array"
   },
   {
     "name": "pop",
-    "sig": "pop(arr)",
-    "summary": "it does not mutate.",
+    "sig": "pop(arr: array) -\u003e array",
+    "summary": "A NEW array with the last element removed (does not mutate).",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "poparr--array"
+    "anchor": "poparr-array--array"
   },
   {
     "name": "print",
-    "sig": "print(…)",
-    "summary": "Useful for building output on a single line across multiple calls.",
+    "sig": "print(values...: any) -\u003e null",
+    "summary": "Print values with no trailing newline.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "print--null"
+    "anchor": "printvalues-any--null"
   },
   {
     "name": "println",
-    "sig": "println(…)",
-    "summary": "Print values to stdout with newline.",
+    "sig": "println(values...: any) -\u003e null",
+    "summary": "Print values, each followed by a newline.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "println--null"
+    "anchor": "printlnvalues-any--null"
   },
   {
     "name": "push",
-    "sig": "push(arr, val)",
-    "summary": "it does not mutate.",
+    "sig": "push(arr: array, value: any) -\u003e array",
+    "summary": "Return a NEW array with one element appended (does not mutate).",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "pusharr-val--array"
+    "anchor": "pusharr-array-value-any--array"
   },
   {
     "name": "range",
-    "sig": "range(start, [stop], [step])",
-    "summary": "A negative step counts down. Returns an empty array if the range is empty.",
+    "sig": "range(start: int, [stop: int], [step: int]) -\u003e array",
+    "summary": "An array of integers over a half-open interval.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "rangestart-stop-step"
+    "anchor": "rangestart-int-stop-int-step-int--array"
   },
   {
     "name": "readFile",
-    "sig": "readFile(path)",
-    "summary": "On failure (file not found, permission denied, etc.) it returns a runtime error.",
+    "sig": "readFile(path: string) -\u003e string",
+    "summary": "Read a whole file into a string.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "readfilepath--string"
+    "anchor": "readfilepath-string--string"
   },
   {
     "name": "recv",
-    "sig": "recv(ch)",
-    "summary": "Returns (value, true) when a value is available.",
+    "sig": "recv(ch: channel) -\u003e (any, bool)",
+    "summary": "Receive the next value from a channel (blocking).",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "recvch--tuple"
+    "anchor": "recvch-channel--any-bool"
   },
   {
     "name": "recvNonBlock",
-    "sig": "recvNonBlock(ch)",
-    "summary": "Returns the value if one is immediately available.",
+    "sig": "recvNonBlock(ch: channel) -\u003e any",
+    "summary": "Receive from a channel without blocking.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "recvnonblockch--null"
+    "anchor": "recvnonblockch-channel--any"
   },
   {
     "name": "reduce",
-    "sig": "reduce(arr, fn, init)",
-    "summary": "The function receives (accumulator, currentElement) and returns the new accumulator.",
+    "sig": "reduce(arr: array, fn: function, init: any) -\u003e any",
+    "summary": "Fold an array into a single value with an accumulator.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "reducearr-fn-init"
+    "anchor": "reducearr-array-fn-function-init-any--any"
   },
   {
     "name": "replace",
-    "sig": "replace(str, old, new)",
-    "summary": "same behaviour either way.",
+    "sig": "replace(str: string, old: string, new: string) -\u003e string",
+    "summary": "A copy of str with EVERY occurrence of old replaced by new.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "replacestr-old-new--string"
+    "anchor": "replacestr-string-old-string-new-string--string"
   },
   {
     "name": "replaceAll",
-    "sig": "replaceAll(str, old, new)",
-    "summary": "alias of replace. Lives under both",
+    "sig": "replaceAll(str: string, old: string, new: string) -\u003e string",
+    "summary": "Identical alias of replace (replaces every occurrence).",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "replaceallstr-old-new--string"
+    "anchor": "replaceallstr-string-old-string-new-string--string"
   },
   {
     "name": "safe",
-    "sig": "safe(fn, ...args)",
-    "summary": "into a (null, ErrorObject) tuple instead of letting the error propagate and",
+    "sig": "safe(fn: function, args...: any) -\u003e (any, error)",
+    "summary": "Call a function and capture any error as a (value, err) tuple.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "safefn-args--tuple"
+    "anchor": "safefn-function-args-any--any-error"
   },
   {
     "name": "send",
-    "sig": "send(ch, val)",
-    "summary": "the caller should stop sending.",
+    "sig": "send(ch: channel, value: any) -\u003e any",
+    "summary": "Transmit a value on a channel.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "sendch-val"
+    "anchor": "sendch-channel-value-any--any"
   },
   {
     "name": "sleep",
-    "sig": "sleep(ms)",
-    "summary": "",
+    "sig": "sleep(ms: int) -\u003e null",
+    "summary": "Pause execution for a number of milliseconds.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "sleepms--null"
+    "anchor": "sleepms-int--null"
   },
   {
     "name": "split",
-    "sig": "split(str, sep)",
-    "summary": "",
+    "sig": "split(str: string, sep: string) -\u003e array",
+    "summary": "Break a string into pieces on a separator.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "splitstr-sep--array"
-  },
-  {
-    "name": "sqrt",
-    "sig": "sqrt(n)",
-    "summary": "Usage: sqrt(16) → 4.0   sqrt(2) → 1.414...",
-    "category": "Core",
-    "doc": "BUILTINS.MD",
-    "anchor": "sqrtn--float"
+    "anchor": "splitstr-string-sep-string--array"
   },
   {
     "name": "startsWith",
-    "sig": "startsWith(str, prefix)",
-    "summary": "",
+    "sig": "startsWith(str: string, prefix: string) -\u003e bool",
+    "summary": "Whether str begins with the given prefix.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "startswithstr-prefix--bool"
+    "anchor": "startswithstr-string-prefix-string--bool"
   },
   {
     "name": "str",
-    "sig": "str(val)",
-    "summary": "This is how you turn an integer into a string for building output.",
+    "sig": "str(value: any) -\u003e string",
+    "summary": "Any value's string representation.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "strval--string"
+    "anchor": "strvalue-any--string"
   },
   {
     "name": "trim",
-    "sig": "trim(str)",
-    "summary": "",
+    "sig": "trim(s: string) -\u003e string",
+    "summary": "A copy of a string with leading and trailing whitespace removed.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "trimstr--string"
+    "anchor": "trims-string--string"
   },
   {
     "name": "type",
-    "sig": "type(val)",
-    "summary": "Useful for debugging: type(42) → \"INTEGER\", type(\"hi\") → \"STRING\"",
+    "sig": "type(value: any) -\u003e string",
+    "summary": "The runtime type name of any value, as a string.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "typeval--string"
+    "anchor": "typevalue-any--string"
   },
   {
     "name": "upper",
-    "sig": "upper(str)",
-    "summary": "",
+    "sig": "upper(s: string) -\u003e string",
+    "summary": "A copy of a string with all letters uppercased.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "upperstr--string"
+    "anchor": "uppers-string--string"
   },
   {
     "name": "values",
-    "sig": "values(hash)",
-    "summary": "accepts both *Hash and *ConcurrentHash so the two",
+    "sig": "values(h: hash) -\u003e array",
+    "summary": "An array of all values in a hash.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "valueshash--array"
+    "anchor": "valuesh-hash--array"
   },
   {
     "name": "writeFile",
-    "sig": "writeFile(path, content)",
-    "summary": "truncating it if it does. On failure returns a runtime error.",
+    "sig": "writeFile(path: string, content: string) -\u003e null",
+    "summary": "Write a string to a file, creating or truncating it.",
     "category": "Core",
     "doc": "BUILTINS.MD",
-    "anchor": "writefilepath-content--null"
+    "anchor": "writefilepath-string-content-string--null"
   },
   {
     "name": "dbBegin",
-    "sig": "dbBegin(conn)",
-    "summary": "Starts a database transaction. Use dbCommit or dbRollback to finish it.",
+    "sig": "dbBegin(conn: connection) -\u003e (transaction, error)",
+    "summary": "Start a database transaction.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbbeginconn"
+    "anchor": "dbbeginconn-connection--transaction-error"
   },
   {
     "name": "dbBulkInsert",
-    "sig": "dbBulkInsert(conn, table, columns, rows)",
-    "summary": "far faster than calling dbExec in a loop.",
+    "sig": "dbBulkInsert(conn: connection|transaction, table: string, columns: array, rows: array) -\u003e (int, error)",
+    "summary": "Insert many rows in batched multi-row statements, fast.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbbulkinsertconn-table-columns-rows"
+    "anchor": "dbbulkinsertconn-connectiontransaction-table-string-columns-array-rows-array--int-error"
   },
   {
     "name": "dbClose",
-    "sig": "dbClose(conn)",
-    "summary": "call when done.",
+    "sig": "dbClose(conn: connection) -\u003e null",
+    "summary": "Close a database connection pool.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbcloseconn--null"
+    "anchor": "dbcloseconn-connection--null"
   },
   {
     "name": "dbCommit",
-    "sig": "dbCommit(tx)",
-    "summary": "Commits a transaction started with dbBegin.",
+    "sig": "dbCommit(tx: transaction) -\u003e (null, error)",
+    "summary": "Commit a transaction, making its changes permanent.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbcommittx"
+    "anchor": "dbcommittx-transaction--null-error"
   },
   {
     "name": "dbExec",
-    "sig": "dbExec(conn, sql, [args])",
-    "summary": "never interpolate values into the SQL string.",
+    "sig": "dbExec(conn: connection|transaction, sql: string, [args: array]) -\u003e (int, error)",
+    "summary": "Run an INSERT, UPDATE, DELETE, or DDL statement.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbexecconn-sql-args"
+    "anchor": "dbexecconn-connectiontransaction-sql-string-args-array--int-error"
   },
   {
     "name": "dbExecReturning",
-    "sig": "dbExecReturning(conn, sql, [args])",
-    "summary": "for INSERT/UPDATE/DELETE",
+    "sig": "dbExecReturning(conn: connection|transaction, sql: string, [args: array]) -\u003e (array, error)",
+    "summary": "Run a write that returns rows (RETURNING / OUTPUT).",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbexecreturningconn-sql-args"
+    "anchor": "dbexecreturningconn-connectiontransaction-sql-string-args-array--array-error"
   },
   {
     "name": "dbOpen",
-    "sig": "dbOpen(driver, dsn)",
-    "summary": "share one conn across goroutines.",
+    "sig": "dbOpen(driver: string, dsn: string) -\u003e (connection, error)",
+    "summary": "Open a database connection pool and verify it with a ping.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbopendriver-dsn"
+    "anchor": "dbopendriver-string-dsn-string--connection-error"
   },
   {
     "name": "dbOpenWithPool",
-    "sig": "dbOpenWithPool(driver, dsn, [options?])",
-    "summary": "Like dbOpen but with explicit connection pool configuration.",
+    "sig": "dbOpenWithPool(driver: string, dsn: string, [options: hash]) -\u003e (connection, error)",
+    "summary": "Open a database connection with explicit pool tuning.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbopenwithpooldriver-dsn-options"
+    "anchor": "dbopenwithpooldriver-string-dsn-string-options-hash--connection-error"
   },
   {
     "name": "dbPing",
-    "sig": "dbPing(conn)",
-    "summary": "Verifies the connection is still alive. Useful for health checks.",
+    "sig": "dbPing(conn: connection) -\u003e (null, error)",
+    "summary": "Check that a database connection is still alive.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbpingconn"
+    "anchor": "dbpingconn-connection--null-error"
   },
   {
     "name": "dbQuery",
-    "sig": "dbQuery(conn, sql, [args])",
-    "summary": "never interpolate values into the SQL string.",
+    "sig": "dbQuery(conn: connection|transaction, sql: string, [args: array]) -\u003e (array, error)",
+    "summary": "Run a SELECT and return every row as an array of hashes.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbqueryconn-sql-args"
+    "anchor": "dbqueryconn-connectiontransaction-sql-string-args-array--array-error"
   },
   {
     "name": "dbQueryOne",
-    "sig": "dbQueryOne(conn, sql, [args])",
-    "summary": "Executes a SELECT and returns the first row as a hash, or null if no rows.",
+    "sig": "dbQueryOne(conn: connection|transaction, sql: string, [args: array]) -\u003e (hash, error)",
+    "summary": "Run a SELECT and return just the first row, or null.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbqueryoneconn-sql-args"
+    "anchor": "dbqueryoneconn-connectiontransaction-sql-string-args-array--hash-error"
   },
   {
     "name": "dbQueryStream",
-    "sig": "dbQueryStream(conn, sql, [args])",
-    "summary": "Executes a SELECT and returns a channel that yields rows one at a time.",
+    "sig": "dbQueryStream(conn: connection|transaction, sql: string, [args: array]) -\u003e (channel, error)",
+    "summary": "Run a SELECT and stream rows one at a time over a channel.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbquerystreamconn-sql-args"
+    "anchor": "dbquerystreamconn-connectiontransaction-sql-string-args-array--channel-error"
   },
   {
     "name": "dbRollback",
-    "sig": "dbRollback(tx)",
-    "summary": "Rolls back a transaction started with dbBegin.",
+    "sig": "dbRollback(tx: transaction) -\u003e null",
+    "summary": "Discard a transaction's changes.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbrollbacktx--null"
+    "anchor": "dbrollbacktx-transaction--null"
   },
   {
     "name": "dbSetTimeout",
-    "sig": "dbSetTimeout(conn, ms)",
-    "summary": "Sets a per-operation timeout on a connection or transaction.",
+    "sig": "dbSetTimeout(conn: connection|transaction, ms: int) -\u003e null",
+    "summary": "Set a per-operation timeout on a connection or transaction.",
     "category": "Database",
     "doc": "BUILTINS.MD",
-    "anchor": "dbsettimeoutconn-ms--null"
+    "anchor": "dbsettimeoutconn-connectiontransaction-ms-int--null"
   },
   {
     "name": "elapsedTime",
-    "sig": "elapsedTime(…)",
-    "summary": "Wall-clock seconds since the kLex interpreter started. Sub-second",
+    "sig": "elapsedTime() -\u003e float",
+    "summary": "Wall-clock seconds since the interpreter started.",
     "category": "Elapsed Time",
     "doc": "BUILTINS.MD",
     "anchor": "elapsedtime--float"
   },
   {
     "name": "openURL",
-    "sig": "openURL(url)",
-    "summary": "Opens url in a new browser tab via window.open().",
+    "sig": "openURL(url: string) -\u003e null",
+    "summary": "Open a URL in a new browser tab (browser playground only).",
     "category": "Eval Wasm",
     "doc": "BUILTINS.MD",
-    "anchor": "openurlurl--null"
+    "anchor": "openurlurl-string--null"
   },
   {
     "name": "runScript",
-    "sig": "runScript(src)",
-    "summary": "Evaluates src in a fresh Environment. Captures println output.",
+    "sig": "runScript(src: string) -\u003e hash",
+    "summary": "Evaluate a kLex source string in isolation (browser playground only).",
     "category": "Eval Wasm",
     "doc": "BUILTINS.MD",
-    "anchor": "runscriptsrc"
+    "anchor": "runscriptsrc-string--hash"
   },
   {
     "name": "format",
-    "sig": "format(fmt, ...args)",
-    "summary": "printf-style string formatting.",
+    "sig": "format(fmtStr: string, args...: any) -\u003e string",
+    "summary": "Printf-style string formatting.",
     "category": "Formatting",
     "doc": "BUILTINS.MD",
-    "anchor": "formatfmt-args--string"
+    "anchor": "formatfmtstr-string-args-any--string"
   },
   {
     "name": "arc",
-    "sig": "arc(x, y, r, startAngle, endAngle)",
-    "summary": "Draws an arc centred at (x, y) with radius r from startAngle to endAngle (radians).",
+    "sig": "arc(x: number, y: number, r: number, startAngle: number, endAngle: number) -\u003e null",
+    "summary": "Draw an arc (or filled pie slice) centred at (x, y).",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "arcx-y-r-startangle-endangle--null"
+    "anchor": "arcx-number-y-number-r-number-startangle-number-endangle-number--null"
   },
   {
     "name": "background",
-    "sig": "background(…)",
-    "summary": "Clear the screen with a colour. Values are in [0.0, 1.0]. Single argument sets a grey level.",
+    "sig": "background(r: number, [g: number], [b: number], [a: number]) -\u003e null",
+    "summary": "Clear the whole canvas to a solid colour.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "background--null"
+    "anchor": "backgroundr-number-g-number-b-number-a-number--null"
   },
   {
     "name": "blendMode",
-    "sig": "blendMode(mode)",
-    "summary": "set the OpenGL blend equation for subsequent draw calls.",
+    "sig": "blendMode(mode: string) -\u003e null",
+    "summary": "Set how subsequent draws blend with what's already on the canvas.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "blendmodemode--null"
+    "anchor": "blendmodemode-string--null"
   },
   {
     "name": "circle",
-    "sig": "circle(x, y, radius)",
-    "summary": "Draw a circle centred at (x, y). Approximated with 64 segments. Respects fill and stroke state.",
+    "sig": "circle(x: number, y: number, radius: number) -\u003e null",
+    "summary": "Draw a filled and/or stroked circle centred at (x, y).",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "circlex-y-radius--null"
+    "anchor": "circlex-number-y-number-radius-number--null"
   },
   {
     "name": "drawImage",
-    "sig": "drawImage(img, x, y)",
-    "summary": "Draw an image at (x, y). Optional w and h scale the image; defaults to the image's natural size.",
+    "sig": "drawImage(img: image, x: number, y: number, [w: number], [h: number]) -\u003e null",
+    "summary": "Draw a loaded image at (x, y), optionally scaled to (w, h).",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "drawimageimg-x-y--null"
+    "anchor": "drawimageimg-image-x-number-y-number-w-number-h-number--null"
   },
   {
     "name": "drawParticles",
-    "sig": "drawParticles(xs, ys, rs, gs, bs, alphas, count, pointSize)",
-    "summary": "matches ParticlePool).",
+    "sig": "drawParticles(xs: array, ys: array, rs: array, gs: array, bs: array, alphas: array, count: int, pointSize: number) -\u003e null",
+    "summary": "Render thousands of coloured points in a single draw call.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "drawparticlesxs-ys-rs-gs-bs-alphas-count-pointsize--null"
+    "anchor": "drawparticlesxs-array-ys-array-rs-array-gs-array-bs-array-alphas-array-count-int-pointsize-number--null"
   },
   {
     "name": "droppedFiles",
-    "sig": "droppedFiles(…)",
-    "summary": "Returns all file paths dropped onto the window since the last call, then",
+    "sig": "droppedFiles() -\u003e array",
+    "summary": "The file paths dropped onto the window since the last call.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "droppedfiles--array"
   },
   {
     "name": "ellipse",
-    "sig": "ellipse(x, y, rx, ry)",
-    "summary": "Draw an ellipse centred at (x, y) with horizontal radius rx and vertical radius ry. Respects fill and stroke state.",
+    "sig": "ellipse(x: number, y: number, rx: number, ry: number) -\u003e null",
+    "summary": "Draw an ellipse centred at (x, y) with radii rx and ry.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "ellipsex-y-rx-ry--null"
+    "anchor": "ellipsex-number-y-number-rx-number-ry-number--null"
   },
   {
     "name": "fill",
-    "sig": "fill(…)",
-    "summary": "Set the fill colour for subsequent shapes. Values in [0.0, 1.0].",
+    "sig": "fill(r: number, [g: number], [b: number], [a: number]) -\u003e null",
+    "summary": "Set the colour shapes are filled with.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "fill--null"
+    "anchor": "fillr-number-g-number-b-number-a-number--null"
   },
   {
     "name": "fontCharHeight",
-    "sig": "fontCharHeight(…)",
-    "summary": "Return the pixel height of one character in the embedded monospace font at scale 1. Multiply by scale to get the displa…",
+    "sig": "fontCharHeight() -\u003e int",
+    "summary": "The height of one character in the built-in bitmap font.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "fontcharheight--int"
   },
   {
     "name": "fontCharWidth",
-    "sig": "fontCharWidth(…)",
-    "summary": "Return the pixel width of one character in the embedded monospace font at scale 1. Multiply by scale to get the display…",
+    "sig": "fontCharWidth() -\u003e int",
+    "summary": "The width of one character in the built-in bitmap font.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "fontcharwidth--int"
   },
   {
     "name": "frameCount",
-    "sig": "frameCount(…)",
-    "summary": "Return the number of frames rendered since the window opened.",
+    "sig": "frameCount() -\u003e int",
+    "summary": "The number of frames drawn so far.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "framecount--int"
   },
   {
     "name": "frameRate",
-    "sig": "frameRate(fps)",
-    "summary": "the cap is applied when the window opens.\\n\\nExample: frameRate(30) limits to 30fps.",
+    "sig": "frameRate(fps: number) -\u003e null",
+    "summary": "Cap the draw loop to a target frames-per-second.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "frameratefps--null"
+    "anchor": "frameratefps-number--null"
   },
   {
     "name": "gradient",
-    "sig": "gradient(x, y, w, h, color1, color2, dir)",
-    "summary": "Fills a rectangle with a two-color linear gradient.",
+    "sig": "gradient(x: number, y: number, w: number, h: number, color1: array, color2: array, dir: string) -\u003e null",
+    "summary": "Fill a rectangle with a two-colour linear gradient.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "gradientx-y-w-h-color1-color2-dir--null"
+    "anchor": "gradientx-number-y-number-w-number-h-number-color1-array-color2-array-dir-string--null"
   },
   {
     "name": "imageFromRgba",
-    "sig": "imageFromRgba(bytes, width, height)",
-    "summary": "Metal surface readbacks, procedural",
+    "sig": "imageFromRgba(bytes: bytes, width: int, height: int) -\u003e image",
+    "summary": "ImageFromRgba(bytes, width, height) → image",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "imagefromrgbabytes-width-height"
+    "anchor": "imagefromrgbabytes-bytes-width-int-height-int--image"
   },
   {
     "name": "imageSize",
-    "sig": "imageSize(img)",
-    "summary": "Returns the pixel dimensions of a kLex Image as a two-element tuple.",
+    "sig": "imageSize(img: image) -\u003e (int, int)",
+    "summary": "Get an image's pixel dimensions as a (width, height) tuple.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "imagesizeimg--tuple"
+    "anchor": "imagesizeimg-image--int-int"
   },
   {
     "name": "imageToRgba",
-    "sig": "imageToRgba(img)",
-    "summary": "round-tripping",
+    "sig": "imageToRgba(img: image) -\u003e bytes",
+    "summary": "Read an image's raw RGBA8 pixels back out as bytes.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "imagetorgbaimg--bytes"
+    "anchor": "imagetorgbaimg-image--bytes"
   },
   {
     "name": "keyDown",
-    "sig": "keyDown(key)",
-    "summary": "Return true while the named key is physically held down.\\n\\nKey names: \\",
+    "sig": "keyDown(key: string) -\u003e bool",
+    "summary": "Whether a named key is currently held down.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "keydownkey--bool"
+    "anchor": "keydownkey-string--bool"
   },
   {
     "name": "keyPressed",
-    "sig": "keyPressed(key)",
-    "summary": "Return true only on the single frame the key was first pressed (one-shot). Resets to false the next frame.",
+    "sig": "keyPressed(key: string) -\u003e bool",
+    "summary": "Whether a named key was pressed this frame (edge-triggered).",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "keypressedkey--bool"
+    "anchor": "keypressedkey-string--bool"
   },
   {
     "name": "line",
-    "sig": "line(x1, y1, x2, y2)",
-    "summary": "Draw a line from (x1, y1) to (x2, y2) using the current stroke colour.",
+    "sig": "line(x1: number, y1: number, x2: number, y2: number) -\u003e null",
+    "summary": "Draw a straight line from (x1, y1) to (x2, y2).",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "linex1-y1-x2-y2--null"
+    "anchor": "linex1-number-y1-number-x2-number-y2-number--null"
   },
   {
     "name": "loadFont",
-    "sig": "loadFont(path, [ptSize])",
-    "summary": "GPU upload is deferred",
+    "sig": "loadFont(path: string, [ptSize: number]) -\u003e Font",
+    "summary": "Load a TrueType/OpenType font and build a proportional atlas.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "loadfontpath-ptsize"
+    "anchor": "loadfontpath-string-ptsize-number--font"
   },
   {
     "name": "loadImage",
-    "sig": "loadImage(path)",
-    "summary": "texture upload is deferred to the first drawImage() call.",
+    "sig": "loadImage(source: string|bytes) -\u003e image",
+    "summary": "Decode an image from a file path or encoded bytes.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "loadimagepath"
+    "anchor": "loadimagesource-stringbytes--image"
   },
   {
     "name": "mouseClicked",
-    "sig": "mouseClicked(…)",
-    "summary": "mouseDown() fires every frame while held.",
-    "category": "Graphics",
-    "doc": "BUILTINS.MD",
-    "anchor": "mouseclicked--bool"
-  },
-  {
-    "name": "mouseClicked",
-    "sig": "mouseClicked(…)",
-    "summary": "mouseDown() fires every frame while held.",
+    "sig": "mouseClicked() -\u003e bool",
+    "summary": "Whether the left button was clicked this frame (edge-triggered).",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "mouseclicked--bool"
   },
   {
     "name": "mouseDown",
-    "sig": "mouseDown(…)",
-    "summary": "Return true if the left mouse button is currently pressed.",
+    "sig": "mouseDown() -\u003e bool",
+    "summary": "Whether the left mouse button is currently held.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "mousedown--bool"
   },
   {
     "name": "mouseRightClicked",
-    "sig": "mouseRightClicked(…)",
-    "summary": "Return true only on the single frame the right mouse button was first pressed (one-shot). Resets to false the next fram…",
+    "sig": "mouseRightClicked() -\u003e bool",
+    "summary": "Whether the right button was clicked this frame.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "mouserightclicked--bool"
   },
   {
     "name": "mouseRightDown",
-    "sig": "mouseRightDown(…)",
-    "summary": "Return true if the right mouse button is currently held down.",
+    "sig": "mouseRightDown() -\u003e bool",
+    "summary": "Whether the right mouse button is currently held.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "mouserightdown--bool"
   },
   {
     "name": "mouseScrollX",
-    "sig": "mouseScrollX(…)",
-    "summary": "Return the horizontal mouse wheel delta for this frame (trackpad two-finger swipe or horizontal scroll wheel). Resets t…",
+    "sig": "mouseScrollX() -\u003e float",
+    "summary": "The horizontal scroll-wheel delta for this frame.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "mousescrollx--float"
   },
   {
     "name": "mouseScrollY",
-    "sig": "mouseScrollY(…)",
-    "summary": "Return the vertical mouse wheel delta for this frame. Positive = scrolled up/forward, negative = scrolled down/backward…",
+    "sig": "mouseScrollY() -\u003e float",
+    "summary": "The vertical scroll-wheel delta for this frame.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "mousescrolly--float"
   },
   {
     "name": "mouseX",
-    "sig": "mouseX(…)",
-    "summary": "Return the current mouse X position in window pixels.",
-    "category": "Graphics",
-    "doc": "BUILTINS.MD",
-    "anchor": "mousex--float"
-  },
-  {
-    "name": "mouseX",
-    "sig": "mouseX(…)",
-    "summary": "Return the current mouse X position in window pixels.",
+    "sig": "mouseX() -\u003e float",
+    "summary": "The mouse cursor's current x position in pixels.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "mousex--float"
   },
   {
     "name": "mouseY",
-    "sig": "mouseY(…)",
-    "summary": "Return the current mouse Y position in window pixels.",
-    "category": "Graphics",
-    "doc": "BUILTINS.MD",
-    "anchor": "mousey--float"
-  },
-  {
-    "name": "mouseY",
-    "sig": "mouseY(…)",
-    "summary": "Return the current mouse Y position in window pixels.",
+    "sig": "mouseY() -\u003e float",
+    "summary": "The mouse cursor's current y position in pixels.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "mousey--float"
   },
   {
     "name": "noFill",
-    "sig": "noFill(…)",
-    "summary": "Disable fill so shapes are drawn outline-only.",
+    "sig": "noFill() -\u003e null",
+    "summary": "Stop filling shapes, leaving only their stroke.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "nofill--null"
   },
   {
     "name": "noShadow",
-    "sig": "noShadow(…)",
-    "summary": "disable drop shadows.",
+    "sig": "noShadow() -\u003e null",
+    "summary": "Turn off drop shadows enabled by shadow().",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "noshadow--null"
   },
   {
     "name": "noStroke",
-    "sig": "noStroke(…)",
-    "summary": "Disable stroke so shapes are drawn fill-only.",
+    "sig": "noStroke() -\u003e null",
+    "summary": "Stop drawing shape outlines, leaving only the fill.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "nostroke--null"
   },
   {
     "name": "point",
-    "sig": "point(x, y)",
-    "summary": "Draw a single pixel at (x, y) using the current stroke colour. Point size is controlled by strokeWeight().",
+    "sig": "point(x: number, y: number) -\u003e null",
+    "summary": "Draw a single point at (x, y) using the stroke colour.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "pointx-y--null"
+    "anchor": "pointx-number-y-number--null"
   },
   {
     "name": "polygon",
-    "sig": "polygon(points)",
-    "summary": "Draw an arbitrary polygon from a flat array of x,y pairs: [x1,y1, x2,y2, ...]. Must have at least 3 points (6 values). …",
+    "sig": "polygon(points: array) -\u003e null",
+    "summary": "Draw a closed polygon from a flat array of x,y pairs.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "polygonpoints--null"
+    "anchor": "polygonpoints-array--null"
   },
   {
     "name": "popClip",
-    "sig": "popClip(…)",
-    "summary": "pop the top clip rect and restore the one below it (or disable clipping).",
+    "sig": "popClip() -\u003e null",
+    "summary": "Remove the top clip rectangle, restoring the one beneath it.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "popclip--null"
   },
   {
     "name": "popMatrix",
-    "sig": "popMatrix(…)",
-    "summary": "Restore the transform matrix saved by the last pushMatrix() call.",
+    "sig": "popMatrix() -\u003e null",
+    "summary": "Restore the transform saved by the matching pushMatrix.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "popmatrix--null"
   },
   {
     "name": "pushClip",
-    "sig": "pushClip(x, y, w, h)",
-    "summary": "enable OpenGL scissor rect (clips drawing to this region)",
+    "sig": "pushClip(x: number, y: number, w: number, h: number) -\u003e null",
+    "summary": "Restrict drawing to a rectangle, pushing it onto the clip stack.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "pushclipx-y-w-h--null"
+    "anchor": "pushclipx-number-y-number-w-number-h-number--null"
   },
   {
     "name": "pushMatrix",
-    "sig": "pushMatrix(…)",
-    "summary": "Save the current transform matrix onto the stack. Pair with popMatrix() to restore it.",
+    "sig": "pushMatrix() -\u003e null",
+    "summary": "Save the current transform onto the matrix stack.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "pushmatrix--null"
   },
   {
     "name": "rect",
-    "sig": "rect(x, y, w, h)",
-    "summary": "Draw a rectangle. Origin is the top-left corner. Respects fill and stroke state.",
+    "sig": "rect(x: number, y: number, w: number, h: number) -\u003e null",
+    "summary": "Draw a rectangle with its top-left corner at (x, y).",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "rectx-y-w-h--null"
+    "anchor": "rectx-number-y-number-w-number-h-number--null"
   },
   {
     "name": "rotate",
-    "sig": "rotate(angle)",
-    "summary": "Rotate the drawing axes by angle radians (clockwise, y-down). Affects all subsequent draw calls until popMatrix().",
+    "sig": "rotate(angle: number) -\u003e null",
+    "summary": "Rotate the coordinate system by an angle in radians.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "rotateangle--null"
+    "anchor": "rotateangle-number--null"
   },
   {
     "name": "roundedRect",
-    "sig": "roundedRect(x, y, w, h, r)",
-    "summary": "mathematically perfect anti-aliased edges at any size. Respects fill and stroke state.",
+    "sig": "roundedRect(x: number, y: number, w: number, h: number, radius: number) -\u003e null",
+    "summary": "Draw a rectangle with rounded corners.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "roundedrectx-y-w-h-r--null"
+    "anchor": "roundedrectx-number-y-number-w-number-h-number-radius-number--null"
   },
   {
     "name": "saveImage",
-    "sig": "saveImage(img, path)",
-    "summary": "encode an Image to disk. Format is chosen from",
+    "sig": "saveImage(img: image, path: string) -\u003e null",
+    "summary": "Encode an image to disk, format chosen by file extension.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "saveimageimg-path--null"
+    "anchor": "saveimageimg-image-path-string--null"
   },
   {
     "name": "scale",
-    "sig": "scale(sx, sy)",
-    "summary": "Scale the drawing axes by (sx, sy). Affects all subsequent draw calls until popMatrix().",
+    "sig": "scale(sx: number, sy: number) -\u003e null",
+    "summary": "Scale the coordinate system by (sx, sy) for later draws.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "scalesx-sy--null"
+    "anchor": "scalesx-number-sy-number--null"
   },
   {
     "name": "shadow",
-    "sig": "shadow(offsetX, offsetY, blur)",
-    "summary": "black @ 50% alpha",
+    "sig": "shadow(offsetX: number, offsetY: number, blur: number, [r: number], [g: number], [b: number], [a: number]) -\u003e null",
+    "summary": "Turn on drop shadows for subsequent rect/circle/roundedRect draws.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "shadowoffsetx-offsety-blur--null"
+    "anchor": "shadowoffsetx-number-offsety-number-blur-number-r-number-g-number-b-number-a-number--null"
   },
   {
     "name": "stroke",
-    "sig": "stroke(…)",
-    "summary": "Set the stroke (outline) colour for subsequent shapes. Values in [0.0, 1.0].",
+    "sig": "stroke(r: number, [g: number], [b: number], [a: number]) -\u003e null",
+    "summary": "Set the colour shape outlines are drawn with.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "stroke--null"
+    "anchor": "stroker-number-g-number-b-number-a-number--null"
   },
   {
     "name": "strokeWeight",
-    "sig": "strokeWeight(w)",
-    "summary": "Set the stroke line width in pixels.",
+    "sig": "strokeWeight(width: number) -\u003e null",
+    "summary": "Set the line width for strokes, in pixels.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "strokeweightw--null"
+    "anchor": "strokeweightwidth-number--null"
   },
   {
     "name": "text",
-    "sig": "text(str, x, y, [scale])",
-    "summary": "draw a string using the embedded 8x8 bitmap font.",
+    "sig": "text(str: string, x: number, y: number, [scale: number]) -\u003e null",
+    "summary": "Draw a string in the built-in bitmap font at (x, y).",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "textstr-x-y-scale"
+    "anchor": "textstr-string-x-number-y-number-scale-number--null"
   },
   {
     "name": "textFont",
-    "sig": "textFont(font, str, x, y, [scale])",
-    "summary": "Draws a string using a font returned by loadFont(). Respects fill colour.",
+    "sig": "textFont(font: Font, str: string, x: number, y: number, [scale: number]) -\u003e null",
+    "summary": "Draw a string using a font loaded with loadFont, at (x, y).",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "textfontfont-str-x-y-scale"
+    "anchor": "textfontfont-font-str-string-x-number-y-number-scale-number--null"
   },
   {
     "name": "textWidth",
-    "sig": "textWidth(font, str, [scale])",
-    "summary": "Returns the pixel width of str rendered with font at the given scale (default 1).",
+    "sig": "textWidth(font: Font, str: string, [scale: number]) -\u003e float",
+    "summary": "Measure how wide a string is in a given font.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "textwidthfont-str-scale--float"
+    "anchor": "textwidthfont-font-str-string-scale-number--float"
   },
   {
     "name": "translate",
-    "sig": "translate(x, y)",
-    "summary": "Move the drawing origin by (x, y). Affects all subsequent draw calls until popMatrix().",
+    "sig": "translate(x: number, y: number) -\u003e null",
+    "summary": "Shift the coordinate origin by (x, y) for later draws.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "translatex-y--null"
+    "anchor": "translatex-number-y-number--null"
   },
   {
     "name": "triangle",
-    "sig": "triangle(x1, y1, x2, y2, x3, y3)",
-    "summary": "Draw a triangle. Respects fill and stroke state.",
+    "sig": "triangle(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number) -\u003e null",
+    "summary": "Draw a triangle through three points.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "trianglex1-y1-x2-y2-x3-y3--null"
+    "anchor": "trianglex1-number-y1-number-x2-number-y2-number-x3-number-y3-number--null"
   },
   {
     "name": "winHeight",
-    "sig": "winHeight(…)",
-    "summary": "Return the window height in pixels.",
+    "sig": "winHeight() -\u003e int",
+    "summary": "The current window height in pixels.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "winheight--int"
   },
   {
     "name": "winWidth",
-    "sig": "winWidth(…)",
-    "summary": "Return the window width in pixels.",
+    "sig": "winWidth() -\u003e int",
+    "summary": "The current window width in pixels.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
     "anchor": "winwidth--int"
   },
   {
     "name": "window",
-    "sig": "window(width, height, title, drawFn)",
-    "summary": "── window ───────────────────────────────────…",
+    "sig": "window(width: int, height: int, title: string, drawFn: function) -\u003e null",
+    "summary": "Open a window and run the draw loop until it closes.",
     "category": "Graphics",
     "doc": "BUILTINS.MD",
-    "anchor": "windowwidth-height-title-drawfn"
-  },
-  {
-    "name": "arc",
-    "sig": "arc(x, y, r, startAngle, endAngle)",
-    "summary": "sweep an arc in radians.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "arcx-y-r-startangle-endangle--null"
-  },
-  {
-    "name": "background",
-    "sig": "background(…)",
-    "summary": "Clear the screen with a colour. Values are in [0.0, 1.0]. Single argument sets a grey level.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "background--null"
-  },
-  {
-    "name": "blendMode",
-    "sig": "blendMode(mode)",
-    "summary": "── blendMode(mode) ────────────────────────────────…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "blendmodemode--null"
-  },
-  {
-    "name": "circle",
-    "sig": "circle(x, y, radius)",
-    "summary": "Draw a circle centred at (x, y). Approximated with 64 segments. Respects fill and stroke state.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "circlex-y-radius--null"
-  },
-  {
-    "name": "drawImage",
-    "sig": "drawImage(img, x, y)",
-    "summary": "",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "drawimageimg-x-y--null"
-  },
-  {
-    "name": "droppedFiles",
-    "sig": "droppedFiles(…)",
-    "summary": "drain and return the list of files dropped onto",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "droppedfiles--array"
-  },
-  {
-    "name": "ellipse",
-    "sig": "ellipse(x, y, rx, ry)",
-    "summary": "Draw an ellipse centred at (x, y) with horizontal radius rx and vertical radius ry. Respects fill and stroke state.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "ellipsex-y-rx-ry--null"
-  },
-  {
-    "name": "fill",
-    "sig": "fill(…)",
-    "summary": "── State: fill / stroke / strokeWeight / noFill / noStroke ────────",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "fill--null"
-  },
-  {
-    "name": "fontCharHeight",
-    "sig": "fontCharHeight(…)",
-    "summary": "Return the pixel height of one character in the embedded monospace font at scale 1. Multiply by scale to get the displa…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "fontcharheight--int"
-  },
-  {
-    "name": "fontCharWidth",
-    "sig": "fontCharWidth(…)",
-    "summary": "embedded monospace metrics at",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "fontcharwidth--int"
-  },
-  {
-    "name": "frameCount",
-    "sig": "frameCount(…)",
-    "summary": "Return the number of frames rendered since the window opened.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "framecount"
-  },
-  {
-    "name": "frameRate",
-    "sig": "frameRate(fps)",
-    "summary": "cap the render loop to fps frames per second.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "frameratefps--null"
-  },
-  {
-    "name": "imageSize",
-    "sig": "imageSize(img)",
-    "summary": "",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "imagesizeimg--tuple"
-  },
-  {
-    "name": "keyDown",
-    "sig": "keyDown(key)",
-    "summary": "Return true while the named key is physically held down.\\n\\nKey names: \\",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "keydownkey--bool"
-  },
-  {
-    "name": "keyPressed",
-    "sig": "keyPressed(key)",
-    "summary": "Return true only on the single frame the key was first pressed (one-shot). Resets to false the next frame.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "keypressedkey--bool"
-  },
-  {
-    "name": "line",
-    "sig": "line(x1, y1, x2, y2)",
-    "summary": "Draw a line from (x1, y1) to (x2, y2) using the current stroke colour.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "linex1-y1-x2-y2--null"
-  },
-  {
-    "name": "loadFont",
-    "sig": "loadFont(path, [ptSize])",
-    "summary": "async font load via the FontFace API.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "loadfontpath-ptsize--error"
-  },
-  {
-    "name": "loadImage",
-    "sig": "loadImage(path)",
-    "summary": "Go scheduler yields while we wait, JS event loop runs,",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "loadimagepath--error"
-  },
-  {
-    "name": "mouseClicked",
-    "sig": "mouseClicked(…)",
-    "summary": "mouseDown() fires every frame while held.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "mouseclicked--bool"
-  },
-  {
-    "name": "mouseDown",
-    "sig": "mouseDown(…)",
-    "summary": "Return true if the left mouse button is currently pressed.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "mousedown--bool"
-  },
-  {
-    "name": "mouseRightClicked",
-    "sig": "mouseRightClicked(…)",
-    "summary": "Return true only on the single frame the right mouse button was first pressed (one-shot). Resets to false the next fram…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "mouserightclicked--bool"
-  },
-  {
-    "name": "mouseRightDown",
-    "sig": "mouseRightDown(…)",
-    "summary": "Return true if the right mouse button is currently held down.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "mouserightdown--bool"
-  },
-  {
-    "name": "mouseScrollX",
-    "sig": "mouseScrollX(…)",
-    "summary": "Return the horizontal mouse wheel delta for this frame (trackpad two-finger swipe or horizontal scroll wheel). Resets t…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "mousescrollx--float"
-  },
-  {
-    "name": "mouseScrollY",
-    "sig": "mouseScrollY(…)",
-    "summary": "Return the vertical mouse wheel delta for this frame. Positive = scrolled up/forward, negative = scrolled down/backward…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "mousescrolly--float"
-  },
-  {
-    "name": "mouseX",
-    "sig": "mouseX(…)",
-    "summary": "── Input: mouse + keyboard ─────────────────────────────\ufffd…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "mousex--float"
-  },
-  {
-    "name": "mouseY",
-    "sig": "mouseY(…)",
-    "summary": "Return the current mouse Y position in window pixels.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "mousey--float"
-  },
-  {
-    "name": "noFill",
-    "sig": "noFill(…)",
-    "summary": "Disable fill so shapes are drawn outline-only.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "nofill--null"
-  },
-  {
-    "name": "noShadow",
-    "sig": "noShadow(…)",
-    "summary": "Disable drop shadows set by shadow(). Subsequent rect(), circle(), and roundedRect() calls will not draw a shadow.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "noshadow--null"
-  },
-  {
-    "name": "noStroke",
-    "sig": "noStroke(…)",
-    "summary": "Disable stroke so shapes are drawn fill-only.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "nostroke--null"
-  },
-  {
-    "name": "point",
-    "sig": "point(x, y)",
-    "summary": "single pixel-ish dot. Uses current stroke colour at",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "pointx-y--null"
-  },
-  {
-    "name": "polygon",
-    "sig": "polygon(points)",
-    "summary": "points is a flat [x1, y1, x2, y2, ...] array.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "polygonpoints--null"
-  },
-  {
-    "name": "popClip",
-    "sig": "popClip(…)",
-    "summary": "Pop the top clip rect from the stack and restore the one below it. If the stack is now empty, clipping is disabled enti…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "popclip--null"
-  },
-  {
-    "name": "popMatrix",
-    "sig": "popMatrix(…)",
-    "summary": "Restore the transform matrix saved by the last pushMatrix() call.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "popmatrix"
-  },
-  {
-    "name": "pushClip",
-    "sig": "pushClip(x, y, w, h)",
-    "summary": "── Clipping (Canvas2D save/clip/restore) ────────────────────────\ufffd\ufffd…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "pushclipx-y-w-h--null"
-  },
-  {
-    "name": "pushMatrix",
-    "sig": "pushMatrix(…)",
-    "summary": "── Transform stack ────────────────────────────────…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "pushmatrix"
-  },
-  {
-    "name": "rect",
-    "sig": "rect(…)",
-    "summary": "── Shapes ───────────────────────────────────…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "rect"
-  },
-  {
-    "name": "rotate",
-    "sig": "rotate(angle)",
-    "summary": "Rotate the drawing axes by angle radians (clockwise, y-down). Affects all subsequent draw calls until popMatrix().",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "rotateangle--null"
-  },
-  {
-    "name": "roundedRect",
-    "sig": "roundedRect(x, y, w, h, r)",
-    "summary": "mathematically perfect anti-aliased edges at any size. Respects fill and stroke state.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "roundedrectx-y-w-h-r"
-  },
-  {
-    "name": "scale",
-    "sig": "scale(…)",
-    "summary": "Scale the drawing axes by (sx, sy). Affects all subsequent draw calls until popMatrix().",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "scale"
-  },
-  {
-    "name": "shadow",
-    "sig": "shadow(offsetX, offsetY, blur)",
-    "summary": "opaque-black shadow at default",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "shadowoffsetx-offsety-blur--null"
-  },
-  {
-    "name": "stroke",
-    "sig": "stroke(…)",
-    "summary": "Set the stroke (outline) colour for subsequent shapes. Values in [0.0, 1.0].",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "stroke--null"
-  },
-  {
-    "name": "strokeWeight",
-    "sig": "strokeWeight(w)",
-    "summary": "Set the stroke line width in pixels.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "strokeweightw--null"
-  },
-  {
-    "name": "text",
-    "sig": "text(str, x, y)",
-    "summary": "Draw a string using the embedded 8×8 monospace bitmap font. Optional scale multiplies character size (default 1 = 8px)…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "textstr-x-y--null"
-  },
-  {
-    "name": "textFont",
-    "sig": "textFont(font, str, x, y, [scale])",
-    "summary": "draw with a Font from loadFont.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "textfontfont-str-x-y-scale--null"
-  },
-  {
-    "name": "textWidth",
-    "sig": "textWidth(font, ...rest)",
-    "summary": "measure a string. Accepts either form:",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "textwidthfont-rest--float"
-  },
-  {
-    "name": "translate",
-    "sig": "translate(…)",
-    "summary": "Move the drawing origin by (x, y). Affects all subsequent draw calls until popMatrix().",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "translate"
-  },
-  {
-    "name": "triangle",
-    "sig": "triangle(x1, y1, x2, y2, x3, y3)",
-    "summary": "Draw a triangle. Respects fill and stroke state.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "trianglex1-y1-x2-y2-x3-y3--null"
-  },
-  {
-    "name": "winHeight",
-    "sig": "winHeight(…)",
-    "summary": "Return the window height in pixels.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "winheight"
-  },
-  {
-    "name": "winWidth",
-    "sig": "winWidth(…)",
-    "summary": "Return the window width in pixels.",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "winwidth"
-  },
-  {
-    "name": "window",
-    "sig": "window(width, height, title, drawFn)",
-    "summary": "── window(w, h, title, drawFn) ────────────────────────────…",
-    "category": "Graphics Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "windowwidth-height-title-drawfn"
+    "anchor": "windowwidth-int-height-int-title-string-drawfn-function--null"
   },
   {
     "name": "abs",
-    "sig": "abs(n)",
-    "summary": "",
+    "sig": "abs(x: number) -\u003e number",
+    "summary": "The absolute value of x, preserving its type.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "absn--int"
+    "anchor": "absx-number--number"
   },
   {
     "name": "acos",
-    "sig": "acos(n)",
-    "summary": "x must be in [-1, 1].",
+    "sig": "acos(x: number) -\u003e float",
+    "summary": "The arc cosine of x, in radians.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "acosn--float"
+    "anchor": "acosx-number--float"
   },
   {
     "name": "asin",
-    "sig": "asin(n)",
-    "summary": "x must be in [-1, 1].",
+    "sig": "asin(x: number) -\u003e float",
+    "summary": "The arc sine of x, in radians.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "asinn--float"
+    "anchor": "asinx-number--float"
   },
   {
     "name": "atan",
-    "sig": "atan(n)",
-    "summary": "",
+    "sig": "atan(x: number) -\u003e float",
+    "summary": "The arc tangent of x, in radians.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "atann--float"
+    "anchor": "atanx-number--float"
   },
   {
     "name": "atan2",
-    "sig": "atan2(y, x)",
-    "summary": "arguments to determine the correct quadrant. Always returns Float.",
+    "sig": "atan2(y: number, x: number) -\u003e float",
+    "summary": "The arc tangent of y/x, using both signs to pick the quadrant.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "atan2y-x--float"
+    "anchor": "atan2y-number-x-number--float"
   },
   {
     "name": "ceil",
-    "sig": "ceil(n)",
-    "summary": "Accepts integer or float. Always returns Integer.",
+    "sig": "ceil(x: number) -\u003e int",
+    "summary": "The smallest integer greater than or equal to x.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "ceiln--int"
+    "anchor": "ceilx-number--int"
   },
   {
     "name": "constrain",
-    "sig": "constrain(val, lo, hi)",
-    "summary": "Clamp val to [lo, hi]. Returns integer if val is integer, float otherwise.",
+    "sig": "constrain(val: number, lo: number, hi: number) -\u003e number",
+    "summary": "Clamp val to the range [lo, hi].",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "constrainval-lo-hi--int"
+    "anchor": "constrainval-number-lo-number-hi-number--number"
   },
   {
     "name": "cos",
-    "sig": "cos(n)",
-    "summary": "",
+    "sig": "cos(x: number) -\u003e float",
+    "summary": "The cosine of x (x in radians).",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "cosn--float"
+    "anchor": "cosx-number--float"
   },
   {
     "name": "e",
-    "sig": "e(…)",
-    "summary": "",
+    "sig": "e() -\u003e float",
+    "summary": "Euler's number.",
     "category": "Math",
     "doc": "BUILTINS.MD",
     "anchor": "e--float"
   },
   {
     "name": "exp",
-    "sig": "exp(n)",
-    "summary": "",
+    "sig": "exp(x: number) -\u003e float",
+    "summary": "E raised to the power x.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "expn--float"
+    "anchor": "expx-number--float"
   },
   {
     "name": "floor",
-    "sig": "floor(n)",
-    "summary": "Accepts integer or float. Always returns Integer.",
+    "sig": "floor(x: number) -\u003e int",
+    "summary": "The greatest integer less than or equal to x.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "floorn--int"
+    "anchor": "floorx-number--int"
   },
   {
     "name": "fmod",
-    "sig": "fmod(a, b)",
-    "summary": "Both arguments must be floats.",
+    "sig": "fmod(a: float, b: float) -\u003e float",
+    "summary": "The floating-point remainder of a divided by b.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "fmoda-b--float"
+    "anchor": "fmoda-float-b-float--float"
   },
   {
     "name": "hsl",
-    "sig": "hsl(h, s, l, [a])",
-    "summary": "Convert HSL colour to a float array compatible with fill(), gradient(), and theme slots.",
+    "sig": "hsl(h: number, s: number, l: number, [a: number]) -\u003e array",
+    "summary": "Convert an HSL colour to an [r, g, b, a] float array.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "hslh-s-l-a--array"
+    "anchor": "hslh-number-s-number-l-number-a-number--array"
   },
   {
     "name": "lerp",
-    "sig": "lerp(a, b, t)",
-    "summary": "Linear interpolation: a + (b-a)*t. Returns a at t=0, b at t=1. Not clamped.",
+    "sig": "lerp(a: number, b: number, t: number) -\u003e float",
+    "summary": "Linear interpolation between a and b by fraction t.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "lerpa-b-t--float"
+    "anchor": "lerpa-number-b-number-t-number--float"
   },
   {
     "name": "log",
-    "sig": "log(n)",
-    "summary": "x must be positive.",
+    "sig": "log(x: number) -\u003e float",
+    "summary": "The natural logarithm (base e) of x.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "logn--float"
+    "anchor": "logx-number--float"
   },
   {
     "name": "log10",
-    "sig": "log10(n)",
-    "summary": "x must be positive.",
+    "sig": "log10(x: number) -\u003e float",
+    "summary": "The base-10 logarithm of x.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "log10n--float"
+    "anchor": "log10x-number--float"
   },
   {
     "name": "log2",
-    "sig": "log2(n)",
-    "summary": "x must be positive.",
+    "sig": "log2(x: number) -\u003e float",
+    "summary": "The base-2 logarithm of x.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "log2n--float"
+    "anchor": "log2x-number--float"
   },
   {
     "name": "max",
-    "sig": "max(a, b)",
-    "summary": "Mixed types are compared as floats; the original value (and its type) is returned.",
+    "sig": "max(a: number, b: number) -\u003e number",
+    "summary": "The larger of two numbers.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "maxa-b"
+    "anchor": "maxa-number-b-number--number"
   },
   {
     "name": "min",
-    "sig": "min(a, b)",
-    "summary": "Mixed types are compared as floats; the original value (and its type) is returned.",
+    "sig": "min(a: number, b: number) -\u003e number",
+    "summary": "The smaller of two numbers.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "mina-b"
+    "anchor": "mina-number-b-number--number"
   },
   {
     "name": "mod",
-    "sig": "mod(a, b)",
-    "summary": "Both arguments must be integers.",
+    "sig": "mod(a: int, b: int) -\u003e int",
+    "summary": "The integer remainder of a divided by b.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "moda-b--int"
+    "anchor": "moda-int-b-int--int"
   },
   {
     "name": "pi",
-    "sig": "pi(…)",
-    "summary": "",
+    "sig": "pi() -\u003e float",
+    "summary": "The mathematical constant π.",
     "category": "Math",
     "doc": "BUILTINS.MD",
     "anchor": "pi--float"
   },
   {
     "name": "pow",
-    "sig": "pow(base, exp)",
-    "summary": "",
+    "sig": "pow(base: number, exp: number) -\u003e float",
+    "summary": "Base raised to the power exp.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "powbase-exp--float"
+    "anchor": "powbase-number-exp-number--float"
   },
   {
     "name": "remap",
-    "sig": "remap(val, inLow, inHigh, outLow, outHigh)",
-    "summary": "Re-map val from [inLow, inHigh] to [outLow, outHigh]. Not clamped.",
+    "sig": "remap(val: number, inLow: number, inHigh: number, outLow: number, outHigh: number) -\u003e float",
+    "summary": "Re-scale val from one range to another (not clamped).",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "remapval-inlow-inhigh-outlow-outhigh--float"
+    "anchor": "remapval-number-inlow-number-inhigh-number-outlow-number-outhigh-number--float"
   },
   {
     "name": "round",
-    "sig": "round(n)",
-    "summary": "Accepts integer or float. Always returns Integer.",
+    "sig": "round(x: number) -\u003e int",
+    "summary": "The nearest integer to x, rounding halves away from zero.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "roundn--int"
+    "anchor": "roundx-number--int"
   },
   {
     "name": "sin",
-    "sig": "sin(n)",
-    "summary": "",
+    "sig": "sin(x: number) -\u003e float",
+    "summary": "The sine of x (x in radians).",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "sinn--float"
+    "anchor": "sinx-number--float"
   },
   {
     "name": "sqrt",
-    "sig": "sqrt(n)",
-    "summary": "Accepts integer or float. x must be non-negative.",
+    "sig": "sqrt(x: number) -\u003e float",
+    "summary": "The square root of x.",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "sqrtn--float"
+    "anchor": "sqrtx-number--float"
   },
   {
     "name": "tan",
-    "sig": "tan(n)",
-    "summary": "",
+    "sig": "tan(x: number) -\u003e float",
+    "summary": "The tangent of x (x in radians).",
     "category": "Math",
     "doc": "BUILTINS.MD",
-    "anchor": "tann--float"
+    "anchor": "tanx-number--float"
   },
   {
     "name": "bridgePool",
-    "sig": "bridgePool(n, transport, [opts])",
-    "summary": "kind, cmd,",
+    "sig": "bridgePool(n: int, transport: hash, [opts: hash]) -\u003e (BridgePool, error)",
+    "summary": "Start N identical bridges as one round-robin pool.",
     "category": "Native Bridge Pools",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgepooln-transport-opts"
+    "anchor": "bridgepooln-int-transport-hash-opts-hash--bridgepool-error"
   },
   {
     "name": "bridgePoolCall",
-    "sig": "bridgePoolCall(pool, fn, args)",
-    "summary": "── bridgePoolCall(pool, fn, args, timeoutSec?) → (result, err) ──────────",
+    "sig": "bridgePoolCall(pool: BridgePool, fn: string, args: array, [timeoutSec: number]) -\u003e (any, error)",
+    "summary": "Call a function on the next alive bridge in a pool.",
     "category": "Native Bridge Pools",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgepoolcallpool-fn-args"
+    "anchor": "bridgepoolcallpool-bridgepool-fn-string-args-array-timeoutsec-number--any-error"
   },
   {
     "name": "bridgePoolClose",
-    "sig": "bridgePoolClose(pool)",
-    "summary": "── bridgePoolClose(pool) → null ───────────────────────────…",
+    "sig": "bridgePoolClose(pool: BridgePool) -\u003e null",
+    "summary": "Close every bridge in a pool.",
     "category": "Native Bridge Pools",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgepoolclosepool--null"
+    "anchor": "bridgepoolclosepool-bridgepool--null"
   },
   {
     "name": "bridgePoolHealth",
-    "sig": "bridgePoolHealth(pool)",
-    "summary": "── bridgePoolHealth(pool) → {size, alive, dead} ─────────────────────\ufffd\ufffd…",
+    "sig": "bridgePoolHealth(pool: BridgePool) -\u003e hash",
+    "summary": "How many pool members are alive vs dead.",
     "category": "Native Bridge Pools",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgepoolhealthpool"
+    "anchor": "bridgepoolhealthpool-bridgepool--hash"
   },
   {
     "name": "bridgePoolStderr",
-    "sig": "bridgePoolStderr(pool)",
-    "summary": "── bridgePoolStderr(pool) → array ──────────────────────────\ufffd…",
+    "sig": "bridgePoolStderr(pool: BridgePool) -\u003e array",
+    "summary": "The merged stderr of every pool member, tagged by index.",
     "category": "Native Bridge Pools",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgepoolstderrpool--array"
+    "anchor": "bridgepoolstderrpool-bridgepool--array"
   },
   {
     "name": "bridgePoolStream",
-    "sig": "bridgePoolStream(pool, fn, args, [timeout])",
-    "summary": "── bridgePoolStream(pool, fn, args, timeout?) → (channel, err) ──────────",
+    "sig": "bridgePoolStream(pool: BridgePool, fn: string, args: array, [timeout: number]) -\u003e (channel, error)",
+    "summary": "Call a streaming handler on the next alive bridge in a pool.",
     "category": "Native Bridge Pools",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgepoolstreampool-fn-args-timeout"
+    "anchor": "bridgepoolstreampool-bridgepool-fn-string-args-array-timeout-number--channel-error"
   },
   {
     "name": "bridgeCall",
-    "sig": "bridgeCall(bridge, fn, args)",
-    "summary": "── bridgeCall(bridge, fn, args, timeoutSec?) → (result, err) ────────────",
+    "sig": "bridgeCall(bridge: Bridge, fn: string, args: array, [timeoutSec: number]) -\u003e (any, error)",
+    "summary": "Call a function exposed by a native bridge and get its result.",
     "category": "Native Bridges",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgecallbridge-fn-args"
+    "anchor": "bridgecallbridge-bridge-fn-string-args-array-timeoutsec-number--any-error"
   },
   {
     "name": "bridgeClose",
-    "sig": "bridgeClose(bridge)",
-    "summary": "── bridgeClose(bridge) → null ───────────────────────────\ufffd\ufffd…",
+    "sig": "bridgeClose(bridge: Bridge) -\u003e null",
+    "summary": "Shut down a bridge and reap its subprocess.",
     "category": "Native Bridges",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgeclosebridge--null"
+    "anchor": "bridgeclosebridge-bridge--null"
   },
   {
     "name": "bridgeInfo",
-    "sig": "bridgeInfo(bridge)",
-    "summary": "backward",
+    "sig": "bridgeInfo(bridge: Bridge) -\u003e hash",
+    "summary": "The protocol metadata negotiated with a bridge at startup.",
     "category": "Native Bridges",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgeinfobridge"
+    "anchor": "bridgeinfobridge-bridge--hash"
   },
   {
     "name": "bridgeMetrics",
-    "sig": "bridgeMetrics(bridge)",
-    "summary": "── bridgeMetrics(bridge) → hash ───────────────────────────…",
+    "sig": "bridgeMetrics(bridge: Bridge) -\u003e hash",
+    "summary": "A snapshot of a bridge's observability counters and latencies.",
     "category": "Native Bridges",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgemetricsbridge"
+    "anchor": "bridgemetricsbridge-bridge--hash"
   },
   {
     "name": "bridgeNotifications",
-    "sig": "bridgeNotifications(bridge)",
-    "summary": "── bridgeNotifications(bridge) → channel ────────────────────────…",
+    "sig": "bridgeNotifications(bridge: Bridge) -\u003e channel",
+    "summary": "The channel of out-of-band notifications from a bridge.",
     "category": "Native Bridges",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgenotificationsbridge"
+    "anchor": "bridgenotificationsbridge-bridge--channel"
   },
   {
     "name": "bridgeOpen",
-    "sig": "bridgeOpen(transport)",
-    "summary": "spawn a subprocess and speak the kLex bridge protocol",
+    "sig": "bridgeOpen(transport: hash) -\u003e (Bridge, error)",
+    "summary": "Open a native bridge to run code in another language/process.",
     "category": "Native Bridges",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgeopentransport"
+    "anchor": "bridgeopentransport-hash--bridge-error"
   },
   {
     "name": "bridgeSchema",
-    "sig": "bridgeSchema(bridge)",
-    "summary": "── bridgeSchema(bridge, fn?) → hash | null ───────────────────────\ufffd…",
+    "sig": "bridgeSchema(bridge: Bridge, [fn: string]) -\u003e hash",
+    "summary": "Introspect the function schemas a bridge declares.",
     "category": "Native Bridges",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgeschemabridge--null"
+    "anchor": "bridgeschemabridge-bridge-fn-string--hash"
   },
   {
     "name": "bridgeStderr",
-    "sig": "bridgeStderr(bridge)",
-    "summary": "── bridgeStderr(bridge) → array of strings ───────────────────────\ufffd…",
+    "sig": "bridgeStderr(bridge: Bridge) -\u003e array",
+    "summary": "The captured stderr lines from a bridge subprocess.",
     "category": "Native Bridges",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgestderrbridge--array"
+    "anchor": "bridgestderrbridge-bridge--array"
   },
   {
     "name": "bridgeStream",
-    "sig": "bridgeStream(bridge, fn, args, [timeout])",
-    "summary": "an *Error value the consumer can detect with `type(item) ==",
+    "sig": "bridgeStream(bridge: Bridge, fn: string, args: array, [timeout: number]) -\u003e (channel, error)",
+    "summary": "Call a streaming bridge handler, getting a channel of items.",
     "category": "Native Bridges",
     "doc": "BUILTINS.MD",
-    "anchor": "bridgestreambridge-fn-args-timeout"
+    "anchor": "bridgestreambridge-bridge-fn-string-args-array-timeout-number--channel-error"
   },
   {
     "name": "dnsLookup",
-    "sig": "dnsLookup(hostname)",
-    "summary": "Returns (addresses, null) on success, (null, error) on failure.",
+    "sig": "dnsLookup(hostname: string) -\u003e (array, error)",
+    "summary": "Resolve a hostname to its IP addresses.",
     "category": "Networking",
     "doc": "BUILTINS.MD",
-    "anchor": "dnslookuphostname--tuple"
+    "anchor": "dnslookuphostname-string--array-error"
   },
   {
     "name": "netClose",
-    "sig": "netClose(conn)",
-    "summary": "Usage: netClose(conn)",
+    "sig": "netClose(conn: connection) -\u003e null",
+    "summary": "Close a connection and release its resources.",
     "category": "Networking",
     "doc": "BUILTINS.MD",
-    "anchor": "netcloseconn--null"
+    "anchor": "netcloseconn-connection--null"
   },
   {
     "name": "netRead",
-    "sig": "netRead(conn, maxBytes)",
-    "summary": "Returns (string, null) on success or EOF, (null, error) on failure.",
+    "sig": "netRead(conn: connection, maxBytes: int) -\u003e (string, error)",
+    "summary": "Read up to maxBytes from a connection.",
     "category": "Networking",
     "doc": "BUILTINS.MD",
-    "anchor": "netreadconn-maxbytes--tuple"
+    "anchor": "netreadconn-connection-maxbytes-int--string-error"
   },
   {
     "name": "netWrite",
-    "sig": "netWrite(conn, data)",
-    "summary": "Returns (null, null) on success, (null, error) on failure.",
+    "sig": "netWrite(conn: connection, data: string) -\u003e (null, error)",
+    "summary": "Send data over a connection.",
     "category": "Networking",
     "doc": "BUILTINS.MD",
-    "anchor": "netwriteconn-data--tuple"
+    "anchor": "netwriteconn-connection-data-string--null-error"
   },
   {
     "name": "tcpDial",
-    "sig": "tcpDial(host, port)",
-    "summary": "Open a TCP connection to host:port. Returns (connection, null) on success or (null, error) on failure.",
+    "sig": "tcpDial(host: string, port: int) -\u003e (connection, error)",
+    "summary": "Open a TCP connection to host:port.",
     "category": "Networking",
     "doc": "BUILTINS.MD",
-    "anchor": "tcpdialhost-port--tuple"
+    "anchor": "tcpdialhost-string-port-int--connection-error"
   },
   {
     "name": "tcpListen",
-    "sig": "tcpListen(host, port)",
-    "summary": "Each accepted connection is sent as a NetConn value.",
+    "sig": "tcpListen(host: string, port: int) -\u003e channel",
+    "summary": "Start a TCP server, yielding accepted connections on a channel.",
     "category": "Networking",
     "doc": "BUILTINS.MD",
-    "anchor": "tcplistenhost-port"
+    "anchor": "tcplistenhost-string-port-int--channel"
   },
   {
     "name": "parallelArrayMap",
-    "sig": "parallelArrayMap(arr, fn)",
-    "summary": "of the corresponding input element. Element order is preserved.",
+    "sig": "parallelArrayMap(arr: array, fn: function) -\u003e array",
+    "summary": "A new array of fn(value, index) for each element, across CPU cores.",
     "category": "Parallel Processing",
     "doc": "BUILTINS.MD",
-    "anchor": "parallelarraymaparr-fn--array"
+    "anchor": "parallelarraymaparr-array-fn-function--array"
   },
   {
     "name": "parallelArrayReduce",
-    "sig": "parallelArrayReduce(arr, fn, init)",
-    "summary": "chunk order is not guaranteed).",
+    "sig": "parallelArrayReduce(arr: array, fn: function, initial: any) -\u003e any",
+    "summary": "Fold an array to a single value across CPU cores.",
     "category": "Parallel Processing",
     "doc": "BUILTINS.MD",
-    "anchor": "parallelarrayreducearr-fn-init"
+    "anchor": "parallelarrayreducearr-array-fn-function-initial-any--any"
   },
   {
     "name": "parallelArrayUpdate",
-    "sig": "parallelArrayUpdate(arr, fn)",
-    "summary": "The function's return value replaces the element at that index.",
+    "sig": "parallelArrayUpdate(arr: array, fn: function) -\u003e array",
+    "summary": "Update every element in place via fn(value, index), across CPU cores.",
     "category": "Parallel Processing",
     "doc": "BUILTINS.MD",
-    "anchor": "parallelarrayupdatearr-fn"
+    "anchor": "parallelarrayupdatearr-array-fn-function--array"
   },
   {
     "name": "beginPath",
-    "sig": "beginPath(…)",
-    "summary": "Clear the current path and reset the pen. Must be called before building a new path.",
+    "sig": "beginPath() -\u003e null",
+    "summary": "Start a new vector path, clearing any previous one.",
     "category": "Path Manipulation",
     "doc": "BUILTINS.MD",
     "anchor": "beginpath--null"
   },
   {
     "name": "bezierTo",
-    "sig": "bezierTo(cp1x, cp1y, cp2x, cp2y, x, y)",
-    "summary": "Add a cubic Bézier from the current pen to (x, y) via control points (cp1x,cp1y) and (cp2x,cp2y).",
+    "sig": "bezierTo(cp1x: number, cp1y: number, cp2x: number, cp2y: number, x: number, y: number) -\u003e null",
+    "summary": "Add a cubic Bézier curve from the pen to (x, y).",
     "category": "Path Manipulation",
     "doc": "BUILTINS.MD",
-    "anchor": "beziertocp1x-cp1y-cp2x-cp2y-x-y--null"
+    "anchor": "beziertocp1x-number-cp1y-number-cp2x-number-cp2y-number-x-number-y-number--null"
   },
   {
     "name": "closePath",
-    "sig": "closePath(…)",
-    "summary": "Close the current contour by adding a line back to the last moveTo point.",
+    "sig": "closePath() -\u003e null",
+    "summary": "Close the current contour with a line back to its start.",
     "category": "Path Manipulation",
     "doc": "BUILTINS.MD",
     "anchor": "closepath--null"
   },
   {
     "name": "fillPath",
-    "sig": "fillPath(…)",
-    "summary": "handles concave and complex shapes correctly.",
+    "sig": "fillPath() -\u003e null",
+    "summary": "Fill the current path with the current fill colour.",
     "category": "Path Manipulation",
     "doc": "BUILTINS.MD",
     "anchor": "fillpath--null"
   },
   {
     "name": "lineTo",
-    "sig": "lineTo(x, y)",
-    "summary": "Add a straight line from the current pen to (x, y).",
+    "sig": "lineTo(x: number, y: number) -\u003e null",
+    "summary": "Add a straight line from the pen to (x, y).",
     "category": "Path Manipulation",
     "doc": "BUILTINS.MD",
-    "anchor": "linetox-y--null"
+    "anchor": "linetox-number-y-number--null"
   },
   {
     "name": "moveTo",
-    "sig": "moveTo(x, y)",
-    "summary": "Move the pen to (x, y) without drawing. Starts a new contour.",
+    "sig": "moveTo(x: number, y: number) -\u003e null",
+    "summary": "Move the pen to (x, y) without drawing, starting a new contour.",
     "category": "Path Manipulation",
     "doc": "BUILTINS.MD",
-    "anchor": "movetox-y--null"
+    "anchor": "movetox-number-y-number--null"
   },
   {
     "name": "quadTo",
-    "sig": "quadTo(cpx, cpy, x, y)",
-    "summary": "Add a quadratic Bézier from the current pen to (x, y) via control point (cpx, cpy).",
+    "sig": "quadTo(cpx: number, cpy: number, x: number, y: number) -\u003e null",
+    "summary": "Add a quadratic Bézier curve from the pen to (x, y).",
     "category": "Path Manipulation",
     "doc": "BUILTINS.MD",
-    "anchor": "quadtocpx-cpy-x-y--null"
+    "anchor": "quadtocpx-number-cpy-number-x-number-y-number--null"
   },
   {
     "name": "strokePath",
-    "sig": "strokePath(…)",
-    "summary": "Stroke the current path with the current stroke colour and strokeWeight.",
+    "sig": "strokePath() -\u003e null",
+    "summary": "Stroke the current path outline with the current stroke colour and weight.",
     "category": "Path Manipulation",
     "doc": "BUILTINS.MD",
     "anchor": "strokepath--null"
   },
   {
     "name": "rand",
-    "sig": "rand(…)",
-    "summary": "no setup required.",
+    "sig": "rand() -\u003e float",
+    "summary": "A random float in [0.0, 1.0).",
     "category": "Random",
     "doc": "BUILTINS.MD",
     "anchor": "rand--float"
   },
   {
     "name": "randInt",
-    "sig": "randInt(min, max)",
-    "summary": "Both endpoints are inclusive: randInt(1, 6) simulates a die roll.",
+    "sig": "randInt(min: int, max: int) -\u003e int",
+    "summary": "A random integer in the inclusive range [min, max].",
     "category": "Random",
     "doc": "BUILTINS.MD",
-    "anchor": "randintmin-max--int"
+    "anchor": "randintmin-int-max-int--int"
   },
   {
     "name": "shuffle",
-    "sig": "shuffle(arr)",
-    "summary": "The original array is not mutated (consistent with push, pop, concat).",
+    "sig": "shuffle(arr: array) -\u003e array",
+    "summary": "A new array with the elements in random order.",
     "category": "Random",
     "doc": "BUILTINS.MD",
-    "anchor": "shufflearr--array"
+    "anchor": "shufflearr-array--array"
   },
   {
     "name": "sort",
-    "sig": "sort(arr)",
-    "summary": "equal elements keep their original relative order.",
+    "sig": "sort(arr: array) -\u003e array",
+    "summary": "A new array sorted in ascending order (stable).",
     "category": "Sort",
     "doc": "BUILTINS.MD",
-    "anchor": "sortarr--array"
+    "anchor": "sortarr-array--array"
   },
   {
     "name": "sortBy",
-    "sig": "sortBy(arr, fn)",
-    "summary": "equal elements keep their original relative order.",
+    "sig": "sortBy(arr: array, compareFn: function) -\u003e array",
+    "summary": "A new array sorted by a comparator function (stable).",
     "category": "Sort",
     "doc": "BUILTINS.MD",
-    "anchor": "sortbyarr-fn--array"
+    "anchor": "sortbyarr-array-comparefn-function--array"
   },
   {
     "name": "chr",
-    "sig": "chr(n)",
-    "summary": "negative values, values in the",
+    "sig": "chr(n: int) -\u003e string",
+    "summary": "The one-character string for a Unicode code point.",
     "category": "Strings",
     "doc": "BUILTINS.MD",
-    "anchor": "chrn--string"
+    "anchor": "chrn-int--string"
   },
   {
     "name": "ord",
-    "sig": "ord(c)",
-    "summary": "`ord(\"Ab\")` returns 65.",
+    "sig": "ord(c: string) -\u003e int",
+    "summary": "The Unicode code point of a string's first character.",
     "category": "Strings",
     "doc": "BUILTINS.MD",
-    "anchor": "ordc--int"
+    "anchor": "ordc-string--int"
   },
   {
     "name": "parseFloat",
-    "sig": "parseFloat(str)",
-    "summary": "Safely parses a string as a float. Trims leading/trailing whitespace.",
+    "sig": "parseFloat(str: string) -\u003e (float, error)",
+    "summary": "Safely parse a string as a float, returning (value, err).",
     "category": "Strings",
     "doc": "BUILTINS.MD",
-    "anchor": "parsefloatstr--tuple"
+    "anchor": "parsefloatstr-string--float-error"
   },
   {
     "name": "parseInt",
-    "sig": "parseInt(str)",
-    "summary": "Safely parses a string as an integer. Trims leading/trailing whitespace.",
+    "sig": "parseInt(str: string) -\u003e (int, error)",
+    "summary": "Safely parse a string as an integer, returning (value, err).",
     "category": "Strings",
     "doc": "BUILTINS.MD",
-    "anchor": "parseintstr--tuple"
+    "anchor": "parseintstr-string--int-error"
   },
   {
     "name": "slice",
-    "sig": "slice(arr, start, [end])",
-    "summary": "returns a new array from start to the end of arr.",
+    "sig": "slice(seq: array | bytes, start: int, [end: int]) -\u003e array | bytes",
+    "summary": "A sub-range of an array or bytes value (a new copy).",
     "category": "Strings",
     "doc": "BUILTINS.MD",
-    "anchor": "slicearr-start-end--array"
+    "anchor": "sliceseq-array--bytes-start-int-end-int--array--bytes"
   },
   {
     "name": "substr",
-    "sig": "substr(str, start, [end])",
-    "summary": "returns the substring from start to the end of str.",
+    "sig": "substr(str: string, start: int, [end: int]) -\u003e string",
+    "summary": "A substring of str by rune index.",
     "category": "Strings",
     "doc": "BUILTINS.MD",
-    "anchor": "substrstr-start-end--string"
+    "anchor": "substrstr-string-start-int-end-int--string"
   },
   {
     "name": "uiBegin",
-    "sig": "uiBegin(…)",
-    "summary": "reset UI state at the start of each draw loop",
+    "sig": "uiBegin() -\u003e null",
+    "summary": "Start a UI frame, resetting per-frame widget state.",
     "category": "UI Widgets",
     "doc": "BUILTINS.MD",
     "anchor": "uibegin--null"
   },
   {
     "name": "uiEnd",
-    "sig": "uiEnd(…)",
-    "summary": "finalize UI frame, update hover state",
+    "sig": "uiEnd() -\u003e null",
+    "summary": "Finish a UI frame: update hover state and draw deferred popups.",
     "category": "UI Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uiend"
-  },
-  {
-    "name": "uiBegin",
-    "sig": "uiBegin(…)",
-    "summary": "reset per-frame UI state. Must be the first widget",
-    "category": "Ui Lifecycle Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "uibegin--null"
-  },
-  {
-    "name": "uiEnd",
-    "sig": "uiEnd(…)",
-    "summary": "close out the UI frame. For Phase 1a this is just the",
-    "category": "Ui Lifecycle Wasm",
-    "doc": "BUILTINS.MD",
-    "anchor": "uiend"
+    "anchor": "uiend--null"
   },
   {
     "name": "accordion",
-    "sig": "accordion(x, y, w, sections, openIdx, [size])",
-    "summary": "── accordion(x, y, w, sections, openIdx, [size]) → int ──────────",
+    "sig": "accordion(x: int, y: int, w: int, sections: array, openIdx: int, [size: number]) -\u003e int",
+    "summary": "Draw collapsible sections, returning the open one's index.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "accordionx-y-w-sections-openidx-size"
+    "anchor": "accordionx-int-y-int-w-int-sections-array-openidx-int-size-number--int"
   },
   {
     "name": "barChart",
-    "sig": "barChart(data, x, y, w, h)",
-    "summary": "bars with track column behind.",
+    "sig": "barChart(data: array, x: int, y: int, w: int, h: int, [min: number], [max: number]) -\u003e null",
+    "summary": "Draw a vertical bar chart with a track column behind each bar.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "barchartdata-x-y-w-h--null"
+    "anchor": "barchartdata-array-x-int-y-int-w-int-h-int-min-number-max-number--null"
   },
   {
     "name": "button",
-    "sig": "button(label, x, y, w, h, [size])",
-    "summary": "── button(label, x, y, w, h, [size]) → bool ─────────────────────",
+    "sig": "button(label: string, x: int, y: int, w: int, h: int, [size: number]) -\u003e bool",
+    "summary": "Draw a clickable button, returning true the frame it's clicked.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "buttonlabel-x-y-w-h-size"
+    "anchor": "buttonlabel-string-x-int-y-int-w-int-h-int-size-number--bool"
   },
   {
     "name": "checkbox",
-    "sig": "checkbox(label, x, y, checked, [size])",
-    "summary": "── checkbox(label, x, y, checked, [size]) → bool ────────────────",
+    "sig": "checkbox(label: string, x: int, y: int, checked: bool, [size: number]) -\u003e bool",
+    "summary": "Draw a labelled checkbox, returning its new checked state.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "checkboxlabel-x-y-checked-size"
+    "anchor": "checkboxlabel-string-x-int-y-int-checked-bool-size-number--bool"
   },
   {
     "name": "colorPicker",
-    "sig": "colorPicker(x, y, w, r, g, b, a)",
-    "summary": "── colorPicker(x, y, w, r, g, b, a) → [r, g, b, a] ──────────────",
+    "sig": "colorPicker(x: int, y: int, w: int, r: number, g: number, b: number, a: number) -\u003e array",
+    "summary": "Draw four RGBA sliders with a preview, returning the colour.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "colorpickerx-y-w-r-g-b-a"
+    "anchor": "colorpickerx-int-y-int-w-int-r-number-g-number-b-number-a-number--array"
   },
   {
     "name": "contextMenu",
-    "sig": "contextMenu(x, y, items, visible, [size])",
-    "summary": "── contextMenu(x, y, items, visible, [size]) → int ──────────────",
+    "sig": "contextMenu(x: int, y: int, items: array, visible: bool, [size: number]) -\u003e int",
+    "summary": "Draw a right-click popup menu, returning the chosen index.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "contextmenux-y-items-visible-size--int"
+    "anchor": "contextmenux-int-y-int-items-array-visible-bool-size-number--int"
   },
   {
     "name": "dropdown",
-    "sig": "dropdown(label, items, x, y, w, [size])",
-    "summary": "── dropdown(label, items, x, y, w, [size]) → string ─────────────",
+    "sig": "dropdown(label: string, items: array, x: int, y: int, w: int, [size: number]) -\u003e string",
+    "summary": "Draw a dropdown select, returning the chosen item.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "dropdownlabel-items-x-y-w-size--string"
+    "anchor": "dropdownlabel-string-items-array-x-int-y-int-w-int-size-number--string"
   },
   {
     "name": "getTypedChars",
-    "sig": "getTypedChars(…)",
-    "summary": "── getTypedChars() → string ────────────────────────────\ufffd…",
+    "sig": "getTypedChars() -\u003e string",
+    "summary": "The printable characters typed this frame.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
     "anchor": "gettypedchars--string"
   },
   {
     "name": "image",
-    "sig": "image(img, x, y, w, h, [mode])",
-    "summary": "Phase 1b honours \"stretch\" (the",
+    "sig": "image(img: image, x: int, y: int, w: int, h: int, [mode: string]) -\u003e null",
+    "summary": "Draw a loaded image inside the UI at (x, y) scaled to w×h.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "imageimg-x-y-w-h-mode--null"
+    "anchor": "imageimg-image-x-int-y-int-w-int-h-int-mode-string--null"
   },
   {
     "name": "label",
-    "sig": "label(text, x, y, [size])",
-    "summary": "── label(text, x, y, [size]) → null ─────────────────────────\ufffd\ufffd…",
+    "sig": "label(text: string, x: int, y: int, [size: number]) -\u003e null",
+    "summary": "Draw a line of static text at (x, y).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "labeltext-x-y-size--null"
+    "anchor": "labeltext-string-x-int-y-int-size-number--null"
   },
   {
     "name": "lineChart",
-    "sig": "lineChart(data, x, y, w, h)",
-    "summary": "bg + axes + filled area + line.",
+    "sig": "lineChart(data: array, x: int, y: int, w: int, h: int, [min: number], [max: number]) -\u003e null",
+    "summary": "Draw a line chart with background, axes, and a filled area.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "linechartdata-x-y-w-h--null"
+    "anchor": "linechartdata-array-x-int-y-int-w-int-h-int-min-number-max-number--null"
   },
   {
     "name": "lineHeight",
-    "sig": "lineHeight(…)",
-    "summary": "── lineHeight([scale]) → int ────────────────────────────…",
+    "sig": "lineHeight([scale: number]) -\u003e int",
+    "summary": "The pixel height of one line of widget text at a given scale.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "lineheight--int"
+    "anchor": "lineheightscale-number--int"
   },
   {
     "name": "list",
-    "sig": "list(label, items, x, y, w, h, [size])",
-    "summary": "── list(label, items, x, y, w, h, [size]) → selected item ───────",
+    "sig": "list(label: string, items: array, x: int, y: int, w: int, h: int, [size: number]) -\u003e any",
+    "summary": "Draw a scrollable single-select list, returning the selected item.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "listlabel-items-x-y-w-h-size--null"
+    "anchor": "listlabel-string-items-array-x-int-y-int-w-int-h-int-size-number--any"
   },
   {
     "name": "listMulti",
-    "sig": "listMulti(label, items, selected, x, y, w, h, [size])",
-    "summary": "── listMulti(label, items, selected, x, y, w, h, [size]) → bool[]",
+    "sig": "listMulti(label: string, items: array, selected: array, x: int, y: int, w: int, h: int, [size: number]) -\u003e array",
+    "summary": "Draw a scrollable multi-select list, returning the selection array.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "listmultilabel-items-selected-x-y-w-h-size"
+    "anchor": "listmultilabel-string-items-array-selected-array-x-int-y-int-w-int-h-int-size-number--array"
   },
   {
     "name": "makeTheme",
-    "sig": "makeTheme(…)",
-    "summary": "",
+    "sig": "makeTheme() -\u003e array",
+    "summary": "Get the default UI palette as a 14-slot array to customise.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "maketheme"
+    "anchor": "maketheme--array"
   },
   {
     "name": "modal",
-    "sig": "modal(title, message, buttons)",
-    "summary": "── modal(title, message, buttons) → string ──────────────────────",
+    "sig": "modal(title: string, message: string, buttons: array) -\u003e string",
+    "summary": "Draw a centred dialog over a dimmed screen, returning a clicked button.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "modaltitle-message-buttons--string"
+    "anchor": "modaltitle-string-message-string-buttons-array--string"
   },
   {
     "name": "numericStepper",
-    "sig": "numericStepper(label, x, y, w, value, min, max, [size])",
-    "summary": "── numericStepper(label, x, y, w, value, min, max, [size]) → int",
+    "sig": "numericStepper(label: string, x: int, y: int, w: int, value: int, min: int, max: int, [size: number]) -\u003e int",
+    "summary": "Draw a −/value/+ integer stepper, returning the new value.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "numericstepperlabel-x-y-w-value-min-max-size"
+    "anchor": "numericstepperlabel-string-x-int-y-int-w-int-value-int-min-int-max-int-size-number--int"
   },
   {
     "name": "pieChart",
-    "sig": "pieChart(data, colors, cx, cy, radius)",
-    "summary": "",
+    "sig": "pieChart(data: array, colors: array, cx: int, cy: int, radius: int, [innerRadius: int]) -\u003e null",
+    "summary": "Draw a pie (or donut) chart centred at (cx, cy).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "piechartdata-colors-cx-cy-radius--null"
+    "anchor": "piechartdata-array-colors-array-cx-int-cy-int-radius-int-innerradius-int--null"
   },
   {
     "name": "popDisabled",
-    "sig": "popDisabled(…)",
-    "summary": "Pop the top disabled-state frame pushed by pushDisabled(). Every pushDisabled must have exactly one matching popDisable…",
+    "sig": "popDisabled() -\u003e null",
+    "summary": "Pop the most recent pushDisabled state.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
     "anchor": "popdisabled--null"
   },
   {
     "name": "progressBar",
-    "sig": "progressBar(x, y, w, h, value, min, max)",
-    "summary": "── progressBar(x, y, w, h, value, min, max) → null ──────────────",
+    "sig": "progressBar(x: int, y: int, w: int, h: int, value: number, min: number, max: number) -\u003e null",
+    "summary": "Draw a horizontal progress bar (display-only).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "progressbarx-y-w-h-value-min-max--null"
+    "anchor": "progressbarx-int-y-int-w-int-h-int-value-number-min-number-max-number--null"
   },
   {
     "name": "pushDisabled",
-    "sig": "pushDisabled(disabled)",
-    "summary": "push a disabled-state frame. All",
+    "sig": "pushDisabled(disabled: bool) -\u003e null",
+    "summary": "Push a disabled state so following widgets are greyed out.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "pushdisableddisabled--null"
+    "anchor": "pushdisableddisabled-bool--null"
   },
   {
     "name": "radio",
-    "sig": "radio(label, x, y, value, groupValue, [size])",
-    "summary": "── radio(label, x, y, value, groupValue, [size]) → string ───────",
+    "sig": "radio(label: string, x: int, y: int, value: string, groupValue: string, [size: number]) -\u003e string",
+    "summary": "Draw one option of a radio group, returning the group's selection.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "radiolabel-x-y-value-groupvalue-size--string"
+    "anchor": "radiolabel-string-x-int-y-int-value-string-groupvalue-string-size-number--string"
   },
   {
     "name": "scrollArea",
-    "sig": "scrollArea(x, y, w, h, contentH)",
-    "summary": "── scrollArea(x, y, w, h, contentH) → float ─────────────────────",
+    "sig": "scrollArea(x: number, y: number, w: number, h: number, contentH: number) -\u003e float",
+    "summary": "Draw a scrollbar for a viewport, returning the scroll offset.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "scrollareax-y-w-h-contenth"
+    "anchor": "scrollareax-number-y-number-w-number-h-number-contenth-number--float"
   },
   {
     "name": "setTheme",
-    "sig": "setTheme(name)",
-    "summary": "install a preset theme. Valid names:",
+    "sig": "setTheme(name: string) -\u003e null",
+    "summary": "Install a named preset theme (colours + style tokens).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "setthemename--null"
+    "anchor": "setthemename-string--null"
   },
   {
     "name": "slider",
-    "sig": "slider(label, x, y, w, value, min, max, [size])",
-    "summary": "── slider(label, x, y, w, value, min, max, [size]) → float ──────",
+    "sig": "slider(label: string, x: int, y: int, w: int, value: number, min: number, max: number, [size: number]) -\u003e float",
+    "summary": "Draw a draggable slider, returning its current value.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "sliderlabel-x-y-w-value-min-max-size"
+    "anchor": "sliderlabel-string-x-int-y-int-w-int-value-number-min-number-max-number-size-number--float"
   },
   {
     "name": "sparkline",
-    "sig": "sparkline(data, x, y, w, h)",
-    "summary": "minimal line, no axes / bg.",
+    "sig": "sparkline(data: array, x: int, y: int, w: int, h: int) -\u003e null",
+    "summary": "Draw a tiny inline line chart: just the line, no axes or background.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "sparklinedata-x-y-w-h--null"
+    "anchor": "sparklinedata-array-x-int-y-int-w-int-h-int--null"
   },
   {
     "name": "splitter",
-    "sig": "splitter(pos, x, y, length, orient, min, max, [thickness])",
-    "summary": "── splitter(pos, x, y, length, orient, min, max, [thickness]) → int",
+    "sig": "splitter(pos: int, x: int, y: int, length: int, orient: string, min: int, max: int, [thickness: int]) -\u003e int",
+    "summary": "Draw a draggable pane divider, returning its position.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "splitterpos-x-y-length-orient-min-max-thickness"
+    "anchor": "splitterpos-int-x-int-y-int-length-int-orient-string-min-int-max-int-thickness-int--int"
   },
   {
     "name": "table",
-    "sig": "table(headers, rows, x, y, w, h, [size])",
-    "summary": "── table(headers, rows, x, y, w, h, [size]) → selectedRow ───────",
+    "sig": "table(headers: array, rows: array, x: int, y: int, w: int, h: int, [size: number]) -\u003e int",
+    "summary": "Draw a scrollable data grid, returning the selected row index.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "tableheaders-rows-x-y-w-h-size--int"
+    "anchor": "tableheaders-array-rows-array-x-int-y-int-w-int-h-int-size-number--int"
   },
   {
     "name": "tabs",
-    "sig": "tabs(x, y, w, items, activeIdx, [size])",
-    "summary": "── tabs(x, y, w, items, activeIdx, [size]) → int ────────────────",
+    "sig": "tabs(x: int, y: int, w: int, items: array, activeIdx: int, [size: number]) -\u003e int",
+    "summary": "Draw a row of tabs, returning the selected index.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "tabsx-y-w-items-activeidx-size"
+    "anchor": "tabsx-int-y-int-w-int-items-array-activeidx-int-size-number--int"
   },
   {
     "name": "textArea",
-    "sig": "textArea(label, text, x, y, w, h, [size], [syntax])",
-    "summary": "wide lines",
+    "sig": "textArea(label: string, text: string, x: int, y: int, w: int, h: int, [size: number], [syntax: string]) -\u003e string",
+    "summary": "Draw a multi-line editable text box, returning its contents.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "textarealabel-text-x-y-w-h-size-syntax"
+    "anchor": "textarealabel-string-text-string-x-int-y-int-w-int-h-int-size-number-syntax-string--string"
   },
   {
     "name": "textInput",
-    "sig": "textInput(label, text, x, y, w, h, [size])",
-    "summary": "── textInput(label, currentText, x, y, w, h, [size]) → string ───",
+    "sig": "textInput(label: string, currentText: string, x: int, y: int, w: int, h: int, [size: number]) -\u003e string",
+    "summary": "Draw a single-line editable text field, returning its contents.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "textinputlabel-text-x-y-w-h-size"
+    "anchor": "textinputlabel-string-currenttext-string-x-int-y-int-w-int-h-int-size-number--string"
   },
   {
     "name": "toast",
-    "sig": "toast(message, [style], [duration])",
-    "summary": "── toast(message, [style], [duration]) → null ───────────────────",
+    "sig": "toast(message: string, [style: string], [duration: number]) -\u003e null",
+    "summary": "Queue an ephemeral notification, shown bottom-right.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "toastmessage-style-duration--null"
+    "anchor": "toastmessage-string-style-string-duration-number--null"
   },
   {
     "name": "toggle",
-    "sig": "toggle(label, x, y, on, [size])",
-    "summary": "── toggle(label, x, y, on, [size]) → bool ───────────────────────",
+    "sig": "toggle(label: string, x: int, y: int, on: bool, [size: number]) -\u003e bool",
+    "summary": "Draw an on/off switch (pill), returning its new state.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "togglelabel-x-y-on-size"
+    "anchor": "togglelabel-string-x-int-y-int-on-bool-size-number--bool"
   },
   {
     "name": "tooltip",
-    "sig": "tooltip(text)",
-    "summary": "── tooltip(text) → null ─────────────────────────────\ufffd\ufffd…",
+    "sig": "tooltip(text: string) -\u003e null",
+    "summary": "Attach hover text to the widget drawn just before this call.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "tooltiptext--null"
+    "anchor": "tooltiptext-string--null"
   },
   {
     "name": "treeView",
-    "sig": "treeView(x, y, w, h, labels, levels, expanded, [size])",
-    "summary": "── treeView(x, y, w, h, labels, levels, expanded, [size]) → [selectedIdx, expanded[]]",
+    "sig": "treeView(x: int, y: int, w: int, h: int, labels: array, levels: array, expanded: array, [size: number]) -\u003e tuple",
+    "summary": "Draw a collapsible tree, returning the selection and expand state.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "treeviewx-y-w-h-labels-levels-expanded-size"
+    "anchor": "treeviewx-int-y-int-w-int-h-int-labels-array-levels-array-expanded-array-size-number--tuple"
   },
   {
     "name": "uiBeginCol",
-    "sig": "uiBeginCol(x, y, w, gap)",
-    "summary": "advance top-to-bottom.",
+    "sig": "uiBeginCol(x: number, y: number, w: number, gap: number) -\u003e null",
+    "summary": "Start a top-to-bottom layout column at (x, y).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uibegincolx-y-w-gap--null"
+    "anchor": "uibegincolx-number-y-number-w-number-gap-number--null"
   },
   {
     "name": "uiBeginRow",
-    "sig": "uiBeginRow(x, y, h, gap)",
-    "summary": "advance left-to-right.",
+    "sig": "uiBeginRow(x: number, y: number, h: number, gap: number) -\u003e null",
+    "summary": "Start a left-to-right layout row at (x, y).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uibeginrowx-y-h-gap--null"
+    "anchor": "uibeginrowx-number-y-number-h-number-gap-number--null"
   },
   {
     "name": "uiColAdvance",
-    "sig": "uiColAdvance(h)",
-    "summary": "Advance the column cursor down by h + gap (the gap set in uiBeginCol). Call once after each widget placed at uiColX(), …",
+    "sig": "uiColAdvance(height: number) -\u003e null",
+    "summary": "Move the column cursor down by height plus the column gap.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uicoladvanceh--null"
+    "anchor": "uicoladvanceheight-number--null"
   },
   {
     "name": "uiColW",
-    "sig": "uiColW(…)",
-    "summary": "Returns the width of the active column. This value is constant for the lifetime of the column (set by uiBeginCol). Use …",
+    "sig": "uiColW() -\u003e int",
+    "summary": "The width of the active column (see uiBeginCol).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uicolw"
+    "anchor": "uicolw--int"
   },
   {
     "name": "uiColX",
-    "sig": "uiColX(…)",
-    "summary": "Returns the X position of the active column. This value is constant for the lifetime of the column (set by uiBeginCol).",
+    "sig": "uiColX() -\u003e int",
+    "summary": "The x of the active column (see uiBeginCol).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uicolx"
+    "anchor": "uicolx--int"
   },
   {
     "name": "uiColY",
-    "sig": "uiColY(…)",
-    "summary": "where the next widget should be placed. Advances after each uiColAdvance() call.",
+    "sig": "uiColY() -\u003e int",
+    "summary": "The current y of the active column cursor (see uiBeginCol).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uicoly"
+    "anchor": "uicoly--int"
   },
   {
     "name": "uiGetFocus",
-    "sig": "uiGetFocus(…)",
-    "summary": "",
+    "sig": "uiGetFocus() -\u003e string",
+    "summary": "The ID of the currently focused widget, or \"\" if none.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
     "anchor": "uigetfocus--string"
   },
   {
     "name": "uiNextFieldID",
-    "sig": "uiNextFieldID(…)",
-    "summary": "id the next textInput would receive",
+    "sig": "uiNextFieldID() -\u003e string",
+    "summary": "The ID the next textInput/textArea will be assigned.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
     "anchor": "uinextfieldid--string"
   },
   {
     "name": "uiResetFont",
-    "sig": "uiResetFont(…)",
-    "summary": "Revert widget text back to the embedded monospace font. Call after uiSetFont() when you want to stop using a custom fon…",
+    "sig": "uiResetFont() -\u003e null",
+    "summary": "Revert widget text to the built-in monospace font.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
     "anchor": "uiresetfont--null"
   },
   {
     "name": "uiRowAdvance",
-    "sig": "uiRowAdvance(w)",
-    "summary": "Advance the row cursor right by w + gap (the gap set in uiBeginRow). Call once after each widget placed at uiRowX(), ui…",
+    "sig": "uiRowAdvance(width: number) -\u003e null",
+    "summary": "Move the row cursor right by width plus the row gap.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uirowadvancew--null"
+    "anchor": "uirowadvancewidth-number--null"
   },
   {
     "name": "uiRowH",
-    "sig": "uiRowH(…)",
-    "summary": "Returns the height of the active row. This value is constant for the lifetime of the row (set by uiBeginRow). Use it as…",
+    "sig": "uiRowH() -\u003e int",
+    "summary": "The height of the active row (see uiBeginRow).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uirowh"
+    "anchor": "uirowh--int"
   },
   {
     "name": "uiRowX",
-    "sig": "uiRowX(…)",
-    "summary": "where the next widget should be placed. Advances after each uiRowAdvance() call.",
+    "sig": "uiRowX() -\u003e int",
+    "summary": "The current x of the active row cursor (see uiBeginRow).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uirowx"
+    "anchor": "uirowx--int"
   },
   {
     "name": "uiRowY",
-    "sig": "uiRowY(…)",
-    "summary": "Returns the Y position of the active row. This value is constant for the lifetime of the row (set by uiBeginRow).",
+    "sig": "uiRowY() -\u003e int",
+    "summary": "The y of the active row (see uiBeginRow).",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uirowy"
+    "anchor": "uirowy--int"
   },
   {
     "name": "uiSetFocus",
-    "sig": "uiSetFocus(id)",
-    "summary": "write activeID directly",
+    "sig": "uiSetFocus(id: string) -\u003e null",
+    "summary": "Move keyboard focus to the widget with the given ID.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uisetfocusid--null"
+    "anchor": "uisetfocusid-string--null"
   },
   {
     "name": "uiSetFont",
-    "sig": "uiSetFont(font)",
-    "summary": "pick the proportional font.",
+    "sig": "uiSetFont(font: Font) -\u003e null",
+    "summary": "Use a loaded font for all subsequent widget text.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uisetfontfont--null"
+    "anchor": "uisetfontfont-font--null"
   },
   {
     "name": "uiTheme",
-    "sig": "uiTheme(palette)",
-    "summary": "apply a 14-slot palette to uiCore.theme",
+    "sig": "uiTheme(palette: array) -\u003e null",
+    "summary": "Apply a 14-slot colour palette to the widgets.",
     "category": "Ui Widgets",
     "doc": "BUILTINS.MD",
-    "anchor": "uithemepalette--null"
+    "anchor": "uithemepalette-array--null"
   },
   {
     "name": "cosineSim",
-    "sig": "cosineSim(arg1, arg2)",
-    "summary": "k-nearest-neighbour searches in stdlib/ai/vector_store.lex",
+    "sig": "cosineSim(a: array, b: array) -\u003e float",
+    "summary": "Cosine similarity of two equal-length numeric vectors.",
     "category": "Vector Math",
     "doc": "BUILTINS.MD",
-    "anchor": "cosinesimarg1-arg2--float"
+    "anchor": "cosinesima-array-b-array--float"
   },
   {
     "name": "dotProduct",
-    "sig": "dotProduct(arg1, arg2)",
-    "summary": "useful when your vectors are",
+    "sig": "dotProduct(a: array, b: array) -\u003e float",
+    "summary": "The inner product of two equal-length numeric vectors.",
     "category": "Vector Math",
     "doc": "BUILTINS.MD",
-    "anchor": "dotproductarg1-arg2--float"
+    "anchor": "dotproducta-array-b-array--float"
   },
   {
     "name": "vecNorm",
-    "sig": "vecNorm(arg1)",
-    "summary": "the geometric length of",
+    "sig": "vecNorm(v: array) -\u003e float",
+    "summary": "The L2 (Euclidean) norm of a numeric vector.",
     "category": "Vector Math",
     "doc": "BUILTINS.MD",
-    "anchor": "vecnormarg1--float"
+    "anchor": "vecnormv-array--float"
   },
   {
     "name": "spawn",
@@ -4906,7 +4458,7 @@
   {
     "name": "combineHash",
     "sig": "combineHash(a, b)",
-    "summary": "-------------------------------------",
+    "summary": "",
     "category": "hash",
     "doc": "STDLIB.MD",
     "anchor": "hashcombinehasha-b"
@@ -4922,7 +4474,7 @@
   {
     "name": "hashBytes",
     "sig": "hashBytes(arr)",
-    "summary": "-------------------------------------",
+    "summary": "",
     "category": "hash",
     "doc": "STDLIB.MD",
     "anchor": "hashhashbytesarr"
@@ -4962,7 +4514,7 @@
   {
     "name": "xor",
     "sig": "xor(a, b)",
-    "summary": "=====================================",
+    "summary": "bitwise XOR for 32-bit integers",
     "category": "hash",
     "doc": "STDLIB.MD",
     "anchor": "hashxora-b"
@@ -5986,7 +5538,7 @@
   {
     "name": "parallel_every",
     "sig": "parallel_every(arr, func, numWorkers)",
-    "summary": "========================================",
+    "summary": "Returns true iff func returns true for all elements.",
     "category": "parallel",
     "doc": "STDLIB.MD",
     "anchor": "parallelparallel_everyarr-func-numworkers"
@@ -5994,7 +5546,7 @@
   {
     "name": "parallel_filter",
     "sig": "parallel_filter(arr, func, numWorkers)",
-    "summary": "========================================",
+    "summary": "Keep only elements where func(element) returns true.",
     "category": "parallel",
     "doc": "STDLIB.MD",
     "anchor": "parallelparallel_filterarr-func-numworkers"
@@ -6002,7 +5554,7 @@
   {
     "name": "parallel_find",
     "sig": "parallel_find(arr, func, numWorkers)",
-    "summary": "========================================",
+    "summary": "Returns first element where func returns true.",
     "category": "parallel",
     "doc": "STDLIB.MD",
     "anchor": "parallelparallel_findarr-func-numworkers"
@@ -6010,7 +5562,7 @@
   {
     "name": "parallel_reduce",
     "sig": "parallel_reduce(arr, chunkReduceFn, mergeFn, numWorkers, init)",
-    "summary": "========================================",
+    "summary": "Parallel fold with custom merge strategy.",
     "category": "parallel",
     "doc": "STDLIB.MD",
     "anchor": "parallelparallel_reducearr-chunkreducefn-mergefn-numworkers-init"
@@ -6018,7 +5570,7 @@
   {
     "name": "parallel_some",
     "sig": "parallel_some(arr, func, numWorkers)",
-    "summary": "========================================",
+    "summary": "Returns true if func returns true for any element.",
     "category": "parallel",
     "doc": "STDLIB.MD",
     "anchor": "parallelparallel_somearr-func-numworkers"

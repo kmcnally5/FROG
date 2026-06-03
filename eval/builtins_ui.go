@@ -47,7 +47,18 @@ func uiWrapText(text string, maxChars int) []string {
 func init() {
 	uiCore.theme = defaultUIPalette()
 
-	// uiBegin() — reset UI state at the start of each draw loop
+	// uiBegin — start a UI frame, resetting per-frame widget state.
+	//
+	// Call once at the top of each draw loop, before any widget. It resets the
+	// widget ID counter and the hover/element registry so the immediate-mode
+	// widgets work correctly. Always pair with uiEnd at the end of the frame.
+	//
+	// @sig     uiBegin() -> null
+	// @returns null
+	// @errors  TypeError if called with any arguments
+	// @example no-run window(640, 480, "app", fn(f) { uiBegin()  /* widgets */  uiEnd() })
+	// @since   0.1.0
+	// @see     uiEnd, button, window
 	Builtins["uiBegin"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 0 {
 			return typeError("uiBegin expects no arguments", ast.Pos{})
@@ -82,7 +93,19 @@ func init() {
 
 	// uiResetFont() — revert widget text back to the embedded monospace font.
 
-	// uiEnd() — finalize UI frame, update hover state
+	// uiEnd — finish a UI frame: update hover state and draw deferred popups.
+	//
+	// Call once at the end of each draw loop, after every widget. It computes which
+	// widget the cursor is over (so next frame's hover is correct) and renders
+	// overlays that must sit on top — open dropdown menus, tooltips, toasts. Always
+	// pair with uiBegin.
+	//
+	// @sig     uiEnd() -> null
+	// @returns null
+	// @errors  TypeError if called with any arguments
+	// @example no-run window(640, 480, "app", fn(f) { uiBegin()  /* widgets */  uiEnd() })
+	// @since   0.1.0
+	// @see     uiBegin, tooltip, toast, dropdown
 	Builtins["uiEnd"] = &Builtin{Fn: func(args []Object) Object {
 		if len(args) != 0 {
 			return typeError("uiEnd expects no arguments", ast.Pos{})
